@@ -44,27 +44,17 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   if (bypassed(url)) return;
 
-  if (event.request.mode === 'navigate') {
-    event.respondWith(
-      fetch(event.request)
-        .then((res) => {
-          const copy = res.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put('/', copy));
-          return res;
-        })
-        .catch(() => caches.match('/'))
-    );
-    return;
-  }
-
+  // Network-first, cache fallback: always prefer the latest code when
+  // online (so local edits show up on the very next reload), and only
+  // serve the cached shell when the network is unreachable.
+  const cacheKey = event.request.mode === 'navigate' ? '/' : event.request;
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      const network = fetch(event.request).then((res) => {
+    fetch(event.request)
+      .then((res) => {
         const copy = res.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+        caches.open(CACHE_NAME).then((cache) => cache.put(cacheKey, copy));
         return res;
-      }).catch(() => cached);
-      return cached || network;
-    })
+      })
+      .catch(() => caches.match(cacheKey))
   );
 });
