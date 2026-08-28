@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Slate — Executive Search</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/app.css">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#1D4E89">
+  <link rel="icon" href="/icons/icon-192.png">
+  <link rel="apple-touch-icon" href="/icons/icon-512.png">
+</head>
+<body>
+  <div id="app"></div>
+  <div class="lookup" id="lookup" hidden role="dialog" aria-modal="true" aria-labelledby="lookup-title" aria-describedby="lookup-copy">
+    <div class="lookup__card" tabindex="-1">
+      <div class="lookup__spin" aria-hidden="true"></div>
+      <div class="t-label" id="lookup-kicker">Working</div>
+      <h2 class="lookup__title" id="lookup-title">Working</h2>
+      <p class="lookup__copy" id="lookup-copy">Stay on this page.</p>
+      <div class="mono t-small" id="lookup-site"></div>
+      <ol class="lookup__steps" id="lookup-steps" aria-live="polite"></ol>
+    </div>
+  </div>
+  <div class="toast" id="toast" hidden role="status"></div>
+  <script src="/app.js"></script>
+</body>
+</html>

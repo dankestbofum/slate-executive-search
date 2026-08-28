@@ -1,0 +1,1870 @@
+<title>Slate Executive Search</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+
+<style>
+/* ============================================================
+   SLATE — built on Docket 2.0.
+   Token layer lifted verbatim from the design system.
+   Light is the source of truth; dark redefines tokens only.
+   ============================================================ */
+:root{
+  --paper:#FFFFFF;
+  --chrome:#F7F6F4;
+  --sunken:#F1EEEA;
+  --line:#E4E0DA;
+  --line-strong:#CDC7BF;
+
+  --ink:#22201C;
+  --ink-2:#55504A;
+  --ink-3:#7E776F;
+
+  --accent:#1D4E89;
+  --accent-deep:#163C6B;
+  --accent-tint:#E9F0F8;
+  --accent-on:#FFFFFF;
+  --focus:#1D4E89;
+  --focus-halo:#FFFFFF;
+
+  --ok:#2C6A4D;   --ok-tint:#E7F1EB;
+  --wait:#7F5C15; --wait-tint:#F6EEDC;
+  --stop:#9E2F29; --stop-tint:#F8EAE8;
+  --idle:#5B5650; --idle-tint:#EEEBE7;
+
+  --r-1:3px; --r-2:6px; --r-3:10px;
+
+  --s-1:4px; --s-2:8px; --s-3:12px; --s-4:16px; --s-5:24px;
+  --s-6:32px; --s-7:48px; --s-8:72px; --s-9:112px;
+
+  --shadow:0 1px 2px rgba(34,32,28,.06), 0 4px 14px -8px rgba(34,32,28,.18);
+  --measure:66ch;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --paper:#17191C; --chrome:#121417; --sunken:#1E2126;
+    --line:#2C3137; --line-strong:#3F464E;
+    --ink:#E9E7E3; --ink-2:#B2ADA6; --ink-3:#877F77;
+    --accent:#84B4EE; --accent-deep:#A9CCF6; --accent-tint:#15243A; --accent-on:#0D1420;
+    --focus:#9CC4F2; --focus-halo:#17191C;
+    --ok:#6FC195;   --ok-tint:#12251C;
+    --wait:#D5AC5C; --wait-tint:#282011;
+    --stop:#E8827B; --stop-tint:#2B1614;
+    --idle:#9A948C; --idle-tint:#22252A;
+    --shadow:0 1px 2px rgba(0,0,0,.5), 0 6px 18px -10px rgba(0,0,0,.7);
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#17191C; --chrome:#121417; --sunken:#1E2126;
+  --line:#2C3137; --line-strong:#3F464E;
+  --ink:#E9E7E3; --ink-2:#B2ADA6; --ink-3:#877F77;
+  --accent:#84B4EE; --accent-deep:#A9CCF6; --accent-tint:#15243A; --accent-on:#0D1420;
+  --focus:#9CC4F2; --focus-halo:#17191C;
+  --ok:#6FC195;   --ok-tint:#12251C;
+  --wait:#D5AC5C; --wait-tint:#282011;
+  --stop:#E8827B; --stop-tint:#2B1614;
+  --idle:#9A948C; --idle-tint:#22252A;
+  --shadow:0 1px 2px rgba(0,0,0,.5), 0 6px 18px -10px rgba(0,0,0,.7);
+  color-scheme:dark;
+}
+
+/* ============================================================ base */
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0;
+  background:var(--chrome);
+  color:var(--ink);
+  font-family:"Public Sans","Segoe UI",system-ui,-apple-system,sans-serif;
+  font-size:17px; line-height:1.62;
+  -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3,h4{margin:0; text-wrap:balance; font-weight:500}
+p{margin:0}
+a{color:var(--accent); text-underline-offset:.18em; text-decoration-thickness:1px}
+:focus-visible{outline:2px solid var(--focus); outline-offset:2px; border-radius:var(--r-1); box-shadow:0 0 0 2px var(--focus-halo)}
+::selection{background:var(--accent-tint); color:var(--ink)}
+.mono{font-family:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace}
+.tnum{font-variant-numeric:tabular-nums}
+@media (prefers-reduced-motion:reduce){
+  *{animation-duration:.001ms !important; transition-duration:.001ms !important}
+}
+
+/* ============================================================ shell */
+.shell{display:grid; grid-template-columns:250px minmax(0,1fr); min-height:100vh}
+.rail{
+  position:sticky; top:0; align-self:start; height:100vh;
+  background:var(--chrome); border-right:1px solid var(--line);
+  display:flex; flex-direction:column; gap:var(--s-4);
+  padding:var(--s-5) var(--s-4); overflow-y:auto;
+}
+.rail__brand{display:flex; align-items:center; gap:10px}
+.rail__name{font-family:"Newsreader",Georgia,serif; font-size:20px; letter-spacing:-.01em; line-height:1}
+.rail__ver{
+  font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; font-weight:700;
+  color:var(--accent); background:var(--accent-tint); padding:2px 6px; border-radius:var(--r-1);
+  margin-left:auto;
+}
+.rail__group{display:flex; flex-direction:column; gap:1px}
+.rail__label{font-size:10.5px; font-weight:700; letter-spacing:.13em; text-transform:uppercase; color:var(--ink-3); padding:0 8px var(--s-2)}
+.rail__link{
+  display:flex; align-items:center; gap:9px; padding:5px 8px; border-radius:var(--r-2);
+  color:var(--ink-2); font:inherit; font-size:14px; line-height:1.5; text-align:left;
+  background:none; border:0; width:100%; cursor:pointer;
+}
+.rail__link:hover{background:var(--sunken); color:var(--ink)}
+.rail__link[aria-current="page"]{background:var(--accent-tint); color:var(--accent); font-weight:600}
+.rail__num{font-family:"IBM Plex Mono",monospace; font-size:11px; color:var(--ink-3); min-width:1.5em; font-variant-numeric:tabular-nums}
+.rail__link[aria-current="page"] .rail__num{color:var(--accent)}
+.rail__tail{margin-left:auto; font-family:"IBM Plex Mono",monospace; font-size:11px; color:var(--ink-3); font-variant-numeric:tabular-nums}
+.rail__foot{margin-top:auto; border-top:1px solid var(--line); padding-top:var(--s-4); display:flex; flex-direction:column; gap:var(--s-3)}
+.rail__note{font-size:11.5px; line-height:1.45; color:var(--ink-3)}
+
+.themeswap{display:flex; gap:2px; padding:2px; background:var(--sunken); border:1px solid var(--line); border-radius:var(--r-2)}
+.themeswap button{flex:1; font:inherit; font-size:12px; font-weight:600; cursor:pointer; padding:4px 2px; border:0; border-radius:var(--r-1); background:transparent; color:var(--ink-3)}
+.themeswap button[aria-pressed="true"]{background:var(--paper); color:var(--ink); box-shadow:var(--shadow)}
+
+/* ============================================================ page frame */
+.page{background:var(--paper); min-width:0}
+.wrap{max-width:1120px; margin:0 auto; padding:0 var(--s-6)}
+.prose{max-width:var(--measure); color:var(--ink-2)}
+
+.masthead{border-bottom:1px solid var(--line); position:sticky; top:0; z-index:20; background:var(--paper)}
+.masthead__in{display:flex; align-items:center; gap:var(--s-3); flex-wrap:wrap; padding:9px 0; font-size:11.5px; color:var(--ink-3)}
+.dot{width:3px; height:3px; border-radius:50%; background:var(--line-strong); flex:none}
+
+.eyebrow{font-size:11px; font-weight:700; letter-spacing:.15em; text-transform:uppercase; color:var(--accent); display:flex; align-items:center; gap:10px}
+.section{padding:var(--s-7) 0; border-bottom:1px solid var(--line)}
+.section:last-of-type{border-bottom:0}
+.section__head{display:flex; gap:var(--s-4); align-items:flex-start; margin-bottom:var(--s-5); flex-wrap:wrap}
+.section__num{font-family:"IBM Plex Mono",monospace; font-size:12px; color:var(--ink-3); padding-top:9px; flex:none; font-variant-numeric:tabular-nums}
+.sub{font-size:11px; font-weight:700; letter-spacing:.13em; text-transform:uppercase; color:var(--ink-3); margin:var(--s-6) 0 var(--s-4); padding-bottom:var(--s-2); border-bottom:1px solid var(--line)}
+
+.spec{border:1px solid var(--line); border-radius:var(--r-3); overflow:hidden; background:var(--paper)}
+.spec__bar{display:flex; align-items:center; gap:var(--s-2); padding:7px var(--s-4); background:var(--chrome); border-bottom:1px solid var(--line); font-size:10.5px; font-weight:700; letter-spacing:.13em; text-transform:uppercase; color:var(--ink-3)}
+.spec__body{padding:var(--s-5)}
+.spec__body--flush{padding:0}
+
+.row{display:flex; flex-wrap:wrap; gap:var(--s-3); align-items:center}
+.row--tight{gap:var(--s-2)}
+.stack{display:flex; flex-direction:column; gap:var(--s-4)}
+.stack--tight{gap:var(--s-3)}
+.stack--loose{gap:var(--s-5)}
+.grid2{display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:var(--s-4)}
+.grid2--wide{grid-template-columns:repeat(auto-fit,minmax(440px,1fr))}
+.grid3{display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:var(--s-4)}
+.spacer{margin-left:auto}
+
+/* ============================================================ type */
+.t-display{font-family:"Newsreader",Georgia,serif; font-size:2.6rem; line-height:1.06; letter-spacing:-.025em; font-weight:500}
+.t-title{font-family:"Newsreader",Georgia,serif; font-size:2rem; line-height:1.14; letter-spacing:-.018em; font-weight:500}
+.t-sub{font-family:"Newsreader",Georgia,serif; font-size:1.4rem; line-height:1.2; letter-spacing:-.015em; font-weight:500}
+.t-head{font-size:1.0625rem; font-weight:600; letter-spacing:-.005em; line-height:1.4}
+.t-body{font-size:1.0625rem; line-height:1.62}
+.t-small{font-size:.875rem; line-height:1.55; color:var(--ink-2)}
+.t-label{font-size:.6875rem; font-weight:700; letter-spacing:.13em; text-transform:uppercase; color:var(--ink-3)}
+.t-data{font-family:"IBM Plex Mono",monospace; font-size:.8125rem; font-variant-numeric:tabular-nums}
+
+/* ============================================================ tables */
+.tablewrap{overflow-x:auto; border:1px solid var(--line); border-radius:var(--r-3)}
+.spec__body--flush .tablewrap{border:0; border-radius:0}
+table{border-collapse:collapse; width:100%; font-size:14px}
+thead th{
+  text-align:left; font-size:10.5px; font-weight:700; letter-spacing:.11em; text-transform:uppercase;
+  color:var(--ink-3); padding:10px var(--s-4); background:var(--chrome); border-bottom:1px solid var(--line); white-space:nowrap;
+}
+tbody td{padding:11px var(--s-4); border-bottom:1px solid var(--line); vertical-align:middle; color:var(--ink-2)}
+tbody tr:last-child td{border-bottom:0}
+tbody td:first-child{color:var(--ink)}
+tr.clickable{cursor:pointer}
+tr.clickable:hover td{background:var(--sunken)}
+
+/* ============================================================ actions */
+.btn{
+  font:inherit; font-size:14px; font-weight:600; line-height:1;
+  display:inline-flex; align-items:center; justify-content:center; gap:7px;
+  min-height:40px; padding:0 16px; border-radius:var(--r-2);
+  border:1px solid transparent; cursor:pointer; text-decoration:none;
+  transition:background-color .12s ease, border-color .12s ease;
+}
+.btn--primary{background:var(--accent); color:var(--accent-on); border-color:var(--accent)}
+.btn--primary:hover{background:var(--accent-deep); border-color:var(--accent-deep)}
+.btn--secondary{background:var(--paper); color:var(--ink); border-color:var(--line-strong)}
+.btn--secondary:hover{background:var(--sunken)}
+.btn--ghost{background:transparent; color:var(--accent)}
+.btn--ghost:hover{background:var(--accent-tint)}
+.btn--danger{background:var(--paper); color:var(--stop); border-color:color-mix(in srgb,var(--stop) 45%,transparent)}
+.btn--danger:hover{background:var(--stop-tint)}
+.btn[disabled]{opacity:.45; cursor:not-allowed}
+.btn--sm{min-height:32px; padding:0 11px; font-size:13px}
+
+/* ============================================================ forms */
+.field{display:flex; flex-direction:column; gap:5px}
+.field__label{font-size:13.5px; font-weight:600}
+.field__req{color:var(--stop); font-weight:700}
+.field__hint{font-size:12.5px; color:var(--ink-3); line-height:1.45}
+.input{
+  font:inherit; font-size:15px; color:var(--ink);
+  min-height:42px; padding:8px 11px;
+  background:var(--paper); border:1px solid var(--line-strong); border-radius:var(--r-2);
+  width:100%;
+}
+textarea.input{min-height:104px; line-height:1.55; resize:vertical; font-size:14.5px}
+.input::placeholder{color:var(--ink-3)}
+.input:hover{border-color:var(--ink-3)}
+.check{display:flex; gap:10px; align-items:flex-start; font-size:14.5px; cursor:pointer}
+.check input{width:18px; height:18px; margin:2px 0 0; accent-color:var(--accent); flex:none}
+.check span small{display:block; font-size:12.5px; color:var(--ink-3); line-height:1.45}
+
+/* ============================================================ status */
+.pill{display:inline-flex; align-items:center; gap:6px; font-size:12.5px; font-weight:600; padding:3px 10px 3px 8px; border-radius:999px; border:1px solid transparent; white-space:nowrap}
+.pill--ok{color:var(--ok); background:var(--ok-tint); border-color:color-mix(in srgb,var(--ok) 22%,transparent)}
+.pill--wait{color:var(--wait); background:var(--wait-tint); border-color:color-mix(in srgb,var(--wait) 22%,transparent)}
+.pill--stop{color:var(--stop); background:var(--stop-tint); border-color:color-mix(in srgb,var(--stop) 22%,transparent)}
+.pill--idle{color:var(--idle); background:var(--idle-tint); border-color:color-mix(in srgb,var(--idle) 22%,transparent)}
+.pill--info{color:var(--accent); background:var(--accent-tint); border-color:color-mix(in srgb,var(--accent) 22%,transparent)}
+.pill--sm{font-size:11px; padding:1px 8px}
+
+.notice{display:flex; gap:var(--s-3); padding:var(--s-4); border-radius:var(--r-2); border:1px solid var(--line); border-left-width:3px; background:var(--sunken)}
+.notice__t{font-size:14px; font-weight:700; margin-bottom:2px}
+.notice__b{font-size:13.5px; line-height:1.55; color:var(--ink-2)}
+.notice--info{background:var(--accent-tint); border-color:color-mix(in srgb,var(--accent) 22%,transparent); border-left-color:var(--accent)}
+.notice--info .notice__t{color:var(--accent)}
+.notice--stop{background:var(--stop-tint); border-color:color-mix(in srgb,var(--stop) 22%,transparent); border-left-color:var(--stop)}
+.notice--stop .notice__t{color:var(--stop)}
+.notice--ok{background:var(--ok-tint); border-color:color-mix(in srgb,var(--ok) 22%,transparent); border-left-color:var(--ok)}
+.notice--ok .notice__t{color:var(--ok)}
+.notice--wait{background:var(--wait-tint); border-color:color-mix(in srgb,var(--wait) 22%,transparent); border-left-color:var(--wait)}
+.notice--wait .notice__t{color:var(--wait)}
+
+.tabs{display:flex; gap:var(--s-5); border-bottom:1px solid var(--line); overflow-x:auto}
+.tab{font:inherit; font-size:14px; font-weight:600; background:none; border:0; cursor:pointer; padding:0 0 9px; color:var(--ink-3); border-bottom:2px solid transparent; margin-bottom:-1px; white-space:nowrap}
+.tab[aria-selected="true"]{color:var(--ink); border-bottom-color:var(--accent)}
+.tab:hover{color:var(--ink)}
+
+.crumbs{display:flex; align-items:center; gap:7px; font-size:12.5px; color:var(--ink-3); flex-wrap:wrap}
+.crumbs button{font:inherit; font-size:12.5px; background:none; border:0; padding:0; cursor:pointer; color:var(--ink-3)}
+.crumbs button:hover{color:var(--ink); text-decoration:underline}
+.crumbs b{font-weight:600; color:var(--ink)}
+
+.quote{border-left:3px solid var(--accent); padding:2px 0 2px var(--s-4); font-family:"Newsreader",Georgia,serif; font-size:1.15rem; line-height:1.5; font-style:italic; color:var(--ink)}
+.quote cite{display:block; font:600 12px/1.4 "Public Sans",sans-serif; font-style:normal; color:var(--ink-3); margin-top:8px; letter-spacing:.02em}
+details.toggle{border-bottom:1px solid var(--line); padding:var(--s-3) 0}
+details.toggle summary{cursor:pointer; font-size:14.5px; font-weight:600; list-style:none; display:flex; gap:9px; align-items:center}
+details.toggle summary::-webkit-details-marker{display:none}
+details.toggle summary::before{content:""; width:0; height:0; border:5px solid transparent; border-left-color:var(--ink-3); margin-left:2px; transition:transform .15s ease}
+details.toggle[open] summary::before{transform:rotate(90deg) translateX(-1px)}
+
+/* ============================================================ record */
+.record{border:1px solid var(--line); border-radius:var(--r-3); overflow:hidden}
+.record__top{padding:var(--s-5) var(--s-5) var(--s-4); border-bottom:1px solid var(--line)}
+.record__no{font-family:"IBM Plex Mono",monospace; font-size:12px; color:var(--ink-3); letter-spacing:.04em}
+.record__title{font-family:"Newsreader",Georgia,serif; font-size:1.75rem; line-height:1.15; letter-spacing:-.018em; margin:6px 0 var(--s-4)}
+.record__meta{display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:var(--s-4) var(--s-5)}
+.record__k{font-size:10.5px; font-weight:700; letter-spacing:.12em; text-transform:uppercase; color:var(--ink-3)}
+.record__v{font-size:14px; margin-top:3px}
+.record__bar{display:flex; gap:var(--s-2); padding:var(--s-3) var(--s-5); background:var(--chrome); flex-wrap:wrap; align-items:center}
+
+/* ============================================================ steps */
+.steps{display:flex; flex-direction:column; gap:0}
+.step{display:grid; grid-template-columns:30px minmax(0,1fr); gap:var(--s-4); padding-bottom:var(--s-5); position:relative}
+.step:last-child{padding-bottom:0}
+.step::before{content:""; position:absolute; left:14px; top:30px; bottom:0; width:1px; background:var(--line)}
+.step:last-child::before{display:none}
+.step__n{width:30px; height:30px; border-radius:50%; display:grid; place-items:center; font-family:"IBM Plex Mono",monospace; font-size:12px; font-weight:500; border:1px solid var(--line-strong); background:var(--paper); color:var(--ink-3); position:relative; z-index:1}
+.step--done .step__n{background:var(--accent); border-color:var(--accent); color:var(--accent-on)}
+.step--now .step__n{border-color:var(--accent); border-width:2px; color:var(--accent); font-weight:700}
+.step__t{font-size:15px; font-weight:600; padding-top:3px; display:flex; gap:var(--s-2); align-items:center; flex-wrap:wrap}
+.step__d{font-size:13.5px; color:var(--ink-2); line-height:1.55; margin-top:3px}
+.step__foot{display:flex; gap:var(--s-3); align-items:center; flex-wrap:wrap; margin-top:var(--s-3)}
+
+.kbd{font-family:"IBM Plex Mono",monospace; font-size:11.5px; border:1px solid var(--line-strong); border-bottom-width:2px; border-radius:var(--r-1); padding:1px 5px; background:var(--paper); color:var(--ink-2)}
+.footer{padding:var(--s-6) 0 var(--s-8); color:var(--ink-3); font-size:12.5px; display:flex; flex-wrap:wrap; gap:var(--s-4); align-items:baseline; justify-content:space-between}
+
+/* ============================================================
+   SLATE additions — new components, tokens only, no new colors.
+   ============================================================ */
+
+/* the who-am-I control: the multi-user model made visible */
+.whoami{border:1px solid var(--line); border-radius:var(--r-3); background:var(--paper); overflow:hidden}
+.whoami__hd{padding:6px var(--s-3) 5px; border-bottom:1px solid var(--line); background:var(--sunken)}
+.whoami__list{display:flex; flex-direction:column; padding:var(--s-1)}
+.whoami__opt{
+  display:flex; gap:9px; align-items:flex-start; text-align:left; width:100%;
+  font:inherit; font-size:13px; line-height:1.4; background:none; border:0; cursor:pointer;
+  padding:6px 7px; border-radius:var(--r-2); color:var(--ink-2);
+}
+.whoami__opt:hover{background:var(--sunken)}
+.whoami__opt[aria-pressed="true"]{background:var(--accent-tint); color:var(--accent)}
+.whoami__init{
+  width:24px; height:24px; flex:none; border-radius:50%; display:grid; place-items:center;
+  font-family:"IBM Plex Mono",monospace; font-size:10.5px; font-weight:500;
+  border:1px solid var(--line-strong); background:var(--paper); color:var(--ink-3);
+}
+.whoami__opt[aria-pressed="true"] .whoami__init{background:var(--accent); border-color:var(--accent); color:var(--accent-on)}
+.whoami__nm{font-weight:600; display:block; color:var(--ink)}
+.whoami__opt[aria-pressed="true"] .whoami__nm{color:var(--accent)}
+.whoami__rl{font-size:11.5px; color:var(--ink-3); display:block}
+
+/* summary tiles */
+.tiles{display:grid; grid-template-columns:repeat(auto-fit,minmax(168px,1fr)); gap:var(--s-3)}
+.tile{border:1px solid var(--line); border-radius:var(--r-3); padding:var(--s-4); background:var(--paper); display:flex; flex-direction:column; gap:2px}
+.tile__k{font-size:10.5px; font-weight:700; letter-spacing:.12em; text-transform:uppercase; color:var(--ink-3)}
+.tile__v{font-family:"Newsreader",Georgia,serif; font-size:2.1rem; line-height:1.05; letter-spacing:-.02em; font-variant-numeric:tabular-nums}
+.tile__n{font-size:12.5px; color:var(--ink-3); line-height:1.4}
+.tile--act{border-color:color-mix(in srgb,var(--accent) 40%,transparent); background:var(--accent-tint)}
+.tile--act .tile__v{color:var(--accent)}
+.tile--act .tile__k{color:var(--accent)}
+
+/* criterion chips — the spine objects from Step 1 */
+.crits{display:flex; flex-wrap:wrap; gap:var(--s-2)}
+.crit{
+  display:inline-flex; align-items:center; gap:7px; font-size:13px; font-weight:500;
+  border:1px solid var(--line-strong); border-radius:var(--r-2);
+  padding:3px 4px 3px 9px; background:var(--paper); color:var(--ink);
+}
+.crit__w{
+  font-family:"IBM Plex Mono",monospace; font-size:10.5px; font-weight:500;
+  background:var(--sunken); color:var(--ink-3); border-radius:var(--r-1); padding:1px 5px;
+  border:1px solid var(--line);
+}
+.crit--hi{border-color:color-mix(in srgb,var(--accent) 45%,transparent)}
+.crit--hi .crit__w{background:var(--accent-tint); color:var(--accent); border-color:transparent}
+.crit__id{font-family:"IBM Plex Mono",monospace; font-size:10.5px; color:var(--ink-3)}
+
+/* score bar */
+.bar{display:flex; align-items:center; gap:9px; min-width:132px}
+.bar__t{flex:1; height:6px; border-radius:999px; background:var(--sunken); overflow:hidden; min-width:64px}
+.bar__f{height:100%; border-radius:999px; background:var(--accent)}
+.bar__f--ok{background:var(--ok)}
+.bar__f--wait{background:var(--wait)}
+.bar__f--idle{background:var(--line-strong)}
+.bar__n{font-family:"IBM Plex Mono",monospace; font-size:12px; font-variant-numeric:tabular-nums; color:var(--ink); min-width:2.4em; text-align:right}
+
+/* trace: shows where a criterion travels downstream */
+.trace{display:grid; grid-template-columns:repeat(auto-fit,minmax(122px,1fr)); gap:1px; background:var(--line); border:1px solid var(--line); border-radius:var(--r-3); overflow:hidden}
+.trace__c{background:var(--paper); padding:var(--s-3) var(--s-4); display:flex; flex-direction:column; gap:3px}
+.trace__s{font-family:"IBM Plex Mono",monospace; font-size:10.5px; color:var(--ink-3)}
+.trace__l{font-size:13px; font-weight:600; line-height:1.35}
+.trace__m{font-size:11.5px; color:var(--ink-3); line-height:1.35}
+.trace__c--on{background:var(--accent-tint)}
+.trace__c--on .trace__l{color:var(--accent)}
+.trace__c--on .trace__s{color:var(--accent)}
+
+/* segmented rating control — the BAR / screening scale */
+.rate{display:inline-flex; border:1px solid var(--line-strong); border-radius:var(--r-2); overflow:hidden; background:var(--paper)}
+.rate button{
+  font:inherit; font-size:12.5px; font-weight:600; cursor:pointer; border:0; background:transparent;
+  color:var(--ink-3); padding:5px 11px; border-right:1px solid var(--line); white-space:nowrap;
+}
+.rate button:last-child{border-right:0}
+.rate button:hover{background:var(--sunken); color:var(--ink)}
+.rate button[aria-pressed="true"]{background:var(--accent); color:var(--accent-on)}
+.rate--num button{padding:5px 0; width:34px; font-family:"IBM Plex Mono",monospace; font-variant-numeric:tabular-nums}
+
+/* scorecard rows — label takes the room it needs, control wraps under when it cannot */
+.sc{display:flex; flex-wrap:wrap; gap:var(--s-2) var(--s-4); align-items:center; justify-content:space-between; padding:var(--s-3) 0; border-bottom:1px solid var(--line)}
+.sc:last-child{border-bottom:0}
+.sc > :first-child{flex:1 1 250px; min-width:0}
+.sc__l{font-size:14px; font-weight:600; line-height:1.4}
+.sc__m{font-size:12.5px; color:var(--ink-3); line-height:1.45; margin-top:2px}
+
+/* ARE breakdown row inside an interview question */
+.are{display:grid; grid-template-columns:78px minmax(0,1fr); gap:var(--s-3); padding:var(--s-3) 0; border-bottom:1px solid var(--line)}
+.are:last-child{border-bottom:0}
+
+/* comparison matrix */
+.mx{border-collapse:separate; border-spacing:0; width:100%}
+.mx th,.mx td{border-bottom:1px solid var(--line); padding:9px var(--s-3)}
+.mx thead th{position:sticky; top:37px; background:var(--chrome); z-index:2; box-shadow:inset 0 -1px 0 var(--line)}
+.mx tbody th{
+  text-align:left; font-size:13px; font-weight:600; color:var(--ink); background:var(--paper);
+  position:sticky; left:0; z-index:1; border-right:1px solid var(--line); min-width:220px;
+}
+.mx__cell{text-align:center; font-family:"IBM Plex Mono",monospace; font-size:13px; font-variant-numeric:tabular-nums; color:var(--ink)}
+.mx__band{display:inline-grid; place-items:center; width:30px; height:26px; border-radius:var(--r-1); font-weight:500}
+.mx__band--4{background:var(--ok-tint); color:var(--ok)}
+.mx__band--3{background:var(--accent-tint); color:var(--accent)}
+.mx__band--2{background:var(--wait-tint); color:var(--wait)}
+.mx__band--1{background:var(--stop-tint); color:var(--stop)}
+.mx tfoot td,.mx tfoot th{background:var(--chrome); font-weight:700; border-bottom:0}
+
+/* sealed panel — scores hidden until release */
+.seal{
+  border:1px dashed var(--line-strong); border-radius:var(--r-3); padding:var(--s-5);
+  background:var(--sunken); display:flex; flex-direction:column; gap:var(--s-3); align-items:flex-start;
+}
+
+/* question card in survey / interview builders */
+.q{border:1px solid var(--line); border-radius:var(--r-3); overflow:hidden; background:var(--paper)}
+.q__hd{display:flex; gap:var(--s-3); align-items:baseline; padding:var(--s-3) var(--s-4); border-bottom:1px solid var(--line); background:var(--chrome)}
+.q__n{font-family:"IBM Plex Mono",monospace; font-size:12px; color:var(--ink-3); flex:none}
+.q__t{font-size:14.5px; font-weight:600; line-height:1.45; color:var(--ink)}
+.q__bd{padding:var(--s-4); display:flex; flex-direction:column; gap:var(--s-3)}
+.q__bd:has(.are){gap:0; padding-top:var(--s-1); padding-bottom:var(--s-1)}
+.q__ft{display:flex; gap:var(--s-2); align-items:center; flex-wrap:wrap; padding:var(--s-2) var(--s-4); border-top:1px solid var(--line); background:var(--paper)}
+
+/* activity feed */
+.feed{display:flex; flex-direction:column}
+.feed__i{display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:var(--s-3); align-items:baseline; padding:var(--s-3) 0; border-bottom:1px solid var(--line); font-size:13.5px}
+.feed__i:last-child{border-bottom:0}
+.feed__w{font-weight:600; color:var(--ink); white-space:nowrap}
+.feed__x{color:var(--ink-2); line-height:1.5}
+.feed__t{font-family:"IBM Plex Mono",monospace; font-size:11.5px; color:var(--ink-3); white-space:nowrap}
+
+/* role/permission grid */
+.perm td:not(:first-child){text-align:center}
+.perm .yes{color:var(--ok); font-weight:700}
+.perm .no{color:var(--ink-3)}
+.perm .part{color:var(--wait); font-weight:600; font-size:12.5px}
+
+/* recruiting documents */
+.doc{border:1px solid var(--line); border-radius:var(--r-3); overflow:hidden; background:var(--paper)}
+.doc__cover{padding:var(--s-7) var(--s-6); background:var(--sunken); border-bottom:1px solid var(--line)}
+.doc__kicker{font-size:11px; font-weight:700; letter-spacing:.14em; text-transform:uppercase; color:var(--accent)}
+.doc__title{font-family:"Newsreader",Georgia,serif; font-size:2.1rem; line-height:1.12; letter-spacing:-.02em; margin:var(--s-3) 0 var(--s-2)}
+.doc__body{padding:var(--s-6); display:flex; flex-direction:column; gap:var(--s-5); max-width:70ch}
+.doc__h{font-size:11px; font-weight:700; letter-spacing:.13em; text-transform:uppercase; color:var(--ink-3); margin-bottom:var(--s-2)}
+.ad{border:1px solid var(--line); border-radius:var(--r-3); padding:var(--s-5); background:var(--paper); display:flex; flex-direction:column; gap:var(--s-3)}
+.ad__tag{font-size:11px; font-weight:700; letter-spacing:.12em; text-transform:uppercase; color:var(--ink-3)}
+.ad__t{font-family:"Newsreader",Georgia,serif; font-size:1.45rem; line-height:1.2; letter-spacing:-.015em}
+.ad__b{font-size:14.5px; line-height:1.6; color:var(--ink-2)}
+.ad--social{max-width:440px}
+.ad--social .ad__b{white-space:pre-wrap}
+
+.toast{
+  position:fixed; bottom:var(--s-5); right:var(--s-5); z-index:80;
+  max-width:360px; background:var(--paper); color:var(--ink);
+  border:1px solid var(--line); border-left:3px solid var(--accent);
+  box-shadow:var(--shadow); padding:var(--s-3) var(--s-4);
+  font-size:14px; font-weight:600; line-height:1.45;
+}
+.toast[hidden]{display:none}
+
+@media (max-width:900px){
+  .shell{grid-template-columns:minmax(0,1fr)}
+  .rail{position:static; height:auto; border-right:0; border-bottom:1px solid var(--line)}
+  .rail__foot{margin-top:var(--s-3)}
+  .t-display{font-size:2rem}
+}
+</style>
+
+<div class="shell">
+  <nav class="rail" aria-label="Primary">
+    <div class="rail__brand">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" style="color:var(--accent)">
+        <path d="M4 20h16M6 20V9l6-4 6 4v11M10 20v-5h4v5"/>
+      </svg>
+      <span class="rail__name">Slate</span>
+      <span class="rail__ver">Demo</span>
+    </div>
+
+    <div class="whoami">
+      <div class="whoami__hd"><span class="t-label">Signed in as</span></div>
+      <div class="whoami__list" id="whoami" role="group" aria-label="Switch user"></div>
+    </div>
+
+    <div id="railnav"></div>
+
+    <div class="rail__foot">
+      <div class="themeswap" role="group" aria-label="Theme">
+        <button type="button" data-theme-set="light" aria-pressed="false">Light</button>
+        <button type="button" data-theme-set="auto" aria-pressed="true">Auto</button>
+        <button type="button" data-theme-set="dark" aria-pressed="false">Dark</button>
+      </div>
+      <p class="rail__note">Prototype with sample data for a fictional client. Nothing entered here is saved.</p>
+    </div>
+  </nav>
+
+  <main class="page">
+    <div class="masthead">
+      <div class="wrap">
+        <div class="masthead__in">
+          <span class="crumbs" id="crumbs"></span>
+          <span class="spacer"></span>
+          <span class="mono" id="mastright"></span>
+        </div>
+      </div>
+    </div>
+    <div id="view"></div>
+    <div class="wrap">
+      <div class="footer">
+        <span>Slate &middot; built on the Docket design system, revision 2.0</span>
+        <span class="mono">Steps 1&ndash;14 &middot; connected, not separate</span>
+      </div>
+    </div>
+  </main>
+</div>
+<div class="toast" id="toast" hidden role="status"></div>
+
+<script>
+/* ============================================================
+   SLATE — a working prototype of the 14-step search process.
+   Sample data describes a fictional client.
+   ============================================================ */
+
+/* ---------- the engagement ---------- */
+const SEARCH = {
+  no:'SR-2026-014',
+  client:'Town of Ridgeline, Colorado',
+  position:'Town Manager',
+  opened:'01 Jun 2026',
+  firstReview:'14 Sep 2026',
+  received:31,
+  screened:8,
+  stage:9
+};
+
+/* ---------- Step 1: the candidate profile. Every other step points here. ---------- */
+const CRITERIA = [
+  {id:'S1', kind:'skill',  label:'Financial management',        w:5, note:'Structural deficit, capital plan, reserve policy'},
+  {id:'S2', kind:'skill',  label:'Organizational management',   w:4, note:'Department reorganization, service delivery'},
+  {id:'S3', kind:'skill',  label:'Community engagement',        w:4, note:'Public process on contested decisions'},
+  {id:'S4', kind:'skill',  label:'Economic development',        w:3, note:'Downtown, retail base, employer attraction'},
+  {id:'S5', kind:'skill',  label:'Intergovernmental relations',  w:3, note:'County, state, regional water district'},
+  {id:'T1', kind:'trait',  label:'Collaborative',               w:5, note:'Works with Council as a body, not members'},
+  {id:'T2', kind:'trait',  label:'Transparent',                 w:4, note:'Open-book with Council and staff'},
+  {id:'T3', kind:'trait',  label:'Decisive',                    w:4, note:'Moves on hard calls without stalling'},
+  {id:'T4', kind:'trait',  label:'Good listener',               w:3, note:'Hears opposition before responding'},
+  {id:'C1', kind:'chall',  label:'Structural budget deficit',   w:5, note:'$2.1M gap against a $34M general fund'},
+  {id:'C2', kind:'chall',  label:'Staff recruitment and retention', w:4, note:'19% vacancy rate, three director openings'},
+  {id:'C3', kind:'chall',  label:'Aging water infrastructure',   w:4, note:'1960s mains, deferred replacement schedule'},
+  {id:'C4', kind:'chall',  label:'Community division over growth', w:3, note:'Annexation and density fights since 2023'},
+  {id:'O1', kind:'opp',    label:'Downtown redevelopment',      w:4, note:'Two Council-owned parcels, no plan yet'},
+  {id:'O2', kind:'opp',    label:'Regional water partnership',   w:3, note:'Three-town shared treatment proposal'},
+  {id:'O3', kind:'opp',    label:'Employee engagement',         w:3, note:'First staff survey ran flat in 2025'}
+];
+const KIND = {
+  skill:{label:'Essential skill', plural:'Essential skills', hint:'Technical and leadership skills required for successful performance.'},
+  trait:{label:'Leadership trait', plural:'Leadership and personality traits', hint:'Characteristics that matter to the governing body and community.'},
+  chall:{label:'Current challenge', plural:'Current challenges', hint:'What the successful candidate inherits and must address.'},
+  opp:{label:'Future opportunity', plural:'Future opportunities', hint:'Where the new leader can make a significant difference.'}
+};
+
+/* ---------- who is signed in ---------- */
+const PEOPLE = [
+  {id:'u1', init:'MV', name:'Marisol Vance',  role:'consultant', title:'Search consultant'},
+  {id:'u2', init:'DO', name:'Dale Okonkwo',   role:'council',    title:'Mayor, Ridgeline'},
+  {id:'u3', init:'PR', name:'Priya Raman',    role:'hr',         title:'HR director, Ridgeline'},
+  {id:'u4', init:'GA', name:'Glen Ashby',     role:'panel',      title:'Staff panel member'},
+  {id:'u5', init:'IC', name:'Ilene Carrow',   role:'candidate',  title:'Applicant'}
+];
+const ROLES = {
+  consultant:{label:'Search consultant', who:'The firm running the search.'},
+  council:   {label:'Governing body',    who:'Mayor and Council. Scores independently.'},
+  hr:        {label:'Staff liaison',     who:'Client HR. Logistics and records.'},
+  panel:     {label:'Assessor',          who:'Staff or community panel. One assignment only.'},
+  candidate: {label:'Applicant',         who:'A candidate. Sees only their own instruments.'}
+};
+
+/* ---------- the pipeline ---------- */
+const CANDIDATES = [
+  {id:'C-01', name:'Angela Brightwater', cur:'Assistant City Manager', org:'City of Coalmont, CO',       yrs:14, stage:'finalist',    initial:'in', semi:'in', sc:[5,4,4,3,4, 5,4,4,3, 5,4,3,4, 4,3,4]},
+  {id:'C-02', name:'Marcus Deleon',      cur:'Town Manager',           org:'Town of Kestrel Falls, WY',  yrs:9,  stage:'finalist',    initial:'in', semi:'in', sc:[4,5,5,4,3, 5,5,3,5, 4,5,3,4, 5,3,5]},
+  {id:'C-03', name:'Nadine Ochoa',       cur:'Deputy County Administrator', org:'Ferrier County, CO',    yrs:17, stage:'finalist',    initial:'in', semi:'in', sc:[5,5,3,3,5, 4,4,5,3, 5,4,5,3, 3,5,3]},
+  {id:'C-05', name:'Ilene Carrow',       cur:'City Manager',           org:'City of Two Rivers, KS',     yrs:11, stage:'semifinalist',initial:'in', semi:'out', sc:[4,4,5,4,4, 4,5,3,4, 4,4,3,4, 4,3,4]},
+  {id:'C-07', name:'Tomas Reyes',        cur:'Assistant Town Manager', org:'Town of Ridgeline, CO',      yrs:6,  stage:'semifinalist',initial:'in', semi:'in', sc:[3,4,5,3,3, 5,4,2,5, 3,4,4,5, 4,4,5], internal:true},
+  {id:'C-04', name:'Reuben Stack',       cur:'Public Works Director',  org:'City of Alder Bay, OR',      yrs:21, stage:'semifinalist',initial:'in', semi:'in', sc:[3,4,3,2,3, 4,3,4,3, 3,3,5,2, 3,4,4]},
+  {id:'C-08', name:'Harriet Loeb',       cur:'Chief of Staff',         org:'City of Granite Pass, NV',   yrs:13, stage:'semifinalist',initial:'in', semi:'in', sc:[3,3,4,4,3, 4,3,3,4, 3,3,2,3, 4,2,3]},
+  {id:'C-06', name:'Wendell Pike',       cur:'Finance Director',       org:'City of Coalmont, CO',       yrs:8,  stage:'declined',    initial:'in', semi:'in',  sc:[5,3,2,3,2, 3,4,3,2, 5,2,2,2, 3,2,3]}
+];
+
+/* ---------- Step 5 / Step 8 instruments ---------- */
+const SURVEY_INITIAL = {
+  step:5, name:'Initial Candidate Survey', sent:31, back:31, due:'14 Sep 2026', status:'closed',
+  intro:'The Town of Ridgeline appreciates your interest in serving as our next Town Manager. This brief confidential survey lets you highlight the background and experience most relevant to this position. Please read each question carefully and provide detail where it is requested.',
+  qs:[
+    {n:1, t:'Please provide your name, cell phone number, and email address.', type:'short', req:true, crit:[]},
+    {n:2, t:'Please list your current and previous three positions: title, employer, number of direct reports, years in the position, and your reason for leaving.', type:'long', req:true, crit:[]},
+    {n:3, t:'Describe your experience closing a structural budget gap. What was the size of the gap, what did you do, and what was the result?', type:'long', req:true, crit:['S1','C1']},
+    {n:4, t:'Have you led a department reorganization or significant service delivery change? If yes, describe the change and how you managed it.', type:'yesno-detail', req:true, crit:['S2']},
+    {n:5, t:'Describe how you have run a public process on a decision the community was divided about.', type:'long', req:true, crit:['S3','C4','T4']},
+    {n:6, t:'What have you done to fill hard-to-recruit positions and keep the people you have?', type:'long', req:true, crit:['C2','O3']},
+    {n:7, t:'Describe your approach to working with a governing body as a body rather than as individual members.', type:'long', req:true, crit:['T1','T2']},
+    {n:8, t:'Is there anything else about your qualifications and experience you would like the search team to know?', type:'long', req:false, crit:[]}
+  ]
+};
+const SURVEY_SEMI = {
+  step:8, name:'Semifinalist Questionnaire', sent:8, back:7, due:'12 Oct 2026', status:'open',
+  intro:'Congratulations on being selected as a semifinalist. This confidential questionnaire goes deeper on the competencies the Council identified for this position. No references will be contacted unless you are selected as a finalist.',
+  qs:[
+    {n:1, t:'Describe a time you inherited a significant organizational problem. What was your approach, what actions did you take, and what measurable results did you achieve?', type:'are', req:true, crit:['S2','T3']},
+    {n:2, t:'Ridgeline faces roughly $2.1M of recurring general fund expense above recurring revenue. Walk us through how you would diagnose and close a gap of that size in your first two budget cycles.', type:'are', req:true, crit:['S1','C1']},
+    {n:3, t:'Describe a water, sewer, or street capital program you inherited in deferred condition. How did you fund it and what did you actually deliver?', type:'are', req:true, crit:['C3','S1','O2']},
+    {n:4, t:'Tell us about a decision where you had to move forward knowing part of the community opposed it. What did you do before, during, and after the decision?', type:'are', req:true, crit:['T3','T4','C4']},
+    {n:5, t:'What did you learn from the hardest year of your career, and what would you do differently?', type:'are', req:true, crit:['T2']}
+  ]
+};
+
+/* ---------- Step 7: the interview guide ---------- */
+const GUIDE = [
+  {n:1, crit:['C1','S1'], q:'Ridgeline is carrying about $2.1M of recurring expense above recurring revenue against a $34M general fund. Tell us how you would approach closing that gap.',
+   a:'What would you do first? Who would you involve? What information would you need before recommending anything to Council?',
+   r:'In a comparable situation, what did you accomplish? What changed because of your leadership?',
+   e:'What similar gap have you closed, what results did you achieve, what evidence supports them, and what would you do differently?'},
+  {n:2, crit:['C2','S2','O3'], q:'The Town is running a 19% vacancy rate with three director positions open. How do you approach that?',
+   a:'What would you look at first, and who would you involve inside and outside the organization?',
+   r:'What have you actually moved: time-to-fill, turnover, engagement scores?',
+   e:'Describe the organization where you did this, the results, and what you would change.'},
+  {n:3, crit:['C3','S1','O2'], q:'Our water mains date to the 1960s and replacement has been deferred for a decade. Three neighboring towns have proposed a shared treatment facility.',
+   a:'How would you evaluate the partnership against going it alone? What would you need to know?',
+   r:'What capital programs have you funded and delivered?',
+   e:'What intergovernmental agreement have you negotiated, and how did it hold up?'},
+  {n:4, crit:['C4','S3','T4'], q:'Annexation and density decisions have divided the community since 2023. Council is split 4-3 on the current proposal.',
+   a:'How would you advise a divided Council? What public process would you design?',
+   r:'Where have you brought a divided community to a workable decision?',
+   e:'What did that cost you, and what did you learn about running contested processes?'},
+  {n:5, crit:['O1','S4'], q:'The Town owns two downtown parcels and has no redevelopment plan for them.',
+   a:'What is your first ninety days on this? Who is at the table?',
+   r:'What development have you gotten built, and what did the community get from it?',
+   e:'What deal went badly, and what did you take from it?'},
+  {n:6, crit:['T1','T2','S5'], q:'Describe how you work with a governing body as a body rather than as seven individuals.',
+   a:'How do you handle a member who calls you directly asking for staff work?',
+   r:'What has your relationship with a governing body looked like at its best?',
+   e:'Describe a time the relationship broke down. What was your part in it?'}
+];
+const SCENARIOS = [
+  {id:'SCN-1', name:'Presentation exercise', mins:45, crit:['S3','S4','O1'],
+   d:'Candidate receives the downtown parcels packet 48 hours ahead and presents a 10-minute approach to a panel, followed by questions.',
+   who:'Council panel'},
+  {id:'SCN-2', name:'Problem-solving team exercise', mins:60, crit:['S2','T1','C2'],
+   d:'Candidate works with four department directors to build a response to a simulated 12% revenue shortfall. Observers assess how the candidate uses the room.',
+   who:'Staff panel'},
+  {id:'SCN-3', name:'Inbox exercise', mins:45, crit:['T3','S1','C3'],
+   d:'Nine competing items. Candidate sorts what needs immediate attention, what can wait, what to delegate, what requires Council, and how they would communicate each decision.',
+   who:'Search consultant'},
+  {id:'SCN-4', name:'Leaderless group exercise', mins:50, crit:['T1','T4','S3'],
+   d:'Finalists work a regional water question together with no assigned leader. Observers assess communication, collaboration, listening, influence, and problem-solving.',
+   who:'Community panel'}
+];
+
+/* ---------- Step 14: BAR evaluation ---------- */
+const BAR = {
+  behavior:[
+    {id:'B1', t:'Transparency, internal and external', d:'Residents have access to key financial and operational information. Employees are kept informed under an open-book philosophy.', from:'T2'},
+    {id:'B2', t:'Good public stewardship', d:'Processes, procedures, and practices are in place to protect the public money and the public trust.', from:'S1'},
+    {id:'B3', t:'Continuous improvement', d:'Internal processes are reviewed and improved as essential to efficient service delivery.', from:'S2'},
+    {id:'B4', t:'Innovation', d:'Employees are empowered to consider unique options alongside industry alternatives.', from:'S2'},
+    {id:'B5', t:'Employee development', d:'Development and involvement are a leadership team priority, with a commitment to training and operational readiness.', from:'O3'},
+    {id:'B6', t:'Governance relations support', d:'The organization supports the Council in its governing role and keeps the Council-Manager relationship working.', from:'T1'}
+  ],
+  actions:[
+    {id:'A1', t:'ICMA Credentialed Manager, maintain standing', due:'Ongoing'},
+    {id:'A2', t:'Complete Senior Executive Institute, University of Virginia', due:'Jul 2027'},
+    {id:'A3', t:'Water utility finance certificate', due:'Mar 2027'}
+  ],
+  results:[
+    {id:'R1', t:'Close the recurring general fund gap to under $500K', target:'30 Jun 2027', from:'C1'},
+    {id:'R2', t:'Reduce townwide vacancy rate from 19% to under 10%', target:'31 Dec 2026', from:'C2'},
+    {id:'R3', t:'Adopt a funded 10-year water main replacement schedule', target:'31 Mar 2027', from:'C3'},
+    {id:'R4', t:'Bring a downtown parcels redevelopment framework to Council', target:'30 Sep 2027', from:'O1'},
+    {id:'R5', t:'Execute or formally decline the regional treatment IGA', target:'31 Dec 2026', from:'O2'},
+    {id:'R6', t:'Raise employee engagement survey participation above 70%', target:'30 Jun 2027', from:'O3'}
+  ],
+  governance:[
+    'The Council provides clear direction about its needs, goals, and priorities.',
+    'The Council acts as a policy-making body and stays out of day-to-day administration.',
+    'Council members bring concerns to the Manager directly rather than to staff.',
+    'The Council speaks to the Manager as a body once a decision is made.',
+    'The Council gives the Manager the resources the adopted work plan requires.'
+  ]
+};
+const RATINGS = ['Out-performing','On track','Needs improvement'];
+
+/* ---------- Steps 1-14 ---------- */
+const STEPS = [
+  {n:1,  t:'Develop the candidate profile',           deliv:'Candidate Profile Matrix',            state:'done', view:'profile',    who:'Consultant + Council', d:'Define what the organization needs before recruiting begins. Everything downstream points back to this.'},
+  {n:2,  t:'Community and form-of-government profile', deliv:'Community and Organization Profile',  state:'done', view:'recruiting', tab:'community', who:'Consultant + Staff',   d:'Answer the candidate question: why would I want to live here and lead this organization?'},
+  {n:3,  t:'Develop recruitment brochure',            deliv:'Recruitment Brochure',                state:'done', view:'recruiting', tab:'brochure',  who:'Consultant',           d:'Sells the opportunity while describing the position and community accurately.'},
+  {n:4,  t:'Develop recruitment advertisement',       deliv:'Four ad versions',                    state:'done', view:'recruiting', tab:'ads',       who:'Consultant',           d:'Full, short, social, and association versions, tailored per outlet rather than posted identically.'},
+  {n:5,  t:'Develop initial candidate survey',        deliv:'Initial Candidate Survey',            state:'done', view:'surveys',    who:'Consultant',           d:'Gets past the resume. Built from the profile, so responses can be scored against it.'},
+  {n:6,  t:'Recruitment and advertising plan',        deliv:'Advertising Plan',                    state:'done', view:'recruiting', tab:'plan',      who:'Consultant',           d:'Outlet, audience, cost, timing, and who posts it.'},
+  {n:7,  t:'Interview questions and scenarios',       deliv:'Interview Guide',                     state:'done', view:'guide',      who:'Consultant + Council', d:'ARE format questions and four assessment scenarios, each tied to profile criteria.'},
+  {n:8,  t:'Develop semifinalist survey',             deliv:'Semifinalist Questionnaire',          state:'done', view:'surveys',    who:'Consultant',           d:'Optional. Goes deeper on the Step 7 competencies before final interviews.', opt:true},
+  {n:9,  t:'Screen candidate surveys',                deliv:'Semifinalist list',                   state:'now',  view:'candidates', who:'Search team',          d:'Review every candidate against the same profile criteria. Scores stay sealed until the team is done.'},
+  {n:10, t:'Send semifinalist survey',                deliv:'Completed questionnaires',            state:'open', view:'surveys',    who:'Staff liaison',        d:'Deadline, instructions, expected length, submission method, confidentiality.', opt:true},
+  {n:11, t:'Select finalists',                        deliv:'Finalist list',                       state:'open', view:'finalists',  who:'Council',              d:'Decide on the criteria set in Step 1. No new criteria introduced at this stage.'},
+  {n:12, t:'Finalist interviews and assessment center',deliv:'Schedule and Assessment Guide',      state:'open', view:'schedule',   who:'Consultant + Staff',   d:'Every finalist gets essentially the same core experience, so the comparison holds.'},
+  {n:13, t:'Model employment contract',               deliv:'Employment Agreement',                state:'open', view:'contract',   who:'Consultant + Counsel', d:'Built from the ICMA model agreement, customized, reviewed by legal counsel before execution.', opt:true},
+  {n:14, t:'Annual performance evaluation process',   deliv:'BAR Evaluation Process and Form',     state:'open', view:'evaluation', who:'Council + HR',         d:'Behavior, Actions, Results. Expectations inherit from the profile the Council already adopted.', opt:true}
+];
+
+const FEED = [
+  {w:'Dale Okonkwo',  x:'sealed screening scores for eight semifinalists',        t:'2h ago'},
+  {w:'Priya Raman',   x:'uploaded the executed confidentiality acknowledgement for C-03', t:'4h ago'},
+  {w:'Tomas Reyes',   x:'submitted the semifinalist questionnaire',               t:'yesterday'},
+  {w:'Marisol Vance', x:'raised the weight on Structural budget deficit from 4 to 5', t:'2 days ago'},
+  {w:'Reuben Stack',  x:'declined to continue after the semifinalist stage',      t:'3 days ago'},
+  {w:'Council',       x:'adopted the candidate profile, 7-0',                     t:'12 Jun 2026'}
+];
+
+/* ---------- state ---------- */
+const state = {
+  user:'u1',
+  view:'overview',
+  sel:null,
+  released:false,
+  weights:{},
+  scores:{},
+  ratings:{},
+  notes:{},
+  tab:'community',
+  doc:null,
+  survey:{},
+  submitted:false,
+  scorecardIn:false,
+  reminded:{}
+};
+CRITERIA.forEach(c=>state.weights[c.id]=c.w);
+CANDIDATES.forEach(c=>{ state.scores[c.id]={}; CRITERIA.forEach((k,i)=>state.scores[c.id][k.id]=c.sc[i]); });
+
+/* ---------- helpers ---------- */
+const $ = s=>document.querySelector(s);
+const me = ()=>PEOPLE.find(p=>p.id===state.user);
+const role = ()=>me().role;
+const cand = id=>CANDIDATES.find(c=>c.id===id);
+const crit = id=>CRITERIA.find(c=>c.id===id);
+const esc = s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function fit(c){
+  let num=0, den=0;
+  CRITERIA.forEach(k=>{ const w=state.weights[k.id]; num += w*state.scores[c.id][k.id]; den += w*5; });
+  return den ? Math.round(num/den*100) : 0;
+}
+function band(v){ return v>=4?4 : v===3?3 : v===2?2 : 1; }
+function fitClass(p){ return p>=80?'ok' : p>=65?'' : p>=50?'wait':'idle'; }
+function ranked(list){ return [...list].sort((a,b)=>fit(b)-fit(a)); }
+function critChip(id, on){
+  const c = crit(id); if(!c) return '';
+  return `<span class="crit ${on?'crit--hi':''}"><span class="crit__id">${c.id}</span>${esc(c.label)}<span class="crit__w">w${state.weights[c.id]}</span></span>`;
+}
+function critTag(id){
+  const c = crit(id); if(!c) return '';
+  return `<span class="pill pill--info pill--sm mono">${c.id}</span>`;
+}
+function bar(pct, cls){
+  return `<span class="bar"><span class="bar__t"><span class="bar__f ${cls?'bar__f--'+cls:''}" style="width:${pct}%"></span></span><span class="bar__n">${pct}</span></span>`;
+}
+function stagePill(s){
+  const m = {
+    finalist:['ok','Finalist'], semifinalist:['info','Semifinalist'],
+    applicant:['idle','Applicant'], declined:['stop','Declined']
+  }[s] || ['idle',s];
+  return `<span class="pill pill--${m[0]}">${m[1]}</span>`;
+}
+function ico(name){
+  const p = {
+    lock:'<path d="M5 8V6a3 3 0 0 1 6 0v2M4 8h8v6H4z"/>',
+    check:'<path d="M3 8.5 6.2 12 13 4.5"/>',
+    alert:'<path d="M8 3v6M8 12h.01"/><circle cx="8" cy="8" r="6.5"/>',
+    arrow:'<path d="M3 8h9M8.5 4.5 12 8l-3.5 3.5"/>',
+    info:'<circle cx="8" cy="8" r="6.5"/><path d="M8 7.5v4M8 4.8h.01"/>'
+  }[name] || '';
+  return `<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`;
+}
+function toast(msg){
+  const el = $('#toast');
+  if(!el) return;
+  el.textContent = msg;
+  el.hidden = false;
+  clearTimeout(toast._t);
+  toast._t = setTimeout(()=>{ el.hidden = true; }, 2800);
+}
+</script>
+
+<script>
+/* ============================================================ navigation */
+const VIEWS = {
+  overview:  {label:'Overview',              crumb:'Overview'},
+  process:   {label:'Process',               crumb:'The 14 steps'},
+  profile:   {label:'Candidate profile',     crumb:'Candidate profile'},
+  candidates:{label:'Candidates',            crumb:'Candidates'},
+  detail:    {label:'Candidate',             crumb:'Candidate record'},
+  finalists: {label:'Finalist comparison',   crumb:'Finalist comparison'},
+  surveys:   {label:'Surveys',               crumb:'Surveys'},
+  guide:     {label:'Interview guide',       crumb:'Interview guide'},
+  scorecard: {label:'My scorecard',          crumb:'Scorecard'},
+  recruiting:{label:'Recruiting',            crumb:'Recruiting materials'},
+  schedule:  {label:'Finalist week',         crumb:'Finalist week'},
+  apply:     {label:'Your questionnaire',    crumb:'Your questionnaire'},
+  contract:  {label:'Employment agreement',  crumb:'Employment agreement'},
+  evaluation:{label:'Performance evaluation',crumb:'Performance evaluation'},
+  blueprint: {label:'How Slate works',       crumb:'How Slate works'}
+};
+
+const NAV = {
+  consultant:[
+    {g:'Search', items:[['overview','Overview',''],['process','Process','9/14'],['profile','Candidate profile','16']]},
+    {g:'Recruiting', items:[['recruiting','Community & ads','4']]},
+    {g:'People', items:[['candidates','Candidates','8'],['finalists','Finalist comparison','3']]},
+    {g:'Assessment', items:[['surveys','Surveys','2'],['guide','Interview guide','6'],['schedule','Finalist week','']]},
+    {g:'After the offer', items:[['contract','Employment agreement',''],['evaluation','Performance evaluation','']]},
+    {g:'System', items:[['blueprint','How Slate works','']]}
+  ],
+  council:[
+    {g:'Search', items:[['overview','My tasks','2'],['process','Process','9/14'],['profile','Candidate profile','16']]},
+    {g:'People', items:[['candidates','Candidates','8'],['finalists','Finalist comparison','3']]},
+    {g:'Materials', items:[['recruiting','Community & ads',''],['guide','Interview guide','6'],['schedule','Finalist week','']]},
+    {g:'After the offer', items:[['evaluation','Performance evaluation','']]},
+    {g:'System', items:[['blueprint','How Slate works','']]}
+  ],
+  hr:[
+    {g:'Search', items:[['overview','Overview',''],['process','Process','9/14'],['profile','Candidate profile','16']]},
+    {g:'Recruiting', items:[['recruiting','Community & ads','4'],['surveys','Surveys','2']]},
+    {g:'People', items:[['candidates','Candidates','8']]},
+    {g:'Assessment', items:[['schedule','Finalist week','']]},
+    {g:'After the offer', items:[['contract','Employment agreement',''],['evaluation','Performance evaluation','']]},
+    {g:'System', items:[['blueprint','How Slate works','']]}
+  ],
+  panel:[
+    {g:'My assignment', items:[['overview','Overview','1'],['scorecard','My scorecard','']]},
+    {g:'Reference', items:[['guide','Interview guide','6']]},
+    {g:'System', items:[['blueprint','How Slate works','']]}
+  ],
+  candidate:[
+    {g:'Your application', items:[['apply','Your questionnaire','']]}
+  ]
+};
+const HOME = {consultant:'overview', council:'overview', hr:'overview', panel:'overview', candidate:'apply'};
+
+function semiStats(){
+  const out = CANDIDATES.filter(c=>c.semi==='out');
+  return {sent:CANDIDATES.length, back:CANDIDATES.filter(c=>c.semi==='in').length, out};
+}
+function allowed(v){
+  if(v==='detail') return role()!=='candidate' && role()!=='panel';
+  return NAV[role()].some(g=>g.items.some(i=>i[0]===v));
+}
+function go(v, sel){
+  if(v==='detail'){ state.sel = sel; }
+  state.view = allowed(v) ? v : HOME[role()];
+  render();
+  window.scrollTo({top:0, behavior:'instant'});
+}
+function setUser(id){
+  state.user = id;
+  if(!allowed(state.view)) state.view = HOME[role()];
+  render();
+}
+
+/* ============================================================ chrome */
+function renderWho(){
+  $('#whoami').innerHTML = PEOPLE.map(p=>`
+    <button type="button" class="whoami__opt" data-user="${p.id}" aria-pressed="${p.id===state.user}">
+      <span class="whoami__init">${p.init}</span>
+      <span><span class="whoami__nm">${esc(p.name)}</span><span class="whoami__rl">${esc(p.title)}</span></span>
+    </button>`).join('');
+}
+function renderNav(){
+  const current = v => state.view===v || (state.view==='detail'&&v==='candidates');
+  $('#railnav').innerHTML = NAV[role()].map(g=>`
+    <div class="rail__group" style="margin-bottom:var(--s-4)">
+      <div class="rail__label">${esc(g.g)}</div>
+      ${g.items.map(([v,l,tail])=>{
+        let t = tail;
+        if(role()==='candidate' && v==='apply') t = state.submitted ? '' : '1';
+        return `<button type="button" class="rail__link" data-go="${v}"${current(v)?' aria-current="page"':''}>
+          ${esc(l)}${t?`<span class="rail__tail">${esc(t)}</span>`:''}
+        </button>`;
+      }).join('')}
+    </div>`).join('');
+}
+function renderCrumbs(){
+  const parts = [`<button type="button" data-go="${HOME[role()]}">${esc(SEARCH.client)}</button>`,
+                 `<span class="dot"></span>`,
+                 `<span>${esc(SEARCH.position)}</span>`,
+                 `<span class="dot"></span>`];
+  if(state.view==='detail'){
+    parts.push(`<button type="button" data-go="candidates">Candidates</button>`,`<span class="dot"></span>`,`<b>${esc(cand(state.sel).name)}</b>`);
+  } else {
+    parts.push(`<b>${esc(VIEWS[state.view].crumb)}</b>`);
+  }
+  $('#crumbs').innerHTML = parts.join('');
+  $('#mastright').textContent = `${SEARCH.no} · ${ROLES[role()].label}`;
+}
+
+/* ============================================================ page head */
+function head(eyebrow, title, lede, actions){
+  return `<div class="section" style="padding-top:var(--s-6);padding-bottom:var(--s-5)">
+    <div class="wrap"><div class="stack">
+      <div class="eyebrow">${esc(eyebrow)}</div>
+      <h1 class="t-display">${esc(title)}</h1>
+      ${lede?`<p class="prose t-body">${lede}</p>`:''}
+      ${actions?`<div class="row" style="margin-top:var(--s-2)">${actions}</div>`:''}
+    </div></div>
+  </div>`;
+}
+
+/* ============================================================ view: overview */
+function vOverview(){
+  const r = role();
+  if(r==='panel') return vPanelHome();
+  if(r==='candidate') return vApply();
+
+  const fin = CANDIDATES.filter(c=>c.stage==='finalist');
+  const semi = semiStats();
+  const tiles = `<div class="tiles">
+    <div class="tile"><span class="tile__k">Applications</span><span class="tile__v">${SEARCH.received}</span><span class="tile__n">First review closed 14 Sep</span></div>
+    <div class="tile"><span class="tile__k">Screened</span><span class="tile__v">${SEARCH.screened}</span><span class="tile__n">Scored against 16 criteria</span></div>
+    <div class="tile"><span class="tile__k">Questionnaires in</span><span class="tile__v">${semi.back}<span style="font-size:1rem;color:var(--ink-3)">/${semi.sent}</span></span><span class="tile__n">${semi.out.length?semi.out.length+' outstanding, due 12 Oct':'All returned'}</span></div>
+    <div class="tile tile--act"><span class="tile__k">Current step</span><span class="tile__v">09</span><span class="tile__n">Screen candidate surveys</span></div>
+  </div>`;
+
+  let tasks = '';
+  if(r==='council'){
+    tasks = `<div class="spec">
+      <div class="spec__bar">Waiting on you<span class="spacer"></span><span class="mono" style="text-transform:none;letter-spacing:0">2 items</span></div>
+      <div class="spec__body stack">
+        <div class="notice notice--wait">${ico('alert')}<div><div class="notice__t">Score the remaining three semifinalists</div>
+          <div class="notice__b">You have scored five of eight. Your scores stay sealed from other Council members until the search team releases them, so nobody anchors on anyone else.</div>
+          <div class="row" style="margin-top:var(--s-3)"><button class="btn btn--primary btn--sm" data-go="candidates">Open screening</button></div></div></div>
+        <div class="notice notice--info">${ico('info')}<div><div class="notice__t">Confirm your availability for finalist week</div>
+          <div class="notice__b">Council interviews and the community reception run 3&ndash;5 November. Priya needs your blocks by Friday.</div></div></div>
+      </div>
+    </div>`;
+  } else {
+    tasks = `<div class="spec">
+      <div class="spec__bar">Needs attention<span class="spacer"></span><span class="mono" style="text-transform:none;letter-spacing:0">3 items</span></div>
+      <div class="spec__body stack">
+        <div class="notice notice--wait">${ico('alert')}<div><div class="notice__t">Four of seven Council members have not finished screening</div>
+          <div class="notice__b">Scores stay sealed until every scorer is done, then release publishes them all at once. Nudging is one click per member.</div>
+          <div class="row" style="margin-top:var(--s-3)"><button class="btn btn--secondary btn--sm" data-go="candidates">Review progress</button></div></div></div>
+        ${semi.out.length?`<div class="notice notice--info">${ico('info')}<div><div class="notice__t">${semi.out.length===1?'One semifinalist questionnaire outstanding':semi.out.length+' questionnaires outstanding'}</div>
+          <div class="notice__b">${esc(semi.out.map(c=>c.name).join(', '))} ${semi.out.length===1?'has':'have'} not submitted. Due 12 Oct.</div></div></div>`:`<div class="notice notice--ok">${ico('check')}<div><div class="notice__t">Every semifinalist questionnaire is in</div>
+          <div class="notice__b">Screening can close once remaining Council scores are in and released.</div></div></div>`}
+        <div class="notice">${ico('arrow')}<div><div class="notice__t">Finalist week needs a schedule</div>
+          <div class="notice__b">Step 12 opens once finalists are selected. The assessment center template is ready to apply.</div></div></div>
+      </div>
+    </div>`;
+  }
+
+  return `
+  ${head('Search '+SEARCH.no, SEARCH.position, `Executive search for the <b>${esc(SEARCH.client)}</b>. Opened ${SEARCH.opened}. Step 9 of 14 in progress.`,
+    `<button class="btn btn--primary" data-go="candidates">Go to screening</button>
+     <button class="btn btn--secondary" data-go="profile">Candidate profile</button>`)}
+  <div class="section">
+    <div class="wrap"><div class="stack stack--loose">
+      ${tiles}
+      <div class="grid2" style="align-items:start">
+        ${tasks}
+        <div class="spec">
+          <div class="spec__bar">Leading on evidence</div>
+          <div class="spec__body stack stack--tight">
+            <p class="t-small" style="margin-bottom:var(--s-2)">Weighted fit against the adopted profile. Screening evidence only &mdash; interviews have not happened.</p>
+            ${ranked(CANDIDATES).slice(0,5).map(c=>`
+              <div class="row" style="gap:var(--s-3);flex-wrap:nowrap">
+                <button class="btn btn--ghost btn--sm" style="padding:0;min-height:auto;font-weight:600" data-detail="${c.id}">${esc(c.name)}</button>
+                <span class="spacer"></span>${bar(fit(c), fitClass(fit(c)))}
+              </div>`).join('')}
+          </div>
+        </div>
+      </div>
+      <div class="spec">
+        <div class="spec__bar">Activity</div>
+        <div class="spec__body"><div class="feed">
+          ${FEED.map(f=>`<div class="feed__i"><span class="feed__w">${esc(f.w)}</span><span class="feed__x">${esc(f.x)}</span><span class="feed__t">${esc(f.t)}</span></div>`).join('')}
+        </div></div>
+      </div>
+    </div></div>
+  </div>`;
+}
+
+function vPanelHome(){
+  const s = SCENARIOS[1];
+  return `
+  ${head('Assessor', 'Your assignment', 'You are observing one exercise. You will not see other assessors’ ratings, the candidate’s file, or the Council’s scoring.')}
+  <div class="section"><div class="wrap"><div class="stack stack--loose">
+    <div class="record">
+      <div class="record__top">
+        <div class="record__no">${s.id}</div>
+        <h2 class="record__title">${esc(s.name)}</h2>
+        <div class="record__meta">
+          <div><div class="record__k">When</div><div class="record__v">4 Nov 2026, 10:15</div></div>
+          <div><div class="record__k">Length</div><div class="record__v">${s.mins} minutes</div></div>
+          <div><div class="record__k">Candidates</div><div class="record__v">3, one at a time</div></div>
+          <div><div class="record__k">Your role</div><div class="record__v">Observer, non-participating</div></div>
+        </div>
+      </div>
+      <div class="spec__body"><p class="t-small">${esc(s.d)}</p>
+        <div class="crits" style="margin-top:var(--s-4)">${s.crit.map(id=>critChip(id,true)).join('')}</div>
+      </div>
+      <div class="record__bar">
+        <button class="btn btn--primary btn--sm" data-go="scorecard">Open my scorecard</button>
+        <button class="btn btn--secondary btn--sm" data-go="guide">Read the exercise brief</button>
+      </div>
+    </div>
+    <div class="notice notice--info">${ico('lock')}<div><div class="notice__t">You see one exercise, and only your own ratings</div>
+      <div class="notice__b">Panel members get scoped access on purpose. It keeps the assessment independent, and it keeps confidential candidate material inside the search team.</div></div></div>
+  </div></div></div>`;
+}
+
+/* ============================================================ view: process */
+function vProcess(){
+  const done = STEPS.filter(s=>s.state==='done').length;
+  return `
+  ${head('The process', 'Fourteen connected steps',
+    'The strength of this process is that the steps are not separate activities. The profile defines what you are looking for, recruitment markets it, the surveys test it, the interviews evidence it, and the evaluation holds the new manager to it. Slate keeps that chain intact by making Step 1 a set of records the later steps point at.')}
+  <div class="section"><div class="wrap"><div class="stack stack--loose">
+    <div class="tiles">
+      <div class="tile"><span class="tile__k">Complete</span><span class="tile__v">${done}</span><span class="tile__n">Steps 1 through 8</span></div>
+      <div class="tile tile--act"><span class="tile__k">In progress</span><span class="tile__v">1</span><span class="tile__n">Step 9, screening</span></div>
+      <div class="tile"><span class="tile__k">Ahead</span><span class="tile__v">${14-done-1}</span><span class="tile__n">Steps 10 through 14</span></div>
+      <div class="tile"><span class="tile__k">Optional</span><span class="tile__v">4</span><span class="tile__n">8, 10, 13, 14</span></div>
+    </div>
+    <div class="spec">
+      <div class="spec__bar">Steps 1&ndash;14</div>
+      <div class="spec__body">
+        <div class="steps">
+        ${STEPS.map(s=>`
+          <div class="step ${s.state==='done'?'step--done':s.state==='now'?'step--now':''}">
+            <div class="step__n">${s.state==='done'?ico('check'):String(s.n).padStart(2,'0')}</div>
+            <div>
+              <div class="step__t">${esc(s.t)}
+                ${s.opt?'<span class="pill pill--idle pill--sm">Optional</span>':''}
+                ${s.state==='now'?'<span class="pill pill--info pill--sm">In progress</span>':''}
+              </div>
+              <div class="step__d">${esc(s.d)}</div>
+              <div class="step__foot">
+                <span class="t-data" style="color:var(--ink-3)">Deliverable</span>
+                <span class="t-small" style="color:var(--ink)">${esc(s.deliv)}</span>
+                <span class="dot"></span>
+                <span class="t-small">${esc(s.who)}</span>
+                ${s.view && allowed(s.view) ? `<button class="btn btn--ghost btn--sm spacer" data-go="${s.view}"${s.tab?` data-tab="${s.tab}"`:''}>Open</button>`:''}
+              </div>
+            </div>
+          </div>`).join('')}
+        </div>
+      </div>
+    </div>
+  </div></div></div>`;
+}
+
+/* ============================================================ view: profile */
+function vProfile(){
+  const editable = role()==='consultant';
+  const groups = ['skill','trait','chall','opp'];
+  const list = k => CRITERIA.filter(c=>c.kind===k);
+
+  const grid = groups.map(k=>`
+    <div class="spec">
+      <div class="spec__bar">${esc(KIND[k].plural)}<span class="spacer"></span><span class="mono" style="text-transform:none;letter-spacing:0">${list(k).length}</span></div>
+      <div class="spec__body stack stack--tight">
+        <p class="t-small" style="color:var(--ink-3)">${esc(KIND[k].hint)}</p>
+        ${list(k).map(c=>`
+          <div class="sc">
+            <div>
+              <div class="sc__l"><span class="mono" style="color:var(--ink-3);font-size:11.5px;margin-right:7px">${c.id}</span>${esc(c.label)}</div>
+              <div class="sc__m">${esc(c.note)}</div>
+            </div>
+            ${editable
+              ? `<div class="rate rate--num" role="group" aria-label="Weight for ${esc(c.label)}">
+                   ${[1,2,3,4,5].map(n=>`<button type="button" data-weight="${c.id}" data-val="${n}" aria-pressed="${state.weights[c.id]===n}">${n}</button>`).join('')}
+                 </div>`
+              : `<span class="crit__w" style="font-size:12px">weight ${state.weights[c.id]}</span>`}
+          </div>`).join('')}
+      </div>
+    </div>`).join('');
+
+  const top = ranked(CANDIDATES).slice(0,3);
+
+  return `
+  ${head('Step 1', 'Candidate profile',
+    'This is the spine of the search. Each line below is a record, not a bullet in a document &mdash; the advertisement, the surveys, the interview questions, the screening rubric, the finalist comparison, and the first-year performance goals all point back to these sixteen records by name.',
+    editable ? `<button class="btn btn--primary" data-act="publish">Publish revision 4</button><button class="btn btn--secondary" data-act="compare">Compare to revision 3</button>` : `<span class="pill pill--ok">${ico('check')}Adopted by Council, 7&ndash;0, 12 Jun 2026</span>`)}
+  <div class="section"><div class="wrap"><div class="stack stack--loose">
+    ${editable ? `<div class="notice notice--wait">${ico('alert')}<div><div class="notice__t">Changing a weight changes every score already recorded</div>
+      <div class="notice__b">Weights feed the screening rollup and the finalist comparison live. Try moving one and watch the fit percentages below move with it. In a real search this would be locked once Council adopts the profile.</div></div></div>`:''}
+    <div class="grid2 grid2--wide" style="align-items:start">${grid}</div>
+
+    <div>
+      <div class="sub">Live effect of the current weighting</div>
+      <div class="grid3">
+        ${top.map((c,i)=>`
+          <div class="tile ${i===0?'tile--act':''}">
+            <span class="tile__k">${i===0?'Strongest fit':'Rank '+(i+1)}</span>
+            <span class="tile__v">${fit(c)}<span style="font-size:1rem;color:var(--ink-3)">%</span></span>
+            <span class="tile__n">${esc(c.name)}</span>
+          </div>`).join('')}
+      </div>
+    </div>
+
+    <div>
+      <div class="sub">Where one criterion travels</div>
+      <p class="prose t-small" style="margin-bottom:var(--s-4)">Following <b>C1 &mdash; Structural budget deficit</b>, the highest-weighted challenge, through the rest of the process. Nothing here was retyped; each stop reads the same record.</p>
+      <div class="trace">
+        <div class="trace__c trace__c--on"><span class="trace__s">Step 1</span><span class="trace__l">Profile</span><span class="trace__m">C1, weight 5</span></div>
+        <div class="trace__c"><span class="trace__s">Step 3&ndash;4</span><span class="trace__l">Brochure and ad</span><span class="trace__m">Named under Current Challenges</span></div>
+        <div class="trace__c"><span class="trace__s">Step 5</span><span class="trace__l">Initial survey</span><span class="trace__m">Question 3</span></div>
+        <div class="trace__c"><span class="trace__s">Step 8</span><span class="trace__l">Semifinalist</span><span class="trace__m">Question 2, ARE format</span></div>
+        <div class="trace__c"><span class="trace__s">Step 9</span><span class="trace__l">Screening</span><span class="trace__m">Scored 1&ndash;5 per candidate</span></div>
+        <div class="trace__c"><span class="trace__s">Step 7&ndash;12</span><span class="trace__l">Interview</span><span class="trace__m">Question 1, Inbox exercise</span></div>
+        <div class="trace__c"><span class="trace__s">Step 11</span><span class="trace__l">Finalist matrix</span><span class="trace__m">Row 10, weighted 5</span></div>
+        <div class="trace__c"><span class="trace__s">Step 14</span><span class="trace__l">Evaluation</span><span class="trace__m">Result R1, year one</span></div>
+      </div>
+    </div>
+  </div></div></div>`;
+}
+</script>
+
+<script>
+/* ============================================================ view: candidates (Step 9) */
+function vCandidates(){
+  const r = role();
+  const sealed = r==='council' && !state.released;
+  const rows = ranked(CANDIDATES).map(c=>{
+    const f = fit(c);
+    return `<tr class="clickable" data-detail="${c.id}">
+      <td><b>${esc(c.name)}</b>${c.internal?' <span class="pill pill--info pill--sm">Internal</span>':''}<div class="t-small" style="color:var(--ink-3)">${esc(c.cur)} &middot; ${esc(c.org)}</div></td>
+      <td class="mono tnum">${c.yrs}</td>
+      <td>${stagePill(c.stage)}</td>
+      <td>${c.semi==='in'?'<span class="pill pill--ok pill--sm">In</span>':c.semi==='out'?'<span class="pill pill--wait pill--sm">Waiting</span>':'<span class="pill pill--idle pill--sm">n/a</span>'}</td>
+      <td>${sealed ? '<span class="t-data" style="color:var(--ink-3)">sealed</span>' : bar(f, fitClass(f))}</td>
+    </tr>`;
+  }).join('');
+
+  const scorers = [
+    ['Marisol Vance','Search consultant',8,8],['Dale Okonkwo','Mayor',5,8],['Ruth Alameda','Council',8,8],
+    ['Ken Frobisher','Council',8,8],['Sonia Petrakis','Council',3,8],['Ben Utley','Council',0,8],['Ada Ngo','Council',6,8]
+  ];
+
+  return `
+  ${head('Step 9', 'Screen candidate surveys',
+    'Every candidate is reviewed against the same sixteen criteria the Council adopted in Step 1. Scorers work independently and cannot see each other until the search team releases the round.',
+    r==='consultant' ? `<button class="btn btn--primary" data-release="1">${state.released?'Scores released':'Release scores to Council'}</button><button class="btn btn--secondary" data-act="export">Export screening record</button>` : '')}
+  <div class="section"><div class="wrap"><div class="stack stack--loose">
+
+    ${sealed ? `<div class="seal">
+      <span class="pill pill--wait">${ico('lock')}Sealed round</span>
+      <div><div class="notice__t">Other scorers are hidden until the round is released</div>
+      <div class="notice__b prose">You can see your own scores and enter the ones you still owe. Nobody sees the group rollup until every scorer finishes and the search team releases it. This is what keeps the first read of a candidate from being the loudest voice in the room &mdash; and it gives the Town a clean record of independent review.</div></div>
+      <div class="row"><span class="t-small">Waiting on 4 of 7 scorers.</span></div>
+    </div>` : ''}
+
+    <div class="spec">
+      <div class="spec__bar">Screened candidates<span class="spacer"></span><span class="mono" style="text-transform:none;letter-spacing:0">8 of ${SEARCH.received} advanced</span></div>
+      <div class="spec__body spec__body--flush"><div class="tablewrap"><table>
+        <thead><tr><th>Candidate</th><th>Yrs</th><th>Stage</th><th>Questionnaire</th><th style="width:190px">Weighted fit</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div></div>
+    </div>
+
+    ${r!=='council' ? `<div class="spec">
+      <div class="spec__bar">Scorer progress</div>
+      <div class="spec__body spec__body--flush"><div class="tablewrap"><table>
+        <thead><tr><th>Scorer</th><th>Seat</th><th>Complete</th><th style="width:200px">Progress</th><th></th></tr></thead>
+        <tbody>${scorers.map(([n,s,d,t])=>`<tr>
+          <td>${esc(n)}</td><td>${esc(s)}</td><td class="mono tnum">${d}/${t}</td>
+          <td>${bar(Math.round(d/t*100), d===t?'ok':d===0?'idle':'wait')}</td>
+          <td style="text-align:right">${d<t?`<button class="btn btn--secondary btn--sm" data-act="remind" data-who="${esc(n)}">${state.reminded[n]?'Reminder sent':'Send reminder'}</button>`:'<span class="pill pill--ok pill--sm">Done</span>'}</td>
+        </tr>`).join('')}</tbody>
+      </table></div></div>
+    </div>`:''}
+
+    <div class="notice notice--info">${ico('info')}<div><div class="notice__t">Twenty-three candidates were not advanced</div>
+      <div class="notice__b">Each holds the criteria scores that produced the decision, so the Town can answer a records request or a challenge with the actual review rather than a recollection of it.</div></div></div>
+  </div></div></div>`;
+}
+
+/* ============================================================ view: candidate detail */
+function vDetail(){
+  const c = cand(state.sel) || CANDIDATES[0];
+  const editable = role()==='consultant' || role()==='council';
+  const f = fit(c);
+  const groups = ['skill','trait','chall','opp'];
+
+  return `
+  ${head('Candidate '+c.id, c.name, `${esc(c.cur)}, ${esc(c.org)} &middot; ${c.yrs} years in local government`)}
+  <div class="section"><div class="wrap"><div class="stack stack--loose">
+    <div class="record">
+      <div class="record__top">
+        <div class="record__no">${c.id} &middot; received 08 Sep 2026</div>
+        <h2 class="record__title">${esc(c.name)}</h2>
+        <div class="record__meta">
+          <div><div class="record__k">Stage</div><div class="record__v">${stagePill(c.stage)}</div></div>
+          <div><div class="record__k">Weighted fit</div><div class="record__v">${bar(f, fitClass(f))}</div></div>
+          <div><div class="record__k">Initial survey</div><div class="record__v"><span class="pill pill--ok pill--sm">Submitted</span></div></div>
+          <div><div class="record__k">Questionnaire</div><div class="record__v">${c.semi==='in'?'<span class="pill pill--ok pill--sm">Submitted</span>':c.semi==='out'?'<span class="pill pill--wait pill--sm">Outstanding</span>':'<span class="pill pill--idle pill--sm">Not sent</span>'}</div></div>
+          <div><div class="record__k">Confidentiality</div><div class="record__v">Requested until finalist</div></div>
+        </div>
+      </div>
+      <div class="record__bar">
+        <button class="btn btn--secondary btn--sm" data-act="resume">Open resume</button>
+        <button class="btn btn--secondary btn--sm" data-act="survey">Survey responses</button>
+        <button class="btn btn--secondary btn--sm" data-act="questionnaire">Questionnaire</button>
+        <span class="spacer"></span>
+        ${role()==='consultant' && c.stage!=='finalist'?`<button class="btn btn--primary btn--sm" data-act="advance">Advance to finalist</button>`:c.stage==='finalist'?'<span class="pill pill--ok pill--sm">Finalist</span>':''}
+      </div>
+    </div>
+    ${state.doc?`<div class="spec"><div class="spec__bar">${state.doc==='resume'?'Resume excerpt':state.doc==='survey'?'Initial survey excerpt':'Semifinalist questionnaire excerpt'}<span class="spacer"></span><button class="btn btn--ghost btn--sm" data-act="closedoc">Close</button></div>
+      <div class="spec__body"><p class="t-small" style="white-space:pre-wrap">${state.doc==='resume'?esc(`${c.name}\n${c.cur}, ${c.org}\n${c.yrs} years in local government\n\nSelected experience\n• Led the operating budget and capital program for a comparable organization.\n• Closed or reduced a structural gap; figures are in the survey file.\n• Labor relations, council packets, and intergovernmental work as documented on the application.`):state.doc==='survey'?esc('Q3 — Structural budget gap\nClosed a $1.4M recurring deficit over two cycles without a service reduction. Used a vacancy freeze, a mid-year reforecast, and a council work session on service levels. Documented in the FY24 adopted budget.\n\nQ5 — Contested public process\nRan a six-month annexation process with three open houses, a mailed survey, and a dedicated council night. The ordinance passed 5–2. Opposition remained; the process was not a consensus exercise.'):esc('Q2 — Closing a $2.1M gap\nApproach: 90-day diagnostic with finance, then a two-cycle close plan. Actions: freeze, service-level options, and a capital deferral the council can see. Results: in the last comparable role, $1.4M recurring closed in 24 months.')}</p></div></div>`:''}
+
+    <div>
+      <div class="sub">Screening against the adopted profile</div>
+      <p class="prose t-small" style="margin-bottom:var(--s-4)">Evidence scale: 1 little, 2 some, 3 solid, 4 strong, 5 exceptional. ${editable?'Your scores are yours until the round is released.':'Read-only in your role.'}</p>
+      <div class="grid2 grid2--wide" style="align-items:start">
+      ${groups.map(k=>`
+        <div class="spec">
+          <div class="spec__bar">${esc(KIND[k].plural)}</div>
+          <div class="spec__body stack stack--tight">
+            ${CRITERIA.filter(x=>x.kind===k).map(x=>`
+              <div class="sc">
+                <div><div class="sc__l"><span class="mono" style="color:var(--ink-3);font-size:11.5px;margin-right:7px">${x.id}</span>${esc(x.label)}</div>
+                <div class="sc__m">Weight ${state.weights[x.id]} &middot; contributes ${Math.round(state.weights[x.id]/CRITERIA.reduce((s,y)=>s+state.weights[y.id],0)*100)}% of the rollup</div></div>
+                ${editable
+                  ? `<div class="rate rate--num" role="group" aria-label="Score ${esc(x.label)}">
+                      ${[1,2,3,4,5].map(n=>`<button type="button" data-score="${c.id}" data-crit="${x.id}" data-val="${n}" aria-pressed="${state.scores[c.id][x.id]===n}">${n}</button>`).join('')}
+                     </div>`
+                  : `<span class="mx__band mx__band--${band(state.scores[c.id][x.id])}">${state.scores[c.id][x.id]}</span>`}
+              </div>`).join('')}
+          </div>
+        </div>`).join('')}
+      </div>
+    </div>
+
+    <div class="spec">
+      <div class="spec__bar">Screening note</div>
+      <div class="spec__body stack">
+        <div class="field"><label class="field__label" for="note">What is the evidence, and what is missing?</label>
+          <textarea class="input" id="note" data-note="${c.id}" placeholder="Point to the survey answer, resume line, or reference that supports each score. Notes are part of the search record.">${esc(state.notes[c.id] || (c.id==='C-02'?'Strong, specific deficit work at Kestrel Falls: closed $1.4M recurring over two cycles without a service reduction, documented in the FY24 adopted budget. Weakest on aging utility capital — has not run a replacement program at this scale.':''))}</textarea>
+        </div>
+        <div class="row"><button class="btn btn--primary btn--sm" data-act="savenote">Save note</button><span class="t-small" style="color:var(--ink-3)">Saved to the search record. Visible to the search team.</span></div>
+      </div>
+    </div>
+  </div></div></div>`;
+}
+
+/* ============================================================ view: finalists (Step 11) */
+function vFinalists(){
+  const fin = CANDIDATES.filter(c=>c.stage==='finalist');
+  const totalW = CRITERIA.reduce((s,c)=>s+state.weights[c.id],0);
+  const rows = CRITERIA.map(x=>`
+    <tr>
+      <th scope="row"><span class="mono" style="color:var(--ink-3);font-size:11px;margin-right:7px">${x.id}</span>${esc(x.label)}
+        <div class="t-small" style="color:var(--ink-3);font-weight:400">${KIND[x.kind].label} &middot; weight ${state.weights[x.id]}</div></th>
+      ${fin.map(c=>`<td class="mx__cell"><span class="mx__band mx__band--${band(state.scores[c.id][x.id])}">${state.scores[c.id][x.id]}</span></td>`).join('')}
+    </tr>`).join('');
+
+  return `
+  ${head('Step 11', 'Finalist comparison',
+    'The same sixteen criteria, the same scale, three candidates side by side. Nothing new is introduced here &mdash; the decision is made on the criteria the Council adopted before the position was ever advertised.')}
+  <div class="section"><div class="wrap"><div class="stack stack--loose">
+    <div class="tiles">
+      ${ranked(fin).map((c,i)=>`<div class="tile ${i===0?'tile--act':''}">
+        <span class="tile__k">${esc(c.name)}</span>
+        <span class="tile__v">${fit(c)}<span style="font-size:1rem;color:var(--ink-3)">%</span></span>
+        <span class="tile__n">${esc(c.org)}</span></div>`).join('')}
+      <div class="tile"><span class="tile__k">Total weight</span><span class="tile__v">${totalW}</span><span class="tile__n">Across 16 criteria</span></div>
+    </div>
+
+    <div class="spec">
+      <div class="spec__bar">Criterion by criterion<span class="spacer"></span><span class="mono" style="text-transform:none;letter-spacing:0">Screening + questionnaire evidence</span></div>
+      <div class="spec__body spec__body--flush"><div class="tablewrap"><table class="mx">
+        <thead><tr><th style="min-width:220px">Criterion</th>${fin.map(c=>`<th style="text-align:center">${esc(c.name.split(' ')[0])}<br><span style="font-weight:400;text-transform:none;letter-spacing:0">${esc(c.name.split(' ')[1])}</span></th>`).join('')}</tr></thead>
+        <tbody>${rows}</tbody>
+        <tfoot><tr><th scope="row">Weighted fit</th>${fin.map(c=>`<td class="mx__cell"><b>${fit(c)}%</b></td>`).join('')}</tr></tfoot>
+      </table></div></div>
+    </div>
+
+    <div class="grid2">
+      <div class="notice notice--info">${ico('info')}<div><div class="notice__t">The matrix is a starting point, not the decision</div>
+        <div class="notice__b">A one-point spread is noise. Where the matrix earns its keep is showing the Council <em>where</em> candidates differ, so the conversation is about the water capital gap rather than about who interviewed warmly.</div></div></div>
+      <div class="notice notice--wait">${ico('alert')}<div><div class="notice__t">Interview and scenario results are not in this view yet</div>
+        <div class="notice__b">Finalist week runs 3&ndash;5 November. Scorecards from the Council panel, staff panel, and community panel land in these same rows, marked by source.</div></div></div>
+    </div>
+  </div></div></div>`;
+}
+
+/* ============================================================ view: surveys (Steps 5, 8, 10) */
+function vSurveys(){
+  const s = SURVEY_SEMI;
+  const qcard = (q,sv) => `
+    <div class="q">
+      <div class="q__hd"><span class="q__n">${String(q.n).padStart(2,'0')}</span><span class="q__t">${esc(q.t)}${q.req?' <span class="field__req">*</span>':''}</span></div>
+      <div class="q__bd">
+        <div class="t-small" style="color:var(--ink-3)">${q.type==='are'?'Long answer, ARE format — approach, results, experience':q.type==='long'?'Long answer':q.type==='yesno-detail'?'Yes / No, detail required if yes':'Short answer'}</div>
+      </div>
+      <div class="q__ft">
+        <span class="t-label">Tests</span>
+        ${q.crit.length ? q.crit.map(id=>critChip(id,true)).join('') : '<span class="t-small" style="color:var(--ink-3)">Administrative — not scored</span>'}
+      </div>
+    </div>`;
+
+  return `
+  ${head('Steps 5, 8, and 10', 'Surveys',
+    'Two instruments, both built from the profile. Every scored question names the criteria it tests, which is what lets a written answer become a number in the screening rollup instead of an impression somebody remembers.',
+    role()==='consultant'?`<button class="btn btn--primary" data-act="newinstrument">New instrument</button><button class="btn btn--secondary" data-act="surveyremind">Send reminders</button>`:'')}
+  <div class="section"><div class="wrap"><div class="stack stack--loose">
+    <div class="grid2">
+      <div class="spec"><div class="spec__bar">Step 5 &middot; ${esc(SURVEY_INITIAL.name)}<span class="spacer"></span><span class="pill pill--idle pill--sm">Closed</span></div>
+        <div class="spec__body"><div class="record__meta">
+          <div><div class="record__k">Sent</div><div class="record__v mono tnum">${SURVEY_INITIAL.sent}</div></div>
+          <div><div class="record__k">Returned</div><div class="record__v mono tnum">${SURVEY_INITIAL.back}</div></div>
+          <div><div class="record__k">Questions</div><div class="record__v mono tnum">${SURVEY_INITIAL.qs.length}</div></div>
+          <div><div class="record__k">Closed</div><div class="record__v">${SURVEY_INITIAL.due}</div></div>
+        </div></div></div>
+      <div class="spec"><div class="spec__bar">Step 8 &middot; ${esc(s.name)}<span class="spacer"></span><span class="pill pill--wait pill--sm">Open</span></div>
+        <div class="spec__body"><div class="record__meta">
+          <div><div class="record__k">Sent</div><div class="record__v mono tnum">${s.sent}</div></div>
+          <div><div class="record__k">Returned</div><div class="record__v mono tnum">${semiStats().back}</div></div>
+          <div><div class="record__k">Questions</div><div class="record__v mono tnum">${s.qs.length}</div></div>
+          <div><div class="record__k">Due</div><div class="record__v">${s.due}</div></div>
+        </div></div></div>
+    </div>
+
+    <div>
+      <div class="sub">Step 8 questionnaire &mdash; what each question tests</div>
+      <div class="stack stack--tight">${s.qs.map(q=>qcard(q,s)).join('')}</div>
+    </div>
+
+    <div>
+      <div class="sub">Step 5 initial survey</div>
+      <div class="stack stack--tight">${SURVEY_INITIAL.qs.map(q=>qcard(q,SURVEY_INITIAL)).join('')}</div>
+    </div>
+
+    <div class="notice notice--info">${ico('info')}<div><div class="notice__t">How responses come back</div>
+      <div class="notice__b">Each candidate gets a single-use link, no account and no password to forget. Responses land straight on the candidate file, ready to score. The firm sees who has answered and who needs a nudge; candidates see nothing but their own form.</div></div></div>
+
+    <div class="notice notice--info">${ico('info')}<div><div class="notice__t">Coverage check</div>
+      <div class="notice__b">Slate flags any adopted criterion no instrument tests. Right now every criterion of weight 4 or higher is covered by at least one survey question and one interview question. <b>S5 Intergovernmental relations</b> is tested at interview only &mdash; acceptable at weight 3, worth a survey question if the Council raises it.</div></div></div>
+  </div></div></div>`;
+}
+
+/* ============================================================ view: interview guide (Steps 7, 12) */
+function vGuide(){
+  return `
+  ${head('Steps 7 and 12', 'Interview guide',
+    'Questions in ARE format &mdash; Approach, Results, Experience. Standardized across every finalist so the comparison holds, with follow-ups that push past the rehearsed answer.',
+    role()==='consultant'?`<button class="btn btn--primary" data-act="addquestion">Add question</button><button class="btn btn--secondary" data-go="schedule">Open finalist week</button>`:'')}
+  <div class="section"><div class="wrap"><div class="stack stack--loose">
+    <div class="quote">A &mdash; how would they approach it, what first, who involved, what information. R &mdash; what happened, what changed because of their leadership. E &mdash; the past situation, the results, the evidence, what they learned, and how it fits us.
+      <cite>The ARE format, from the firm&rsquo;s process</cite></div>
+
+    <div class="stack stack--tight">
+    ${GUIDE.map(g=>`
+      <div class="q">
+        <div class="q__hd"><span class="q__n">Q${g.n}</span><span class="q__t">${esc(g.q)}</span></div>
+        <div class="q__bd">
+          <div class="are">
+            <div class="t-label" style="color:var(--accent)">Approach</div><div class="t-small">${esc(g.a)}</div></div>
+          <div class="are">
+            <div class="t-label" style="color:var(--accent)">Results</div><div class="t-small">${esc(g.r)}</div></div>
+          <div class="are">
+            <div class="t-label" style="color:var(--accent)">Experience</div><div class="t-small">${esc(g.e)}</div></div>
+        </div>
+        <div class="q__ft"><span class="t-label">Tests</span>${g.crit.map(id=>critChip(id,true)).join('')}</div>
+      </div>`).join('')}
+    </div>
+
+    <div>
+      <div class="sub">Assessment scenarios</div>
+      <div class="grid2 grid2--wide">
+      ${SCENARIOS.map(s=>`
+        <div class="spec">
+          <div class="spec__bar">${s.id}<span class="spacer"></span><span class="mono" style="text-transform:none;letter-spacing:0">${s.mins} min</span></div>
+          <div class="spec__body stack stack--tight">
+            <h3 class="t-head">${esc(s.name)}</h3>
+            <p class="t-small">${esc(s.d)}</p>
+            <div class="row row--tight"><span class="t-label">Observed by</span><span class="t-small" style="color:var(--ink)">${esc(s.who)}</span></div>
+            <div class="crits">${s.crit.map(id=>critChip(id,true)).join('')}</div>
+          </div>
+        </div>`).join('')}
+      </div>
+    </div>
+
+    <div class="notice notice--ok">${ico('check')}<div><div class="notice__t">Every finalist gets the same core experience</div>
+      <div class="notice__b">Same questions, same scenarios, same order, same clock. Slate builds the three schedules from one template, so a candidate who interviews on Thursday is not answering a different set than the one who came Tuesday.</div></div></div>
+  </div></div></div>`;
+}
+
+/* ============================================================ view: scorecard (panel) */
+function vScorecard(){
+  const s = SCENARIOS[1];
+  const c = CANDIDATES[0];
+  return `
+  ${head('Step 12', 'Problem-solving exercise scorecard', `Candidate ${esc(c.name)} &middot; 4 Nov 2026, 10:15 &middot; ${s.mins} minutes`)}
+  <div class="section"><div class="wrap"><div class="stack stack--loose">
+    <div class="notice notice--info">${ico('lock')}<div><div class="notice__t">Score what you observed, not what you have heard</div>
+      <div class="notice__b">You are rating three criteria. Other assessors are rating different ones from different exercises. The search team combines them; you will not see the combination.</div></div></div>
+
+    <div class="spec">
+      <div class="spec__bar">Criteria for this exercise</div>
+      <div class="spec__body stack">
+        ${s.crit.map(id=>{ const x = crit(id); return `
+          <div class="sc">
+            <div><div class="sc__l"><span class="mono" style="color:var(--ink-3);font-size:11.5px;margin-right:7px">${x.id}</span>${esc(x.label)}</div>
+              <div class="sc__m">${esc(x.note)}</div></div>
+            <div class="rate rate--num" role="group" aria-label="Score ${esc(x.label)}">
+              ${[1,2,3,4,5].map(n=>`<button type="button" data-rate="sc-${x.id}" data-val="${n}" aria-pressed="${state.ratings['sc-'+x.id]===String(n)}">${n}</button>`).join('')}
+            </div>
+          </div>`; }).join('')}
+        <div class="field field--full">
+          <label class="field__label" for="obs">What did you actually see?</label>
+          <span class="field__hint">Behavior you observed, not conclusions about the person. This text goes into the search record.</span>
+          <textarea class="input" id="obs" placeholder="Named the revenue assumption nobody else questioned. Asked the finance director for the fund balance policy before proposing anything."></textarea>
+        </div>
+      </div>
+    </div>
+    <div class="row">${state.scorecardIn?`<span class="pill pill--ok">${ico('check')}Scorecard submitted</span>`:`<button class="btn btn--primary" data-act="submit-score">Submit scorecard</button><button class="btn btn--secondary" data-act="savedraft">Save draft</button>`}
+      <span class="t-small spacer" style="color:var(--ink-3)">${state.scorecardIn?'Submitted scorecards cannot be edited.':'Submitted scorecards cannot be edited.'}</span></div>
+  </div></div></div>`;
+}
+
+/* ============================================================ view: contract (Step 13) */
+function vContract(){
+  const terms = [
+    ['Position','Town Manager, Town of Ridgeline','Set'],
+    ['Term of employment','Indefinite, reviewed annually','Set'],
+    ['Base salary','$186,500','Negotiating'],
+    ['Benefits','Town standard, executive tier','Set'],
+    ['Vacation and leave','25 days, 12 days sick, front-loaded','Set'],
+    ['Professional development','$6,000 per year plus ICMA dues','Set'],
+    ['Automobile allowance','$550 per month','Negotiating'],
+    ['Deferred compensation','7% of base, ICMA-RC','Negotiating'],
+    ['Residency','Within town limits inside 12 months','Open'],
+    ['Performance evaluation','Annual, BAR framework, each 1 July','Set'],
+    ['Severance','9 months base, ICMA model language','Open'],
+    ['Termination','For cause defined per ICMA model','Set']
+  ];
+  return `
+  ${head('Step 13', 'Employment agreement',
+    'Built from the ICMA model employment agreement for local government executives, then customized. Legal counsel reviews and finalizes before execution &mdash; Slate tracks the redlines, it does not replace the lawyer.',
+    role()!=='council'?`<button class="btn btn--primary" data-act="counsel">Send to counsel</button><button class="btn btn--secondary" data-act="icma">Compare to ICMA model</button>`:'')}
+  <div class="section"><div class="wrap"><div class="stack stack--loose">
+    <div class="notice notice--wait">${ico('alert')}<div><div class="notice__t">Draft. Not an offer, and not legal advice.</div>
+      <div class="notice__b">Three terms are still open. Nothing here goes to a candidate until Council authorizes the offer in executive session and counsel signs off on the language.</div></div></div>
+    <div class="spec">
+      <div class="spec__bar">Terms<span class="spacer"></span><span class="mono" style="text-transform:none;letter-spacing:0">ICMA model, revision 2</span></div>
+      <div class="spec__body spec__body--flush"><div class="tablewrap"><table>
+        <thead><tr><th>Term</th><th>Proposed</th><th>Status</th></tr></thead>
+        <tbody>${terms.map(([k,v,st])=>`<tr><td>${esc(k)}</td><td>${esc(v)}</td>
+          <td>${st==='Set'?'<span class="pill pill--ok pill--sm">Set</span>':st==='Negotiating'?'<span class="pill pill--wait pill--sm">Negotiating</span>':'<span class="pill pill--stop pill--sm">Open</span>'}</td></tr>`).join('')}</tbody>
+      </table></div></div>
+    </div>
+    <div class="notice notice--info">${ico('arrow')}<div><div class="notice__t">The agreement hands off to Step 14</div>
+      <div class="notice__b">The evaluation clause names the BAR framework and the 1 July date. When the agreement is executed, Slate opens the first evaluation cycle with the expectations already loaded from the adopted profile.</div></div></div>
+  </div></div></div>`;
+}
+
+/* ============================================================ view: evaluation (Step 14) */
+function vEvaluation(){
+  const rateRow = (id, label, note, tag) => `
+    <div class="sc">
+      <div><div class="sc__l">${esc(label)}</div><div class="sc__m">${note?esc(note):''}${tag?` &middot; from ${critTag(tag)} ${esc(crit(tag).label)}`:''}</div></div>
+      <div class="rate" role="group" aria-label="Rate ${esc(label)}">
+        ${RATINGS.map(r=>`<button type="button" data-rate="ev-${id}" data-val="${r}" aria-pressed="${state.ratings['ev-'+id]===r}">${r}</button>`).join('')}
+      </div>
+    </div>`;
+
+  return `
+  ${head('Step 14', 'Annual performance evaluation',
+    'Behavior, Actions, Results. The expectations are not written from scratch each July &mdash; they inherit from the profile the Council adopted before the search began, which is what makes the first-year review a continuation of the hire rather than a new negotiation.',
+    role()==='council'?`<button class="btn btn--primary" data-act="submit-eval">Submit my evaluation</button><button class="btn btn--secondary" data-act="savedraft">Save draft</button>`:`<button class="btn btn--secondary" data-act="opencycle">Open the cycle</button>`)}
+  <div class="section"><div class="wrap"><div class="stack stack--loose">
+
+    <div class="tiles">
+      <div class="tile"><span class="tile__k">Cycle</span><span class="tile__v" style="font-size:1.5rem">Year one</span><span class="tile__n">1 Jul 2027</span></div>
+      <div class="tile"><span class="tile__k">Council submitted</span><span class="tile__v">4<span style="font-size:1rem;color:var(--ink-3)">/7</span></span><span class="tile__n">Sealed until all in</span></div>
+      <div class="tile"><span class="tile__k">Self-evaluation</span><span class="tile__v" style="font-size:1.5rem">In</span><span class="tile__n">Submitted 18 Jun</span></div>
+      <div class="tile"><span class="tile__k">Governance survey</span><span class="tile__v">5<span style="font-size:1rem;color:var(--ink-3)">/7</span></span><span class="tile__n">Council rates itself</span></div>
+    </div>
+
+    <div class="spec">
+      <div class="spec__bar">Behavior &mdash; meeting the adopted organizational and manager expectations</div>
+      <div class="spec__body stack stack--tight">
+        <p class="t-small" style="color:var(--ink-3)">Out-performing: went above the role. On track: met the shared expectations and showed success in the role. Needs improvement: below the shared expectations, with specific examples given.</p>
+        ${BAR.behavior.map(b=>rateRow(b.id, b.t, b.d, b.from)).join('')}
+      </div>
+    </div>
+
+    <div class="spec">
+      <div class="spec__bar">Actions &mdash; professional development plan</div>
+      <div class="spec__body stack stack--tight">
+        ${BAR.actions.map(a=>rateRow(a.id, a.t, 'Due '+a.due, null)).join('')}
+      </div>
+    </div>
+
+    <div class="spec">
+      <div class="spec__bar">Results &mdash; the annual work plan<span class="spacer"></span><span class="mono" style="text-transform:none;letter-spacing:0">6 measurable goals</span></div>
+      <div class="spec__body stack stack--tight">
+        <p class="t-small" style="color:var(--ink-3)">Every goal traces to a challenge or opportunity in the profile. The Council is measuring the manager against the problem it hired the manager to solve.</p>
+        ${BAR.results.map(r=>rateRow(r.id, r.t, 'Target '+r.target, r.from)).join('')}
+      </div>
+    </div>
+
+    <div class="spec">
+      <div class="spec__bar">Council governance survey &mdash; the Council rates itself</div>
+      <div class="spec__body stack stack--tight">
+        <div class="notice notice--info" style="margin-bottom:var(--s-2)">${ico('info')}<div><div class="notice__t">This is the half that makes it a two-way process</div>
+          <div class="notice__b">The evaluation is not only of the manager. A Council that is not giving clear direction, or that is drifting into administration, will show up here &mdash; which is the point.</div></div></div>
+        ${BAR.governance.map((g,i)=>rateRow('G'+i, g, '', null)).join('')}
+        <div class="field field--full" style="margin-top:var(--s-3)">
+          <label class="field__label" for="ev-note">Strengths, and opportunities for improvement</label>
+          <textarea class="input" id="ev-note" placeholder="Specific examples. General impressions are not useful to the manager and are hard to defend if the evaluation is ever challenged."></textarea>
+        </div>
+      </div>
+    </div>
+
+    <div class="notice notice--ok">${ico('check')}<div><div class="notice__t">Where the year actually starts</div>
+      <div class="notice__b">Beginning of year: adopt expectations, five to seven measurable goals, a development plan, a work plan, and the Council-Manager expectations. Mid-year: progress, accomplishments, barriers, adjustments. July: both sides complete, results compile, and the conversation sets next year&rsquo;s goals.</div></div></div>
+  </div></div></div>`;
+}
+
+/* ============================================================ view: blueprint */
+function vBlueprint(){
+  const perms = [
+    ['Build and weight the candidate profile','Edit','Comment and vote','View','—'],
+    ['Draft brochure, advertisement, plan','Edit','Approve','Edit','—'],
+    ['Build surveys and the interview guide','Edit','Comment','View','—'],
+    ['See the full applicant list','All','Screened only','All','—'],
+    ['Open a candidate file and its responses','All','Screened only','All','—'],
+    ['Score candidates against criteria','Yes','Yes','—','Assigned only'],
+    ['See other people’s scores','After release','After release','—','Never'],
+    ['Release a sealed scoring round','Yes','—','—','—'],
+    ['Schedule finalist week','Yes','Confirm','Yes','Confirm'],
+    ['Draft the employment agreement','Yes','Approve','Yes','—'],
+    ['Complete the annual evaluation','Facilitate','Yes','Facilitate','—'],
+    ['Export the search record','Yes','Yes','Yes','—']
+  ];
+  const cell = v => v==='—' ? '<span class="no">—</span>'
+    : ['Yes','Edit','All'].includes(v) ? `<span class="yes">${esc(v)}</span>`
+    : `<span class="part">${esc(v)}</span>`;
+
+  const objects = [
+    ['Engagement','One search for one client. Owns everything below.','client, position, dates, stage'],
+    ['Criterion','A single line of the Step 1 profile. The spine object.','id, kind, label, weight, note'],
+    ['Instrument','A survey, questionnaire, interview guide, or scenario.','step, questions, each question → criteria'],
+    ['Person','A hiring-side user with one role in one engagement.','role, seat, scope'],
+    ['Candidate','An applicant file. A record, not an account.','stage, documents, responses, consents'],
+    ['Score','One person, one candidate, one criterion, one source.','value 1–5, source, sealed flag, note'],
+    ['Cycle','An annual evaluation round after the hire.','expectations, goals, ratings, governance survey']
+  ];
+
+  return `
+  ${head('The platform', 'How Slate works',
+    'The process already works on paper. What it does not do on paper is stay connected when seven Council members, a staff panel, a client HR office, and thirty-one candidates all touch it at once. Three decisions carry the whole design.')}
+
+  <div class="section"><div class="wrap"><div class="stack stack--loose">
+    <div class="grid3">
+      <div class="spec"><div class="spec__bar">Decision one</div><div class="spec__body stack stack--tight">
+        <h3 class="t-head">The profile is data, not a document</h3>
+        <p class="t-small">Step 1 produces sixteen records with stable identifiers and weights. Every later step references them instead of restating them. That is the difference between a connected process and fourteen Word files that drift apart by October.</p></div></div>
+      <div class="spec"><div class="spec__bar">Decision two</div><div class="spec__body stack stack--tight">
+        <h3 class="t-head">Scoring is independent, then released</h3>
+        <p class="t-small">Scorers cannot see each other until a round is released. It prevents anchoring, it survives a records request, and it gives a divided Council a defensible account of how the decision was made.</p></div></div>
+      <div class="spec"><div class="spec__bar">Decision three</div><div class="spec__body stack stack--tight">
+        <h3 class="t-head">Everyone sees one search, scoped</h3>
+        <p class="t-small">Four roles on the hiring side, one dataset. An assessor sees one exercise. Nobody gets a second copy of the truth, and nobody gets access they do not need. Candidates are records here, not users.</p></div></div>
+    </div>
+
+    <div>
+      <div class="sub">Who can do what</div>
+      <div class="tablewrap"><table class="perm">
+        <thead><tr><th style="min-width:280px">Capability</th><th>Consultant</th><th>Governing body</th><th>Staff liaison</th><th>Assessor</th></tr></thead>
+        <tbody>${perms.map(p=>`<tr><td>${esc(p[0])}</td>${p.slice(1).map(v=>`<td>${cell(v)}</td>`).join('')}</tr>`).join('')}</tbody>
+      </table></div>
+      <p class="t-small" style="color:var(--ink-3);margin-top:var(--s-3)">Switch the user in the left rail to see each of these applied. The navigation, the dashboards, and the scoring visibility all change with the role.</p>
+    </div>
+
+    <div>
+      <div class="sub">What the system stores</div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Object</th><th>What it is</th><th>Key fields</th></tr></thead>
+        <tbody>${objects.map(o=>`<tr><td><b>${esc(o[0])}</b></td><td>${esc(o[1])}</td><td class="t-data" style="color:var(--ink-3)">${esc(o[2])}</td></tr>`).join('')}</tbody>
+      </table></div>
+    </div>
+
+    <div>
+      <div class="sub">What this has to get right to be used</div>
+      <div class="grid2 grid2--wide">
+        <div class="notice notice--stop">${ico('alert')}<div><div class="notice__t">Public records and open meetings</div>
+          <div class="notice__b">Search material in most states is a public record, and finalist names usually become disclosable. The platform has to hold candidate consent, log who saw what and when, and export a clean record on request. It must not become a way for a quorum of the governing body to deliberate outside a noticed meeting &mdash; independent scoring is fine, threaded discussion between members is not, which is why Slate has no such thread.</div></div></div>
+        <div class="notice notice--wait">${ico('alert')}<div><div class="notice__t">Council members are occasional users</div>
+          <div class="notice__b">A Council member logs in perhaps eight times across a five-month search, often on a phone, often at night. Anything that needs a manual is dead. The Council-facing surface is deliberately three screens: my tasks, the candidates, the comparison.</div></div></div>
+        <div class="notice notice--info">${ico('info')}<div><div class="notice__t">Confidentiality is why good candidates apply at all</div>
+          <div class="notice__b">Sitting managers will not apply if their own council might read about it. The platform has to carry a confidentiality flag on every file, block reference contact until consent is recorded, and warn the team before finalist names become disclosable. Get this wrong once and the firm&rsquo;s applicant pool shrinks for years.</div></div></div>
+        <div class="notice notice--ok">${ico('check')}<div><div class="notice__t">The firm runs many searches at once</div>
+          <div class="notice__b">Profiles, instruments, and scenario templates are reusable across engagements. A new Town Manager search starts from the last one and gets edited down, which is where the firm&rsquo;s margin actually is.</div></div></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="sub">A sensible build order</div>
+      <div class="spec"><div class="spec__body"><div class="steps">
+        <div class="step step--done"><div class="step__n">01</div><div><div class="step__t">Profile, instruments, and response intake</div>
+          <div class="step__d">Steps 1, 5, 8, and 10. Replaces the survey tool and the email chain, and it is usable on its own from the first search.</div>
+          <div class="step__foot"><span class="pill pill--info pill--sm">Highest value first</span></div></div></div>
+        <div class="step step--done"><div class="step__n">02</div><div><div class="step__t">Screening, sealed rounds, and the finalist matrix</div>
+          <div class="step__d">Steps 9 and 11. Brings the governing body in as users, which is the first time the platform faces people who did not choose it.</div></div></div>
+        <div class="step step--now"><div class="step__n">03</div><div><div class="step__t">Interview guide, scenarios, and assessment scheduling</div>
+          <div class="step__d">Steps 7 and 12, including the panel scorecards. Heaviest logistics, so it benefits from two searches of real use behind it.</div></div></div>
+        <div class="step"><div class="step__n">04</div><div><div class="step__t">Agreement tracking and the annual evaluation</div>
+          <div class="step__d">Steps 13 and 14. These extend the relationship past the hire and give the firm a recurring engagement rather than a one-time placement.</div>
+          <div class="step__foot"><span class="pill pill--ok pill--sm">Where the recurring revenue is</span></div></div></div>
+        <div class="step"><div class="step__n">05</div><div><div class="step__t">Multi-engagement templates and the firm dashboard</div>
+          <div class="step__d">Steps 2, 3, 4, and 6 as reusable assets across every search the firm runs.</div></div></div>
+      </div></div></div>
+    </div>
+
+    <div class="notice notice--info">${ico('info')}<div><div class="notice__t">About this prototype</div>
+      <div class="notice__b">Sample data throughout, describing a fictional client. Weights and scores are live &mdash; changing them recalculates the rollups &mdash; but nothing is saved. Built on the Docket design system, revision 2.0, using its tokens, type, and components unchanged.</div></div></div>
+  </div></div></div>`;
+}
+
+/* ============================================================ view: recruiting (Steps 2, 3, 4, 6) */
+function vRecruiting(){
+  const tab = state.tab || 'community';
+  const tabs = [['community','Step 2 · Community'],['brochure','Step 3 · Brochure'],['ads','Step 4 · Advertisements'],['plan','Step 6 · Ad plan']];
+  const chall = CRITERIA.filter(c=>c.kind==='chall');
+  const opps = CRITERIA.filter(c=>c.kind==='opp');
+  const skills = CRITERIA.filter(c=>c.kind==='skill');
+  const traits = CRITERIA.filter(c=>c.kind==='trait');
+
+  const body = {
+    community: `
+      <div class="doc">
+        <div class="doc__cover">
+          <div class="doc__kicker">Step 2 · Community and form of government</div>
+          <h2 class="doc__title">Town of Ridgeline, Colorado</h2>
+          <p class="t-small" style="max-width:58ch">Written to answer the candidate question: why would I want to live here, and why would I want to lead this organization?</p>
+        </div>
+        <div class="doc__body">
+          <div><div class="doc__h">The place</div>
+            <p class="t-small">Ridgeline sits at 7,200 feet on the I-70 corridor, 45 minutes west of Denver. Population 18,400. The Town grew around Ridgeline Creek and a rail stop; the identity is still a working mountain town that happens to be inside a metro commute. Housing is tight, visitors are a fiscal fact, and the water system is the constraint nobody gets to ignore.</p></div>
+          <div><div class="doc__h">Form of government</div>
+            <p class="t-small">Council–Manager. Seven-member Council, including a directly elected Mayor (Dale Okonkwo). The Town Manager is the chief executive: budget, personnel, and daily operations. 142 FTEs. $34 million general fund. Major departments: Police, Public Works / Utilities, Community Development, Parks and Recreation, Finance, and a combined Clerk–HR office.</p></div>
+          <div><div class="doc__h">What the next manager inherits</div>
+            <div class="crits" style="margin-top:var(--s-2)">${chall.map(c=>critChip(c.id,true)).join('')}</div></div>
+          <div><div class="doc__h">Where a new manager can make a difference</div>
+            <div class="crits" style="margin-top:var(--s-2)">${opps.map(c=>critChip(c.id,true)).join('')}</div></div>
+        </div>
+      </div>`,
+    brochure: `
+      <div class="doc">
+        <div class="doc__cover">
+          <div class="doc__kicker">Step 3 · Recruitment brochure</div>
+          <h2 class="doc__title">Town Manager<br>Town of Ridgeline</h2>
+          <p class="t-small">Built from the Step 1 profile and the Step 2 community record. The brochure sells the opportunity; it does not invent a different job than the one Council adopted.</p>
+        </div>
+        <div class="doc__body">
+          <div><div class="doc__h">The opportunity</div>
+            <p class="t-small">Ridgeline is seeking a Town Manager to close a structural budget gap, restaff a thin organization, and put a deferred water system on a funded replacement schedule — while keeping a divided Council working as a body.</p></div>
+          <div><div class="doc__h">What we are looking for</div>
+            <div class="stack stack--tight" style="margin-top:var(--s-2)">
+              <div><span class="t-label">Essential skills</span><div class="crits" style="margin-top:6px">${skills.map(c=>critChip(c.id,c.w>=4)).join('')}</div></div>
+              <div><span class="t-label">Leadership traits</span><div class="crits" style="margin-top:6px">${traits.map(c=>critChip(c.id,c.w>=4)).join('')}</div></div>
+            </div></div>
+          <div><div class="doc__h">Current challenges</div><div class="crits">${chall.map(c=>critChip(c.id,true)).join('')}</div></div>
+          <div><div class="doc__h">How to apply</div>
+            <p class="t-small">Submit a letter, resume, and the initial candidate survey at the link in the advertisement. First review: 14 September 2026. The Town will treat applications as confidential to the extent Colorado law allows, until finalists are named.</p></div>
+        </div>
+      </div>`,
+    ads: `
+      <div class="grid2">
+        <div class="ad"><span class="ad__tag">Full · ICMA, CML, job boards</span>
+          <h3 class="ad__t">Town Manager — Town of Ridgeline, Colorado</h3>
+          <p class="ad__b">Council–Manager government. Population 18,400. $34M general fund, 142 employees. The Council is looking for a manager who can close a structural budget gap, restaff the organization, and fund deferred water infrastructure — and who works with the Council as a body. Salary range $165,000–$195,000, ICMA-model agreement. Apply with letter, resume, and the candidate survey. First review 14 September 2026.</p>
+          <div class="crits">${['S1','T1','C1'].map(id=>critChip(id,true)).join('')}</div></div>
+        <div class="ad"><span class="ad__tag">Short · association briefs</span>
+          <h3 class="ad__t">Town Manager, Ridgeline, CO</h3>
+          <p class="ad__b">Mountain community, Council–Manager, 18,400. Structural budget, vacancies, deferred water. Collaborative, transparent manager wanted. $165k–$195k. Survey required. First review 14 Sep 2026.</p></div>
+        <div class="ad ad--social"><span class="ad__tag">Social</span>
+          <h3 class="ad__t">Ridgeline is hiring a Town Manager.</h3>
+          <p class="ad__b">18,400 people. A real budget gap. A water system that is out of time. A Council that wants a partner, not a seventh member.\n\nIf you have closed a gap and still want the work, the survey is in the link.</p></div>
+        <div class="ad"><span class="ad__tag">Association · ICMA / state managers</span>
+          <h3 class="ad__t">Ridgeline, CO — Town Manager</h3>
+          <p class="ad__b">ICMA Credentialed Manager preferred. Council–Manager. Emphasis on finance, organizational leadership, and contested public process. Confidential until finalists. Details and survey: ridgeline.co/tmsearch</p></div>
+      </div>`,
+    plan: `
+      <div class="spec">
+        <div class="spec__bar">Recruitment advertising plan<span class="spacer"></span><span class="mono" style="text-transform:none;letter-spacing:0">Step 6</span></div>
+        <div class="spec__body spec__body--flush"><div class="tablewrap"><table>
+          <thead><tr><th>Outlet</th><th>Audience</th><th>Version</th><th>Cost</th><th>When</th><th>Who posts</th></tr></thead>
+          <tbody>
+            <tr><td>ICMA Career Center</td><td>City/county managers</td><td>Association</td><td class="mono tnum">$425</td><td>8 Jun</td><td>Marisol Vance</td></tr>
+            <tr><td>Colorado Municipal League</td><td>Colorado managers and assistants</td><td>Short</td><td class="mono tnum">$150</td><td>8 Jun</td><td>Marisol Vance</td></tr>
+            <tr><td>Colorado City &amp; County Management Association</td><td>State network</td><td>Association</td><td class="mono tnum">$0</td><td>9 Jun</td><td>Marisol Vance</td></tr>
+            <tr><td>LinkedIn (boosted)</td><td>Regional executives</td><td>Social</td><td class="mono tnum">$600</td><td>9–30 Jun</td><td>Priya Raman</td></tr>
+            <tr><td>Town website + newsletter</td><td>Local and regional</td><td>Full</td><td class="mono tnum">$0</td><td>8 Jun</td><td>Priya Raman</td></tr>
+            <tr><td>Direct outreach (20 targets)</td><td>Comparable and larger orgs</td><td>—</td><td class="mono tnum">staff time</td><td>15–30 Jun</td><td>Marisol Vance</td></tr>
+          </tbody>
+        </table></div></div>
+      </div>
+      <div class="notice notice--info">${ico('info')}<div><div class="notice__t">The plan uses four ad versions, not one posting everywhere</div>
+        <div class="notice__b">That is the Step 4 rule. Each row names the version it runs, so a social post is not a paste of the ICMA listing, and the association brief is not a brochure.</div></div></div>`
+  }[tab];
+
+  return `
+  ${head('Steps 2, 3, 4, and 6', 'Recruiting materials',
+    'Community profile, brochure, advertisements, and the posting plan — each written from the same adopted criteria, so the job being sold is the job being scored.',
+    role()==='consultant'?`<button class="btn btn--primary" data-act="publish">Publish current packet</button><button class="btn btn--secondary" data-act="export">Export PDF</button>`:'')}
+  <div class="section"><div class="wrap"><div class="stack stack--loose">
+    <div class="tabs" role="tablist">
+      ${tabs.map(([id,l])=>`<button type="button" class="tab" data-tab="${id}" aria-selected="${tab===id}">${l}</button>`).join('')}
+    </div>
+    ${body}
+  </div></div></div>`;
+}
+
+/* ============================================================ view: schedule (Step 12) */
+function vSchedule(){
+  const fins = CANDIDATES.filter(c=>c.stage==='finalist');
+  const days = [
+    ['Tue 3 Nov','Community tour and staff briefings','Same packet, same stops, same briefers. Candidates rotate; the tour does not.'],
+    ['Wed 4 Nov','Council interview, presentation, inbox','ARE questions from the guide, then SCN-1 and SCN-3. Order is the same for every finalist.'],
+    ['Thu 5 Nov','Staff exercise, community panel, wrap','SCN-2 with directors in the morning. Leaderless group in the afternoon if three finalists remain.']
+  ];
+  return `
+  ${head('Step 12', 'Finalist week',
+    'Every finalist gets the same core experience: same questions, same scenarios, same clock. The schedule is one template applied three times, not three custom days.',
+    role()==='consultant'?`<button class="btn btn--primary" data-act="publish">Issue the schedule</button><button class="btn btn--secondary" data-go="guide">Open the interview guide</button>`:'')}
+  <div class="section"><div class="wrap"><div class="stack stack--loose">
+    <div class="tiles">
+      ${fins.map(c=>`<div class="tile"><span class="tile__k">${esc(c.name)}</span><span class="tile__v" style="font-size:1.35rem">${esc(c.cur.split(' ')[0])}</span><span class="tile__n">${esc(c.org)}</span></div>`).join('')}
+      <div class="tile tile--act"><span class="tile__k">Core experience</span><span class="tile__v">1</span><span class="tile__n">Template, three applications</span></div>
+    </div>
+    <div class="spec">
+      <div class="spec__bar">Week of 3 November 2026</div>
+      <div class="spec__body spec__body--flush"><div class="tablewrap"><table>
+        <thead><tr><th>Day</th><th>Block</th><th>What is held constant</th></tr></thead>
+        <tbody>${days.map(([d,b,n])=>`<tr><td class="mono">${d}</td><td>${esc(b)}</td><td class="t-small">${esc(n)}</td></tr>`).join('')}</tbody>
+      </table></div></div>
+    </div>
+    <div class="spec">
+      <div class="spec__bar">Assessment stations — same for each finalist</div>
+      <div class="spec__body stack stack--tight">
+        ${SCENARIOS.map(s=>`<div class="sc"><div><div class="sc__l">${esc(s.name)}</div><div class="sc__m">${s.mins} min · observed by ${esc(s.who)}</div></div><div class="crits">${s.crit.map(id=>critChip(id,true)).join('')}</div></div>`).join('')}
+      </div>
+    </div>
+    <div class="notice notice--ok">${ico('check')}<div><div class="notice__t">A Thursday candidate is not answering a different job than a Tuesday candidate</div>
+      <div class="notice__b">That is the whole point of Step 12. The comparison in Step 11 only holds if the evidence was gathered the same way.</div></div></div>
+  </div></div></div>`;
+}
+
+/* ============================================================ view: apply (candidate) */
+function vApply(){
+  const s = SURVEY_SEMI;
+  if(state.submitted){
+    return `
+    ${head('Semifinalist questionnaire', 'Received', 'Thank you. Your responses are on the search file. The Town will contact you if you are selected as a finalist. No references will be called before then.')}
+    <div class="section"><div class="wrap">
+      <div class="notice notice--ok">${ico('check')}<div><div class="notice__t">Submitted 12 Oct 2026</div>
+        <div class="notice__b">You can close this page. If you need to correct something, write the search consultant — the form itself does not reopen.</div></div></div>
+    </div></div>`;
+  }
+  return `
+  ${head('Town of Ridgeline', 'Semifinalist questionnaire',
+    esc(s.intro),
+    `<span class="pill pill--wait">Due ${s.due}</span>`)}
+  <div class="section"><div class="wrap"><div class="stack stack--loose">
+    <div class="notice notice--info">${ico('lock')}<div><div class="notice__t">This link is yours alone</div>
+      <div class="notice__b">No account. No password. Responses go to the search file, not to other applicants, and not to the Council until the search team releases a round.</div></div></div>
+    ${s.qs.map(q=>`
+      <div class="q">
+        <div class="q__hd"><span class="q__n">${String(q.n).padStart(2,'0')}</span><span class="q__t">${esc(q.t)}${q.req?' <span class="field__req">*</span>':''}</span></div>
+        <div class="q__bd">
+          <div class="t-small" style="color:var(--ink-3);margin-bottom:var(--s-2)">${q.type==='are'?'Please address approach, actions, and measurable results.':''}</div>
+          <label class="field__label" for="ans-${q.n}">Your response</label>
+          <textarea class="input" id="ans-${q.n}" data-ans="${q.n}" placeholder="Write in enough detail that a reader who does not know you can see what you did.">${esc(state.survey[q.n]||'')}</textarea>
+        </div>
+        <div class="q__ft"><span class="t-label">This question is used to assess</span>${q.crit.map(id=>critChip(id,true)).join('')}</div>
+      </div>`).join('')}
+    <div class="row"><button class="btn btn--primary" data-act="submit-survey">Submit questionnaire</button>
+      <span class="t-small" style="color:var(--ink-3)">You will not be able to edit after you submit.</span></div>
+  </div></div></div>`;
+}
+
+/* ============================================================ render */
+const RENDER = {
+  overview:vOverview, process:vProcess, profile:vProfile, candidates:vCandidates, detail:vDetail,
+  finalists:vFinalists, surveys:vSurveys, guide:vGuide, scorecard:vScorecard, contract:vContract,
+  evaluation:vEvaluation, blueprint:vBlueprint, recruiting:vRecruiting, schedule:vSchedule, apply:vApply
+};
+function render(){
+  renderWho(); renderNav(); renderCrumbs();
+  $('#view').innerHTML = (RENDER[state.view] || vOverview)();
+}
+
+/* ============================================================ events */
+document.addEventListener('click', e=>{
+  const t = e.target.closest('[data-user],[data-go],[data-detail],[data-weight],[data-score],[data-rate],[data-release],[data-theme-set],[data-act],[data-tab]');
+  if(!t) return;
+
+  if(t.dataset.themeSet){
+    const v = t.dataset.themeSet;
+    if(v==='auto') document.documentElement.removeAttribute('data-theme');
+    else document.documentElement.setAttribute('data-theme', v);
+    document.querySelectorAll('[data-theme-set]').forEach(b=>b.setAttribute('aria-pressed', String(b.dataset.themeSet===v)));
+    return;
+  }
+  if(t.dataset.user){ setUser(t.dataset.user); return; }
+  if(t.dataset.detail){ go('detail', t.dataset.detail); return; }
+  if(t.dataset.go){
+    if(t.dataset.tab) state.tab = t.dataset.tab;
+    go(t.dataset.go);
+    return;
+  }
+  if(t.dataset.tab){ state.tab = t.dataset.tab; render(); return; }
+  if(t.dataset.release){ state.released = true; toast('Scores released to Council. The round is now visible to every scorer.'); render(); return; }
+
+  if(t.dataset.weight){ state.weights[t.dataset.weight] = Number(t.dataset.val); render(); return; }
+  if(t.dataset.score){ state.scores[t.dataset.score][t.dataset.crit] = Number(t.dataset.val); render(); return; }
+  if(t.dataset.rate){
+    const k = t.dataset.rate;
+    state.ratings[k] = state.ratings[k]===t.dataset.val ? null : t.dataset.val;
+    document.querySelectorAll(`[data-rate="${k}"]`).forEach(b=>b.setAttribute('aria-pressed', String(state.ratings[k]===b.dataset.val)));
+    return;
+  }
+  if(t.dataset.act){
+    const act = t.dataset.act;
+    if(act==='remind'){ state.reminded[t.dataset.who] = true; toast('Reminder sent to '+t.dataset.who+'.'); render(); return; }
+    if(act==='export'){ toast('Screening record downloaded. In production this is a timestamped PDF of scores and notes.'); return; }
+    if(act==='publish'){ toast('Revision 4 published. Council will see the current weights on next login.'); return; }
+    if(act==='compare'){ toast('Revision 3 kept S1 at weight 4. Revision 4 raised it to 5 after the June 12 work session.'); return; }
+    if(act==='resume' || act==='survey' || act==='questionnaire'){ state.doc = act; render(); return; }
+    if(act==='closedoc'){ state.doc = null; render(); return; }
+    if(act==='advance'){
+      const c = cand(state.sel); if(c){ c.stage = 'finalist'; toast(c.name+' advanced to finalist. The comparison matrix now includes this file.'); }
+      render(); return;
+    }
+    if(act==='savenote'){
+      const area = $('#note');
+      if(area && state.sel) state.notes[state.sel] = area.value;
+      toast('Note saved to the search record.');
+      return;
+    }
+    if(act==='newinstrument'){ toast('New instrument starts from the adopted profile, so every question is tagged to a criterion before it can be sent.'); return; }
+    if(act==='surveyremind'){
+      const who = semiStats().out;
+      if(!who.length){ toast('Every questionnaire is in. No reminders to send.'); return; }
+      toast('Reminder sent to '+who.map(c=>c.name).join(', ')+'. The questionnaire is still due 12 Oct.');
+      return;
+    }
+    if(act==='addquestion'){ toast('New questions must name at least one adopted criterion. Untagged questions cannot be scored.'); return; }
+    if(act==='submit-score'){ state.scorecardIn = true; toast('Scorecard submitted. It cannot be edited.'); render(); return; }
+    if(act==='savedraft'){ toast('Draft saved on this device. Nothing is stored on a server in this prototype.'); return; }
+    if(act==='counsel'){ toast('Draft sent to the Town Attorney. Three terms remain open until counsel and Council both sign off.'); return; }
+    if(act==='icma'){ toast('Ridgeline draft follows the ICMA model on term, severance, and evaluation. Residency and automobile are the local additions.'); return; }
+    if(act==='submit-eval'){ toast('Your evaluation is in and sealed until the remaining Council members submit.'); return; }
+    if(act==='opencycle'){ toast('Year-one cycle is already open. Expectations were loaded from the adopted profile.'); return; }
+    if(act==='submit-survey'){
+      const empty = SURVEY_SEMI.qs.some(q=>q.req && !(state.survey[q.n]||'').trim());
+      if(empty){ toast('Please complete every required question before submitting.'); return; }
+      state.submitted = true;
+      const ilene = cand('C-05'); if(ilene) ilene.semi = 'in';
+      toast('Questionnaire submitted. The search team can see it on your file.');
+      render(); return;
+    }
+  }
+});
+
+document.addEventListener('input', e=>{
+  const t = e.target;
+  if(t.dataset.ans){ state.survey[t.dataset.ans] = t.value; }
+  if(t.dataset.note && state.sel){ state.notes[state.sel] = t.value; }
+});
+
+render();
+</script>

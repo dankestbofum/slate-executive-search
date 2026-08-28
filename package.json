@@ -1,0 +1,21 @@
+{
+  "name": "slate-executive-search",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Guided executive-search workspace for local-government consulting.",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "test": "node tests/bughunt.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.78.0",
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^17.2.1",
+    "express": "^5.1.0",
+    "undici": "^7.29.0"
+  }
+}

@@ -1,0 +1,13 @@
+node_modules/
+data/
+.env
+*.tmp
+.DS_Store
+.claude/
+.cursor/
+
+# Reference/client documents, not app code
+*.pdf
+*.docx
+SUPERSEDED*
+Slate - Partnership Proposal.md
