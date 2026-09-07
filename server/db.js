@@ -135,8 +135,26 @@ function blankSearch(input, user){
   };
 }
 
+// The container runs as an unprivileged user, so a volume mounted with root-only
+// ownership is a realistic deployment mistake. Prove the directory is writable at
+// startup and stop with an actionable message, rather than accepting sign-ins and
+// failing later on the first save that matters.
+function requireWritableDataDir(){
+  const probe = path.join(DATA_DIR, '.write-probe');
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(probe, String(process.pid));
+    fs.unlinkSync(probe);
+  } catch (error) {
+    console.error('Slate: DATA_DIR is not writable: ' + DATA_DIR);
+    console.error('Slate: running as uid ' + (process.getuid ? process.getuid() : 'n/a') + '. ' + error.message);
+    console.error('Slate: grant the runtime user write access to the mounted volume, then restart.');
+    process.exit(1);
+  }
+}
+
 function load(){
-  fs.mkdirSync(DATA_DIR, { recursive: true });
+  requireWritableDataDir();
   if (!fs.existsSync(DATA_FILE)) {
     const db = { users: seedUsers(), sessions: {}, searches: [], seq: 0 };
     // A fresh store goes through the same path as an existing one, so the

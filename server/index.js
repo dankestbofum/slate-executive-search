@@ -1,9 +1,14 @@
 'use strict';
 
-if (process.env.NODE_ENV !== 'test') require('dotenv').config({
-  path: require('path').join(__dirname, '..', '.env'),
-  override: true
-});
+// A local .env is a development convenience only. In production the platform's
+// environment is authoritative: a stray .env baked into an image must never
+// silently replace deployed configuration. Tests supply their own environment.
+if (process.env.NODE_ENV !== 'test' && process.env.NODE_ENV !== 'production') {
+  require('dotenv').config({
+    path: require('path').join(__dirname, '..', '.env'),
+    override: true
+  });
+}
 
 const fs = require('fs');
 const path = require('path');
@@ -26,6 +31,10 @@ const PORT = Number(process.env.PORT || 4173);
 const HOST = process.env.HOST || '0.0.0.0';
 const COOKIE = 'slate_sid';
 const isProd = process.env.NODE_ENV === 'production';
+// Stamped into the image by CI (--build-arg SLATE_RELEASE). Lets an operator
+// confirm which commit a running container was built from, which is what makes
+// a rollback decision checkable rather than assumed.
+const RELEASE = String(process.env.SLATE_RELEASE || '').trim() || 'dev';
 const showDemoLogins = !isProd && process.env.SHOW_DEMO_LOGINS !== 'false';
 const NON_ARTIFACT_STEPS = new Set(['profile', 'screen', 'send2', 'finalists', ...db.STAFF_STEPS]);
 const ARTIFACTS = new Set(db.STEPS.map(s => s.key).filter(k => !NON_ARTIFACT_STEPS.has(k)));
@@ -222,7 +231,7 @@ function requireManager(req, res, next){
 }
 
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true });
+  res.json({ ok: true, release: RELEASE, node: process.versions.node });
 });
 
 app.get('/api/config', (_req, res) => {
@@ -1280,6 +1289,7 @@ app.get('/apply/:token', (_req, res) => {
 
 const server = app.listen(PORT, HOST, () => {
   console.log('Slate listening on http://'+HOST+':'+PORT);
+  console.log('Release:', RELEASE, '| Node', process.versions.node, '| data', db.DATA_DIR);
   console.log('Default model:', process.env.CLAUDE_MODEL || 'claude-sonnet-5');
   console.log('API key:', String(process.env.ANTHROPIC_API_KEY || '').trim() ? 'present' : 'MISSING — set ANTHROPIC_API_KEY');
   if (process.send) process.send({ port:server.address().port });

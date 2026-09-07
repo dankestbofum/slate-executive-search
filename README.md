@@ -1,6 +1,6 @@
 # Slate
 
-Guided executive-search workspace. Node 20, Express, JSON file store.
+Guided executive-search workspace. Node 24 LTS, Express, JSON file store.
 
 ## How a search runs
 
@@ -134,12 +134,19 @@ anything written by hand, capped at five per category.
 
 ## Local
 
+Requires **Node 24 LTS** (24.20.0 or newer), matching the container and CI.
+Node 20 is end of life and no longer receives security patches.
+
 ```bash
 cp .env.example .env
 # add ANTHROPIC_API_KEY
-npm install
+npm ci        # lockfile install, same as CI and the image
 npm start
 ```
+
+`.env` is loaded only outside production. In production the platform's
+environment is authoritative, so a file that slipped into an image cannot
+quietly replace deployed configuration.
 
 Open http://127.0.0.1:4173 and sign in as `team@slate.local` / `1234`. The named
 accounts still work (`abe@slate.local` / `2468`, `mike@slate.local` / `1357`).
@@ -165,6 +172,52 @@ External website checks are opt-in with `SLATE_NETWORK_TESTS=true`.
 5. Keep a **single replica**. The store is one JSON file; two instances will overwrite each other.
 
 The app binds `0.0.0.0` and uses `PORT` from the platform. Session cookies are `Secure` in production.
+
+The image is built from `Dockerfile` (`railway.json` selects the `DOCKERFILE`
+builder). There is no second build path: the former `nixpacks.toml` was removed
+so the runtime cannot drift between build methods.
+
+### Container volume permissions
+
+The container runs as the unprivileged `node` user (uid 1000), not root. A
+mounted volume keeps whatever ownership the platform gives it, so if the volume
+is root-owned the app cannot write to it. Slate checks this at startup and exits
+with the offending path and uid rather than accepting sign-ins and failing on
+the first save:
+
+```
+Slate: DATA_DIR is not writable: /data
+Slate: running as uid 1000. EACCES: permission denied ...
+Slate: grant the runtime user write access to the mounted volume, then restart.
+```
+
+If you see this, `chown 1000:1000` the volume (or configure the platform to
+mount it for uid 1000) and redeploy.
+
+### Release identity
+
+CI builds with `--build-arg SLATE_RELEASE=$GITHUB_SHA`. The running app reports
+it at startup and on `/api/health`:
+
+```json
+{ "ok": true, "release": "76598b9…", "node": "24.20.0" }
+```
+
+Use it to confirm which commit is actually serving before and after a deploy or
+rollback. Building by hand without the build argument reports `dev`.
+
+## Continuous integration
+
+`.github/workflows/ci.yml` runs on pushes and pull requests to `main`:
+
+| Job | What it proves |
+|---|---|
+| `checks` | Every first-party file parses (`npm run check`), the isolated suite passes on Node 24, and production dependencies have no advisory at moderate or above |
+| `container` | The image builds, refuses to start without storage or first-boot credentials, boots on an empty volume, runs as non-root, answers `/api/health` with the built release, and survives a restart with its store intact |
+
+A failing run means the commit is not eligible to be marked ready for release.
+Browser, accessibility, and print coverage are not in CI yet, so a green run is
+not evidence of those.
 
 ## Revisions, questionnaires, and recovery
 

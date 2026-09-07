@@ -1,0 +1,152 @@
+name: CI
+
+# DEP-01. A failing run here means the commit is not eligible to be marked
+# ready for release. Browser and accessibility coverage (DEP-12) is not here
+# yet; a green run is not evidence of those.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Syntax and isolated suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Must match the Dockerfile's Node major version. If these drift, the
+      # suite is not testing the runtime that ships.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.20.0'
+          cache: npm
+
+      - name: Install from lockfile
+        run: npm ci
+
+      - name: Parse every first-party file
+        run: npm run check
+
+      # Uses isolated temp data directories and an empty ANTHROPIC_API_KEY,
+      # so no paid model calls are made and no repository data is touched.
+      - name: Isolated test suite
+        run: npm test
+        env:
+          ANTHROPIC_API_KEY: ''
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=moderate
+
+  container:
+    name: Container build and boot
+    runs-on: ubuntu-latest
+    needs: checks
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: |
+          docker build \
+            --build-arg SLATE_RELEASE="${GITHUB_SHA}" \
+            --tag slate:ci \
+            .
+
+      # This is the locally built image ID. A registry content digest only
+      # exists once an image has been pushed, so when a publish step is added
+      # it should record RepoDigests here instead.
+      - name: Record release identity
+        run: |
+          {
+            echo "### Release identity"
+            echo "- commit: \`${GITHUB_SHA}\`"
+            echo "- image id: \`$(docker image inspect slate:ci --format '{{.Id}}')\`"
+            echo "- base: \`$(grep -m1 '^FROM ' Dockerfile | cut -d' ' -f2)\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Refusing to start without a persistent volume is a data-loss guard:
+      # without it the app would write records into the container filesystem
+      # and lose them on the next deploy. Assert it still refuses.
+      - name: Fails clearly without storage
+        run: |
+          set +e
+          output=$(docker run --rm -e NODE_ENV=production slate:ci 2>&1)
+          status=$?
+          set -e
+          echo "$output"
+          [ "$status" -ne 0 ] || { echo "FAIL: started without DATA_DIR"; exit 1; }
+          echo "$output" | grep -q "persistent disk" || { echo "FAIL: unclear message"; exit 1; }
+
+      - name: Fails clearly without credentials
+        run: |
+          mkdir -p "${RUNNER_TEMP}/novolume" && chmod 777 "${RUNNER_TEMP}/novolume"
+          set +e
+          output=$(docker run --rm \
+            -e NODE_ENV=production -e DATA_DIR=/data \
+            -v "${RUNNER_TEMP}/novolume:/data" slate:ci 2>&1)
+          status=$?
+          set -e
+          echo "$output"
+          [ "$status" -ne 0 ] || { echo "FAIL: first boot seeded without PINs"; exit 1; }
+          echo "$output" | grep -q "first boot needs" || { echo "FAIL: unclear message"; exit 1; }
+
+      - name: Boots on an empty writable volume
+        run: |
+          mkdir -p "${RUNNER_TEMP}/data" && chmod 777 "${RUNNER_TEMP}/data"
+          docker run -d --name slate-ci -p 4173:4173 \
+            -e NODE_ENV=production \
+            -e DATA_DIR=/data \
+            -e SLATE_PIN_ABE=91735204 \
+            -e SLATE_PIN_MIKE=44820917 \
+            -e SLATE_PIN_TEAM=70513368 \
+            -v "${RUNNER_TEMP}/data:/data" \
+            slate:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:4173/api/health >/dev/null 2>&1; then break; fi
+            sleep 2
+          done
+          body=$(curl -fsS http://127.0.0.1:4173/api/health)
+          echo "$body"
+          echo "$body" | grep -q "\"release\":\"${GITHUB_SHA}\"" \
+            || { echo "FAIL: health did not report the built release"; docker logs slate-ci; exit 1; }
+
+      # The image drops to uid 1000. A root-owned volume against a non-root
+      # process is the failure this pairing is meant to make loud.
+      - name: Runs as a non-root user
+        run: |
+          uid=$(docker exec slate-ci id -u)
+          echo "container uid: $uid"
+          [ "$uid" != "0" ] || { echo "FAIL: container is running as root"; exit 1; }
+
+      - name: Persists across restart
+        run: |
+          test -f "${RUNNER_TEMP}/data/slate.json" || { echo "FAIL: no store written to the volume"; exit 1; }
+          before=$(sha256sum "${RUNNER_TEMP}/data/slate.json" | cut -d' ' -f1)
+          docker restart slate-ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:4173/api/health >/dev/null 2>&1; then break; fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:4173/api/health >/dev/null \
+            || { echo "FAIL: did not come back after restart"; docker logs slate-ci; exit 1; }
+          test -f "${RUNNER_TEMP}/data/slate.json" || { echo "FAIL: store lost on restart"; exit 1; }
+          echo "store sha256 before restart: $before"
+          echo "store sha256 after restart:  $(sha256sum "${RUNNER_TEMP}/data/slate.json" | cut -d' ' -f1)"
+
+      - name: Container logs
+        if: always()
+        run: docker logs slate-ci || true
+
+      - name: Tear down
+        if: always()
+        run: docker rm -f slate-ci || true

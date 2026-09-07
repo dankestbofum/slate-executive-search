@@ -1,8 +1,45 @@
+# The Dockerfile copies only package files, server/, public/ and
+# scripts/backup.js, so most of this is already excluded by construction. It is
+# repeated here so the build context itself never carries secrets or client
+# material to the daemon, and so a future COPY cannot widen the image by
+# accident.
+
+# Dependencies and version control
 node_modules
 .git
+.gitignore
+
+# Secrets. Production configuration comes from the platform environment; a
+# .env inside an image is never correct.
 .env
+.env.*
+!.env.example
+
+# Live records, media, and backup snapshots
 data
+backups
+
+# Editor and tooling state
 .cursor
 .claude
+.vscode
+.idea
 *.tmp
 .DS_Store
+
+# Client and reference documents. These are working material, not app code,
+# and must not be distributed inside a container image.
+*.pdf
+*.docx
+SUPERSEDED*
+Slate - Partnership Proposal.md
+
+# Repository documentation and CI definitions; not needed at runtime
+*.md
+!README.md
+.github
+.dockerignore
+Dockerfile
+
+# Tests and their fixtures do not ship to production
+tests
