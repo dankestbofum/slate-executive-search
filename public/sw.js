@@ -4,7 +4,7 @@
 // offline). Everything dynamic or auth-sensitive (/api, /media, /apply) is
 // intentionally never touched here — it always goes straight to the network.
 
-const CACHE_NAME = 'slate-shell-v1';
+const CACHE_NAME = 'slate-shell-v2';
 const SHELL_ASSETS = [
   '/',
   '/app.js',

@@ -1,8 +1,19 @@
 'use strict';
 
 const Anthropic = require('@anthropic-ai/sdk');
-const { fetchCitySite } = require('./site');
+const { fetchCitySite, publicUrl } = require('./site');
 const { PLACE_KEYS, GOV_KEYS } = require('./brochure');
+const { STEPS } = require('./steps');
+const desk = require('./desk');
+const jurisdictions = require('./jurisdictions');
+
+// Prompts name their own step number so a draft can say which step it belongs
+// to. Reading it off the catalog means renumbering the process cannot leave a
+// prompt telling Claude it is writing Step 1 when it is writing Step 3.
+function stepNo(key){
+  const s = STEPS.find(x => x.key === key);
+  return s ? s.n : '?';
+}
 
 const MODEL = process.env.CLAUDE_MODEL || 'claude-sonnet-5';
 const PREMIUM = process.env.CLAUDE_MODEL_PREMIUM || 'claude-opus-5';
@@ -18,8 +29,12 @@ Write the way this firm writes:
 - ARE format means Approach, Results, Experience — three follow-ups under one stem.
 - Return ONLY valid JSON matching the schema described. No markdown fences.`;
 
+function apiKey(){
+  return String(process.env.ANTHROPIC_API_KEY || '').trim().replace(/^['"]|['"]+$/g, '');
+}
+
 function client(){
-  const key = process.env.ANTHROPIC_API_KEY;
+  const key = apiKey();
   if (!key) {
     const err = new Error('ANTHROPIC_API_KEY is not set. Add it locally in .env or as a platform variable.');
     err.code = 'NO_KEY';
@@ -43,7 +58,12 @@ function normalizeClaudeError(err){
 function packSearch(search){
   return {
     client: search.client,
+    jurisdictionType: jurisdictions.typeOf(search.jurisdictionType),
+    governingBody: jurisdictions.governingBody(search),
     position: search.position,
+    // Which service package this is. A Basic engagement is a posting and a
+    // screen, not a retained search; the copy should not promise more.
+    package: search.package || 'executive',
     state: search.state,
     website: search.website,
     fog: search.fog,
@@ -301,18 +321,18 @@ Fill a search file from public sources. Use tools. Do not guess.
 Checklist — every item gets a sourced value or "":
 1. Official jurisdiction name
 2. State
-3. Form of government (Council-Manager, Mayor-Council, or other)
+3. Form of government (use the official structure named by this jurisdiction)
 4. Population with year (Census or ACS)
 5. Operating or general-fund budget with fiscal year, if published
 6. Salary range for THIS position only if an official or recruiting page publishes it
-7. Form of government detail: number of elected officials, roles of mayor/council/board, role of the manager, employee count, major departments, elected-staff relationship
+7. Form of government detail: number of elected officials, roles of the governing body and separately elected officials, role of the executive, employee count, major departments, elected-staff relationship
 8. Community: history and identity, quality of life, housing/cost of living, schools, parks/arts, employers/economy, healthcare, transportation, climate/outdoors, growth and major projects — only from sources
 9. Why a strong manager would want this job — grounded in facts, not hype
 
 Rules:
 - Empty string is better than a guess. Never invent census, budget, or salary figures.
 - Do not use em dashes (—) or en dashes (–) in any written field. Use a comma, a colon, a period, or parentheses.
-- Prefer the official city site, Census/ACS, and adopted budget documents.
+- Prefer the official jurisdiction site, Census/ACS, and adopted budget documents.
 - When the checklist is done, call submit_research. Do not submit until you have searched for any still-empty figure.`;
 
 function toolUses(msg, name){
@@ -423,59 +443,151 @@ Each body must include position, organization, community, salary, highlights, ch
 8 questions. First two are administrative (crit []). Remaining questions test the heaviest-weighted criteria.`,
   survey2: `{"name":"Semifinalist Questionnaire","intro":"","dueHint":"","questions":[{"n":1,"prompt":"","type":"are","required":true,"crit":["S1"]}]}
 5 ARE questions. Each tests 1-3 criteria. One question should put the candidate inside this jurisdiction's hardest current challenge.`,
-  guide: `{"questions":[{"n":1,"stem":"","crit":["C1","S1"],"approach":"","results":"","experience":""}],"scenarios":[{"id":"SCN-1","name":"","mins":45,"who":"Council panel|Staff panel|Search consultant|Community panel","crit":["S1"],"brief":""}]}
+  guide: `{"questions":[{"n":1,"stem":"","crit":["C1","S1"],"approach":"","results":"","experience":""}],"scenarios":[{"id":"SCN-1","name":"","mins":45,"who":"Governing body panel|Staff panel|Search consultant|Community panel","crit":["S1"],"brief":""}]}
 6 ARE questions and 4 scenarios (presentation, problem-solving with staff, inbox, leaderless group).`,
-  schedule: `{"days":[{"date":"Day 1","title":"","blocks":[{"time":"","what":"","who":""}]}],"note":"Every finalist receives the same core experience.","guide":{"panel":"who sits on the interview panel","council":"council/board interview","staff":"staff meetings","community":"community meetings if used","tour":"facility and community tour","presentation":"presentation exercise","exercises":"other assessment scenarios","sameCore":"statement that each finalist receives the same core experience"}}`,
-  contract: `{"title":"Employment Agreement — draft for counsel","sections":[{"h":"heading","body":"prose"}]}
+  schedule: `{"days":[{"date":"Day 1","title":"","blocks":[{"time":"","what":"","who":""}]}],"note":"Every finalist receives the same core experience.","guide":{"panel":"who sits on the interview panel","council":"governing body interview","staff":"staff meetings","community":"community meetings if used","tour":"facility and community tour","presentation":"presentation exercise","exercises":"other assessment scenarios","sameCore":"statement that each finalist receives the same core experience"}}`,
+  contract: `{"title":"Employment Agreement: draft for counsel","sections":[{"h":"heading","body":"prose"}]}
 Follow the ICMA model employment agreement structure. Flag local policy choices in the body rather than inventing them as decided.`,
-  bar: `{"behavior":[{"id":"B1","t":"","d":"","from":"T2"}],"actions":[{"id":"A1","t":"","due":""}],"results":[{"id":"R1","t":"","target":"","from":"C1"}],"governance":["Council governance survey item"],"cadence":{"beginning":["Establish annual expectations","Establish 5-7 measurable goals","Establish professional development goals","Establish annual work plan","Confirm Council/Manager expectations"],"midyear":["Review progress","Discuss accomplishments","Identify barriers","Clarify expectations","Adjust goals when appropriate"],"annual":["Council completes evaluation","Manager completes self-evaluation","Results are compiled","Council and Manager discuss performance","Strengths and opportunities identified","New goals established"]}}`
+  bar: `{"behavior":[{"id":"B1","t":"","d":"","from":"T2"}],"actions":[{"id":"A1","t":"","due":""}],"results":[{"id":"R1","t":"","target":"","from":"C1"}],"governance":["Governing body governance survey item"],"cadence":{"beginning":["Establish annual expectations","Establish 5-7 measurable goals","Establish professional development goals","Establish annual work plan","Confirm governing body/executive expectations"],"midyear":["Review progress","Discuss accomplishments","Identify barriers","Clarify expectations","Adjust goals when appropriate"],"annual":["Governing body completes evaluation","Executive completes self-evaluation","Results are compiled","Governing body and executive discuss performance","Strengths and opportunities identified","New goals established"]}}`
 };
 
 const KIND_PROMPTS = {
-  profile: (s, extra) => `Draft the Step 1 candidate profile matrix from these notes and search facts. ${SCHEMAS.profile}\n\nSearch:\n${JSON.stringify(packSearch(s),null,2)}\n\nCouncil / staff notes:\n${extra.notes||s.notes||'(none)'}`,
-  community: s => `Write the community and form-of-government profile (Step 2). Use the researched facts. Do not invent census, budget, or salary figures. Fill every community and government field you can support; use "" if unpublished. ${SCHEMAS.community}\n\nSearch:\n${JSON.stringify(packSearch(s),null,2)}\n\nPrior research:\n${JSON.stringify(s.research||{},null,2)}`,
+  profile: (s, extra) => {
+    const room = extra.committee;
+    // When the committee has answered, their tally is the source and the notes
+    // are background. Consensus is what the governing body will recognize as
+    // its own priorities, so the draft has to reflect the counts and the
+    // disagreements rather than average them away.
+    const brief = room
+      ? `Draft the Step ${stepNo('profile')} candidate profile matrix from what the search committee actually said. ${SCHEMAS.profile}
+
+The committee input below is the primary source. Rules:
+- Rank by how many members named a quality, then by average weight. Keep their wording where it is already clear.
+- Set weight from avgWeight, rounded.
+- An item listed under "contested" is one the committee disagrees about. Keep it, and say so plainly in its note.
+- Do not invent a criterion nobody named unless a kind has fewer than three items; if you must add one, ground it in "inTheirWords" or the search facts and say in the note that it did not come from the committee.
+- In each note, state how many members named it.
+
+Committee input (${room.submissions} of ${room.seats} seated members responded):
+${JSON.stringify(room, null, 2)}`
+      : `Draft the Step ${stepNo('profile')} candidate profile matrix from these notes and search facts. ${SCHEMAS.profile}`;
+    return `${brief}\n\nSearch:\n${JSON.stringify(packSearch(s),null,2)}\n\nGoverning body / staff notes:\n${extra.notes||s.notes||'(none)'}`;
+  },
+  community: s => `Write the community and form-of-government profile (Step ${stepNo('community')}). Use the researched facts. Do not invent census, budget, or salary figures. Fill every community and government field you can support; use "" if unpublished. ${SCHEMAS.community}\n\nSearch:\n${JSON.stringify(packSearch(s),null,2)}\n\nPrior research:\n${JSON.stringify(s.research||{},null,2)}`,
   brochure: s => {
     const existing = { ...(s.artifacts.brochure || {}) };
     delete existing.photos;
     delete existing.theme;
     delete existing.scheme;
-    return `Tighten the recruitment brochure (Step 3) from the community profile and adopted candidate profile. Use only facts already on file. Do not invent census, budget, or salary figures. Do not include photos, a theme, or a color scheme field. Prefer the existing brochure wording when it already matches the research; shorten and arrange rather than rewriting from scratch. ${SCHEMAS.brochure}\n\nSearch:\n${JSON.stringify(packSearch(s),null,2)}\n\nCommunity profile:\n${JSON.stringify(s.artifacts.community||{},null,2)}\n\nExisting brochure copy:\n${JSON.stringify(existing,null,2)}`;
+    return `Tighten the recruitment brochure (Step ${stepNo('brochure')}) from the community profile and adopted candidate profile. Use only facts already on file. Do not invent census, budget, or salary figures. Do not include photos, a theme, or a color scheme field. Prefer the existing brochure wording when it already matches the research; shorten and arrange rather than rewriting from scratch. ${SCHEMAS.brochure}\n\nSearch:\n${JSON.stringify(packSearch(s),null,2)}\n\nCommunity profile:\n${JSON.stringify(s.artifacts.community||{},null,2)}\n\nExisting brochure copy:\n${JSON.stringify(existing,null,2)}`;
   },
-  ads: s => `Write four advertisement versions (Step 4): full, short, social, association. Include application opening date, first-review date, closing or until-filled statement, apply URL/email, and contact. ${SCHEMAS.ads}\n\nSearch:\n${JSON.stringify(packSearch(s),null,2)}`,
-  plan: s => `Write the recruitment and advertising plan (Step 6). Include ICMA, state municipal league, NFBPA/Local Government Hispanic Network if relevant, LinkedIn, the client's site, and one regional paper. ${SCHEMAS.plan}\n\nSearch:\n${JSON.stringify(packSearch(s),null,2)}`,
-  survey1: s => `Write the initial candidate survey (Step 5). ${SCHEMAS.survey1}\n\nSearch:\n${JSON.stringify(packSearch(s),null,2)}`,
-  survey2: s => `Write the semifinalist questionnaire (Step 8). ${SCHEMAS.survey2}\n\nSearch:\n${JSON.stringify(packSearch(s),null,2)}\n\nInterview guide if present:\n${JSON.stringify(s.artifacts.guide||{},null,2)}`,
-  guide: s => `Write the interview guide and assessment scenarios (Step 7). ${SCHEMAS.guide}\n\nSearch:\n${JSON.stringify(packSearch(s),null,2)}`,
-  schedule: s => `Draft the finalist interview week and assessment guide (Step 12). Same core experience for every finalist: interview panel, council/board interview, staff meetings, community meetings if used, facility/community tour, presentation, and assessment scenarios from the interview guide. ${SCHEMAS.schedule}\n\nSearch:\n${JSON.stringify(packSearch(s),null,2)}\n\nScenarios:\n${JSON.stringify((s.artifacts.guide||{}).scenarios||[],null,2)}`,
-  contract: s => `Draft a customized ICMA-model employment agreement for counsel review (Step 13). ${SCHEMAS.contract}\n\nSearch:\n${JSON.stringify(packSearch(s),null,2)}`,
-  bar: s => `Draft the BAR annual evaluation (Step 14) inheriting from the adopted profile. Include Behavior, Actions, Results, a Council governance survey, and the beginning-of-year / mid-year / annual cadence. ${SCHEMAS.bar}\n\nSearch:\n${JSON.stringify(packSearch(s),null,2)}`
+  ads: s => `Write four advertisement versions (Step ${stepNo('ads')}): full, short, social, association. Include application opening date, first-review date, closing or until-filled statement, apply URL/email, and contact. ${SCHEMAS.ads}\n\nSearch:\n${JSON.stringify(packSearch(s),null,2)}`,
+  plan: s => `Write the recruitment and advertising plan (Step ${stepNo('plan')}). Include ICMA, ${jurisdictions.typeOf(s.jurisdictionType)==='county' ? 'relevant county associations and county administrator networks' : 'the state municipal league'}, NFBPA/Local Government Hispanic Network if relevant, LinkedIn, the client's site, and one regional paper. ${SCHEMAS.plan}\n\nSearch:\n${JSON.stringify(packSearch(s),null,2)}`,
+  survey1: s => `Write the initial candidate survey (Step ${stepNo('survey1')}). ${SCHEMAS.survey1}\n\nSearch:\n${JSON.stringify(packSearch(s),null,2)}`,
+  survey2: s => `Write the semifinalist questionnaire (Step ${stepNo('survey2')}). ${SCHEMAS.survey2}\n\nSearch:\n${JSON.stringify(packSearch(s),null,2)}\n\nInterview guide if present:\n${JSON.stringify(s.artifacts.guide||{},null,2)}`,
+  guide: s => `Write the interview guide and assessment scenarios (Step ${stepNo('guide')}). ${SCHEMAS.guide}\n\nSearch:\n${JSON.stringify(packSearch(s),null,2)}`,
+  schedule: s => `Draft the finalist interview week and assessment guide (Step ${stepNo('schedule')}). Same core experience for every finalist: interview panel, governing body interview, staff meetings, community meetings if used, facility/community tour, presentation, and assessment scenarios from the interview guide. ${SCHEMAS.schedule}\n\nSearch:\n${JSON.stringify(packSearch(s),null,2)}\n\nScenarios:\n${JSON.stringify((s.artifacts.guide||{}).scenarios||[],null,2)}`,
+  contract: s => `Draft a customized ICMA-model employment agreement for counsel review (Step ${stepNo('contract')}). ${SCHEMAS.contract}\n\nSearch:\n${JSON.stringify(packSearch(s),null,2)}`,
+  bar: s => `Draft the BAR annual evaluation (Step ${stepNo('bar')}) inheriting from the adopted profile. Include Behavior, Actions, Results, a Governing body governance survey, and the beginning-of-year / mid-year / annual cadence. ${SCHEMAS.bar}\n\nSearch:\n${JSON.stringify(packSearch(s),null,2)}`
 };
 
-async function generate(kind, search, { premium=false, notes='' }={}){
+// How many times the desk may send a draft back. Each round resends the prompt
+// and the previous draft, so this is a cost ceiling as much as a loop guard.
+const REVIEW_ROUNDS = 2;
+
+// Material whose figures the desk treats as supported. The search facts and
+// research are the source of truth; copy already on file counts too, because
+// a consultant's hand-written number is theirs to keep and the brochure prompt
+// tells Claude to prefer existing wording.
+function deskSources(kind, search, { notes, committee }){
+  const arts = search.artifacts || {};
+  return [
+    packSearch(search),
+    search.research || null,
+    arts.community || null,
+    arts.brochure || null,
+    arts[kind] || null,
+    notes || '',
+    committee || null
+  ];
+}
+
+/**
+ * Draft one artifact. Claude writes, the desk editor (desk.js) reads it, and
+ * anything the desk flags goes back to Claude with the draft for a bounded
+ * number of rounds. The draft with the fewest open findings is what lands on
+ * the file; a later round that returns unparseable JSON or makes things worse
+ * does not overwrite a better earlier one.
+ *
+ * `call` is the model call. It defaults to the Anthropic client and is
+ * injectable so the loop can be tested without a key.
+ */
+async function generate(kind, search, { premium=false, notes='', committee=null, call=null }={}){
   const build = KIND_PROMPTS[kind];
   if (!build) {
     const err = new Error('Unknown generate kind: '+kind);
     err.code = 'BAD_KIND';
     throw err;
   }
-  const anthropic = client();
+  const anthropic = call ? null : client();
+  const ask = call || (req => anthropic.messages.create(req));
   const model = pickModel(premium);
-  const prompt = build(search, { notes });
-  let msg;
-  try {
-    msg = await anthropic.messages.create({
-      model,
-      max_tokens: 8000,
-      output_config: { effort: premium ? 'medium' : 'low' },
-      system: SYSTEM,
-      messages: [{ role:'user', content: prompt }]
-    });
-  } catch (err) {
-    throw normalizeClaudeError(err);
+  const prompt = jurisdictions.context(search) + '\n\n' + build(search, { notes, committee });
+  const sources = deskSources(kind, search, { notes, committee });
+  const messages = [{ role:'user', content: prompt }];
+
+  let usage = { input_tokens: 0, output_tokens: 0 };
+  let best = null;
+  let first = null;
+  let rounds = 0;
+
+  for (let round = 0; round <= REVIEW_ROUNDS; round++) {
+    let msg;
+    try {
+      msg = await ask({
+        model,
+        max_tokens: 8000,
+        output_config: { effort: premium ? 'medium' : 'low' },
+        system: SYSTEM,
+        messages
+      });
+    } catch (err) {
+      // The first draft failing is the caller's error. A fix round failing
+      // after a usable draft exists is not worth throwing the draft away for.
+      if (best) break;
+      throw normalizeClaudeError(err);
+    }
+    usage = addUsage(usage, msg.usage);
+    rounds += 1;
+
+    let json;
+    try {
+      json = parseJson(extractText(msg));
+    } catch (err) {
+      if (best) break;
+      throw err;
+    }
+
+    const findings = desk.review(kind, json, search, sources);
+    if (first === null) first = findings.length;
+    if (!best || findings.length < best.findings.length) best = { json, findings };
+    if (!findings.length || round === REVIEW_ROUNDS) break;
+
+    messages.push({ role:'assistant', content: msg.content });
+    messages.push({ role:'user', content: desk.describe(findings) });
   }
-  const text = extractText(msg);
-  const json = parseJson(text);
-  return { kind, model, json, usage: msg.usage };
+
+  return {
+    kind,
+    model,
+    json: best.json,
+    usage,
+    desk: {
+      rounds,
+      found: first,
+      open: best.findings.map(f => f.msg)
+    }
+  };
 }
 
 const RESEARCH_CHECKLIST = `Work the checklist, then call submit_research.`;
@@ -506,7 +618,8 @@ function collectSources(msg, extra=[]){
   return out.slice(0, 12);
 }
 
-async function researchCity({ city, website, position, state, premium=false }={}){
+async function researchCity({ city, website, position, state, jurisdictionType='municipality', premium=false }={}){
+  publicUrl(website);
   const anthropic = client();
   const model = pickModel(premium);
   let site = { canonical: website, pages: [] };
@@ -520,6 +633,8 @@ async function researchCity({ city, website, position, state, premium=false }={}
     : '(Could not read the website. Use web_search and web_fetch.)';
 
   const prompt = `Research this US local government for an executive search.
+
+${jurisdictions.context({ jurisdictionType, position, state })}
 
 Jurisdiction the consultant entered: ${city}
 State if known: ${state || 'unknown'}
@@ -570,14 +685,14 @@ ${RESEARCH_CHECKLIST}`;
   }
 
   if (!out.submitted) {
-    const err = new Error('City lookup finished without a usable file. Try again, or fill the facts by hand.');
+    const err = new Error('Jurisdiction lookup finished without a usable file. Try again, or fill the facts by hand.');
     err.code = 'BAD_JSON';
     throw err;
   }
 
   const sources = collectSources(out.transcripts, [
     { title: city + ' website', url: site.canonical || website },
-    ...(site.pages || []).map(p => ({ title: 'City site', url: p.url })),
+    ...(site.pages || []).map(p => ({ title: 'Official site', url: p.url })),
     ...(out.submitted.sources || [])
   ]);
   return {

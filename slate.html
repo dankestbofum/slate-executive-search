@@ -7,66 +7,70 @@
 <style>
 /* ============================================================
    SLATE — built on Docket 2.0.
-   Token layer lifted verbatim from the design system.
+   Colorway: navy accent and wordmark on the Docket token layer,
+   dark teal ink. Fonts are unchanged.
    Light is the source of truth; dark redefines tokens only.
    ============================================================ */
 :root{
   --paper:#FFFFFF;
-  --chrome:#F7F6F4;
-  --sunken:#F1EEEA;
-  --line:#E4E0DA;
-  --line-strong:#CDC7BF;
+  --chrome:#F6F4F2;
+  --sunken:#F0EBE7;
+  --line:#E4DDD7;
+  --line-strong:#CDC3BB;
 
-  --ink:#22201C;
-  --ink-2:#55504A;
-  --ink-3:#7E776F;
+  --ink:#163D50;
+  --ink-2:#3E5A68;
+  --ink-3:#6B838E;
 
   --accent:#1D4E89;
   --accent-deep:#163C6B;
   --accent-tint:#E9F0F8;
   --accent-on:#FFFFFF;
+  --brand:#1D4E89;
   --focus:#1D4E89;
   --focus-halo:#FFFFFF;
 
   --ok:#2C6A4D;   --ok-tint:#E7F1EB;
-  --wait:#7F5C15; --wait-tint:#F6EEDC;
-  --stop:#9E2F29; --stop-tint:#F8EAE8;
-  --idle:#5B5650; --idle-tint:#EEEBE7;
+  --wait:#9A5A12; --wait-tint:#F8EEDC;
+  --stop:#981D25; --stop-tint:#F8E8E9;
+  --idle:#5A6E76; --idle-tint:#E8EEF0;
 
   --r-1:3px; --r-2:6px; --r-3:10px;
 
   --s-1:4px; --s-2:8px; --s-3:12px; --s-4:16px; --s-5:24px;
   --s-6:32px; --s-7:48px; --s-8:72px; --s-9:112px;
 
-  --shadow:0 1px 2px rgba(34,32,28,.06), 0 4px 14px -8px rgba(34,32,28,.18);
+  --shadow:0 1px 2px rgba(22,61,80,.07), 0 4px 14px -8px rgba(22,61,80,.20);
   --measure:66ch;
   color-scheme:light;
 }
 @media (prefers-color-scheme:dark){
   :root:not([data-theme="light"]){
-    --paper:#17191C; --chrome:#121417; --sunken:#1E2126;
-    --line:#2C3137; --line-strong:#3F464E;
-    --ink:#E9E7E3; --ink-2:#B2ADA6; --ink-3:#877F77;
+    --paper:#15242C; --chrome:#101C22; --sunken:#1C3038;
+    --line:#2A414A; --line-strong:#3D5863;
+    --ink:#F0EBE6; --ink-2:#B7C6CD; --ink-3:#8498A1;
     --accent:#84B4EE; --accent-deep:#A9CCF6; --accent-tint:#15243A; --accent-on:#0D1420;
-    --focus:#9CC4F2; --focus-halo:#17191C;
+    --brand:#84B4EE;
+    --focus:#9CC4F2; --focus-halo:#15242C;
     --ok:#6FC195;   --ok-tint:#12251C;
-    --wait:#D5AC5C; --wait-tint:#282011;
-    --stop:#E8827B; --stop-tint:#2B1614;
-    --idle:#9A948C; --idle-tint:#22252A;
+    --wait:#E0B05C; --wait-tint:#2A1E0E;
+    --stop:#E88A90; --stop-tint:#2C1416;
+    --idle:#9AADB4; --idle-tint:#1A282E;
     --shadow:0 1px 2px rgba(0,0,0,.5), 0 6px 18px -10px rgba(0,0,0,.7);
     color-scheme:dark;
   }
 }
 :root[data-theme="dark"]{
-  --paper:#17191C; --chrome:#121417; --sunken:#1E2126;
-  --line:#2C3137; --line-strong:#3F464E;
-  --ink:#E9E7E3; --ink-2:#B2ADA6; --ink-3:#877F77;
+  --paper:#15242C; --chrome:#101C22; --sunken:#1C3038;
+  --line:#2A414A; --line-strong:#3D5863;
+  --ink:#F0EBE6; --ink-2:#B7C6CD; --ink-3:#8498A1;
   --accent:#84B4EE; --accent-deep:#A9CCF6; --accent-tint:#15243A; --accent-on:#0D1420;
-  --focus:#9CC4F2; --focus-halo:#17191C;
+  --brand:#84B4EE;
+  --focus:#9CC4F2; --focus-halo:#15242C;
   --ok:#6FC195;   --ok-tint:#12251C;
-  --wait:#D5AC5C; --wait-tint:#282011;
-  --stop:#E8827B; --stop-tint:#2B1614;
-  --idle:#9A948C; --idle-tint:#22252A;
+  --wait:#E0B05C; --wait-tint:#2A1E0E;
+  --stop:#E88A90; --stop-tint:#2C1416;
+  --idle:#9AADB4; --idle-tint:#1A282E;
   --shadow:0 1px 2px rgba(0,0,0,.5), 0 6px 18px -10px rgba(0,0,0,.7);
   color-scheme:dark;
 }
@@ -84,7 +88,7 @@ body{
 }
 h1,h2,h3,h4{margin:0; text-wrap:balance; font-weight:500}
 p{margin:0}
-a{color:var(--accent); text-underline-offset:.18em; text-decoration-thickness:1px}
+a{color:var(--accent-deep); text-underline-offset:.18em; text-decoration-thickness:1px}
 :focus-visible{outline:2px solid var(--focus); outline-offset:2px; border-radius:var(--r-1); box-shadow:0 0 0 2px var(--focus-halo)}
 ::selection{background:var(--accent-tint); color:var(--ink)}
 .mono{font-family:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace}
@@ -102,7 +106,7 @@ a{color:var(--accent); text-underline-offset:.18em; text-decoration-thickness:1p
   padding:var(--s-5) var(--s-4); overflow-y:auto;
 }
 .rail__brand{display:flex; align-items:center; gap:10px}
-.rail__name{font-family:"Newsreader",Georgia,serif; font-size:20px; letter-spacing:-.01em; line-height:1}
+.rail__name{font-family:"Newsreader",Georgia,serif; font-size:20px; letter-spacing:-.01em; line-height:1; color:var(--brand)}
 .rail__ver{
   font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; font-weight:700;
   color:var(--accent); background:var(--accent-tint); padding:2px 6px; border-radius:var(--r-1);

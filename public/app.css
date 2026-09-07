@@ -53,6 +53,15 @@
   .lookup__spin{animation:none; border-top-color:var(--line-strong); background:conic-gradient(var(--accent) 0 35%, var(--line) 0)}
 }
 
+.gate{min-height:100vh; background:var(--paper)}
+.gate__bar{
+  display:flex; align-items:center; justify-content:space-between; gap:var(--s-4);
+  padding:var(--s-4) var(--s-5); border-bottom:1px solid var(--line); background:var(--chrome);
+}
+.gate__hero{padding:var(--s-7) 0 var(--s-5)}
+.gate__hero .t-title{max-width:16ch}
+.gate__hero .t-body{max-width:var(--measure); color:var(--ink-2)}
+.gate__table{padding-bottom:var(--s-8)}
 .login{min-height:100vh; display:grid; place-items:center; padding:var(--s-6); background:var(--chrome)}
 .login__card{
   width:min(460px,100%); background:var(--paper); border:1px solid var(--line);
@@ -75,11 +84,22 @@
   border-bottom:1px solid var(--line);
 }
 .home-row:last-child{border-bottom:0}
+.home-row--on{background:var(--accent-tint)}
+.home-row__pick{
+  flex:none; display:flex; align-items:center; align-self:stretch;
+  padding:0 0 0 var(--s-4); cursor:pointer;
+}
+.home-row__pick input{width:18px; height:18px; margin:0; accent-color:var(--accent); cursor:pointer}
+.spec__bar-act{margin-left:auto; display:flex; gap:var(--s-2); align-items:center; text-transform:none; letter-spacing:0; font-weight:600}
+/* Client, search number, who runs it, progress. The account-manager column is
+   why this is four wide; a stale count here wraps every row onto two lines. */
 .home-row__open{
-  display:grid; grid-template-columns:minmax(0,1fr) auto minmax(140px,auto);
+  display:grid; grid-template-columns:minmax(0,1fr) auto minmax(90px,auto) minmax(140px,auto);
   gap:var(--s-4); align-items:center; flex:1; min-width:0; text-align:left;
   padding:var(--s-4); border:0; background:none; font:inherit; color:inherit; cursor:pointer;
 }
+/* A committee member's row has no manager or progress column. */
+.home-row__open--plain{grid-template-columns:minmax(0,1fr) auto minmax(140px,auto)}
 .home-row:hover{background:var(--sunken)}
 .home-row .btn--danger{flex:none; margin:var(--s-3) var(--s-3) var(--s-3) 0}
 .home-steps{
@@ -88,6 +108,119 @@
 }
 .home-step{display:flex; gap:10px; align-items:baseline; font-size:14px}
 .home-step .mono{color:var(--ink-3); font-size:11.5px}
+/* Service packages: one card per tier, picked when the search is opened. */
+.pkgs{display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:var(--s-3)}
+.pkg{
+  position:relative; display:flex; flex-direction:column; gap:6px; padding:var(--s-4);
+  border:1px solid var(--line-strong); border-radius:var(--r-3); background:var(--paper); cursor:pointer;
+}
+.pkg:hover{background:var(--sunken)}
+.pkg input{position:absolute; inset:0; opacity:0; margin:0; cursor:pointer}
+.pkg:has(input:checked){border-color:var(--accent); background:var(--accent-tint); box-shadow:inset 0 0 0 1px var(--accent)}
+.pkg:has(input:focus-visible){outline:2px solid var(--accent); outline-offset:2px}
+.pkg__hd{display:flex; justify-content:space-between; align-items:baseline; gap:var(--s-3)}
+.pkg__nm{font-weight:700; color:var(--ink)}
+.pkg__fee{font-family:"IBM Plex Mono",monospace; font-size:11.5px; color:var(--ink-3); white-space:nowrap}
+.pkg__svc{margin:4px 0 0; padding:0; list-style:none; display:flex; flex-direction:column; gap:2px; font-size:13px; color:var(--ink-2)}
+.pkg__svc li::before{content:"\2713\00a0"; color:var(--ok)}
+.svcs{display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:6px var(--s-5); margin:0; padding:0; list-style:none; font-size:14px}
+.svcs li::before{content:"\2713\00a0"; color:var(--ok)}
+
+/* Pay-level breakdown: service rows, one column per fee. */
+.pkgmx{border-collapse:separate; border-spacing:0; width:100%; font-size:14px}
+.pkgmx th,.pkgmx td{border-bottom:1px solid var(--line); padding:10px var(--s-3); vertical-align:middle}
+.pkgmx thead th{
+  background:var(--chrome); font-size:12px; font-weight:700; letter-spacing:.04em;
+  text-transform:uppercase; color:var(--ink-3); text-align:center;
+}
+.pkgmx thead th:first-child,.pkgmx tbody th,.pkgmx tfoot th{
+  text-align:left; text-transform:none; letter-spacing:0; font-weight:600;
+  color:var(--ink); background:var(--paper); position:sticky; left:0; z-index:1;
+  border-right:1px solid var(--line); min-width:12em;
+}
+.pkgmx thead th:first-child{text-transform:uppercase; letter-spacing:.04em; font-size:12px; color:var(--ink-3); font-weight:700}
+.pkgmx tbody th{font-size:14px; font-weight:500}
+.pkgmx__col{min-width:8.5em}
+.pkgmx__pick{
+  display:flex; flex-direction:column; align-items:center; gap:4px;
+  cursor:pointer; padding:4px 2px; position:relative;
+  width:100%; border:0; background:none; font:inherit; color:inherit;
+}
+.pkgmx__pick input{position:absolute; opacity:0; inset:0; margin:0; cursor:pointer}
+.pkgmx__nm{font-size:15px; font-weight:700; letter-spacing:0; text-transform:none; color:var(--ink)}
+.pkgmx__fee{font-family:"IBM Plex Mono",monospace; font-size:11.5px; font-weight:500; letter-spacing:0; text-transform:none; color:var(--ink-3); white-space:nowrap}
+.pkgmx__cell{text-align:center}
+.pkgmx__yes{font-weight:700; color:var(--ok)}
+.pkgmx__no{color:var(--ink-3)}
+.pkgmx__band th{
+  background:var(--sunken); color:var(--ink-3); font-size:11px; font-weight:700;
+  letter-spacing:.13em; text-transform:uppercase; padding:8px var(--s-3);
+  position:static; border-right:0;
+}
+.pkgmx tfoot th,.pkgmx tfoot td{background:var(--chrome); border-bottom:0; font-weight:700}
+.pkgmx tfoot .pkgmx__fee{color:var(--ink); font-weight:700}
+.pkgmx col.pkgmx--on,.pkgmx th.pkgmx--on,.pkgmx td.pkgmx--on{background:var(--accent-tint)}
+.pkgmx--pick:has(input[value="basic"]:checked) .pkgmx__c-basic,
+.pkgmx--pick:has(input[value="enhanced"]:checked) .pkgmx__c-enhanced,
+.pkgmx--pick:has(input[value="executive"]:checked) .pkgmx__c-executive{
+  background:var(--accent-tint);
+}
+.pkgmx--pick:has(input[value="basic"]:checked) th.pkgmx__c-basic .pkgmx__nm,
+.pkgmx--pick:has(input[value="enhanced"]:checked) th.pkgmx__c-enhanced .pkgmx__nm,
+.pkgmx--pick:has(input[value="executive"]:checked) th.pkgmx__c-executive .pkgmx__nm{color:var(--accent)}
+.pkgmx--pick tbody td,.pkgmx--pick tfoot td{cursor:pointer}
+.pkgmx--pick .pkgmx__pick:has(input:focus-visible){outline:2px solid var(--accent); outline-offset:3px; border-radius:var(--r-1)}
+@media (max-width:720px){
+  .pkgmx thead th:first-child,.pkgmx tbody th,.pkgmx tfoot th{min-width:9em}
+  .pkgmx__col{min-width:7em}
+  .pkgmx__fee{white-space:normal}
+}
+
+.showtabs{
+  display:grid; grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:var(--s-2); padding:4px; background:var(--sunken); border-radius:var(--r-3);
+}
+.showtab{
+  display:flex; flex-direction:column; align-items:center; gap:2px;
+  padding:var(--s-3) var(--s-2); border:0; border-radius:var(--r-2);
+  background:transparent; color:var(--ink-2); font:inherit; cursor:pointer;
+}
+.showtab:hover{background:var(--paper); color:var(--ink)}
+.showtab[aria-selected="true"]{background:var(--paper); color:var(--accent); box-shadow:var(--shadow)}
+.showtab__nm{font-weight:700}
+.showtab__fee{font-family:"IBM Plex Mono",monospace; font-size:11.5px; color:var(--ink-3)}
+.showtab[aria-selected="true"] .showtab__fee{color:var(--accent)}
+.showcase{display:flex; flex-direction:column; gap:var(--s-4)}
+@media (max-width:720px){
+  .showtabs{grid-template-columns:1fr}
+}
+
+/* Overview dashboard (Basic and Enhanced packages). Panels in a two-up grid,
+   each a spec card with label/value rows. */
+.dash{display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:var(--s-4)}
+.dash .spec{margin:0}
+.dash__kv{display:flex; justify-content:space-between; align-items:center; gap:var(--s-3); padding:6px 0; border-bottom:1px solid var(--line); font-size:14px}
+.dash__kv:last-of-type{border-bottom:0}
+.dash__k{color:var(--ink-2)}
+.dash__v{display:flex; align-items:center; gap:8px; text-align:right}
+.tiles--tight{grid-template-columns:repeat(auto-fit,minmax(110px,1fr)); gap:var(--s-2)}
+.tiles--tight .tile{padding:var(--s-3)}
+.tiles--tight .tile__v{font-size:1.4rem}
+
+/* The process as one row of chips, for packages short enough to read at a glance. */
+.strip{display:flex; flex-wrap:wrap; gap:8px}
+.strip__s{
+  display:inline-flex; align-items:center; gap:8px; padding:6px 12px; border-radius:999px;
+  border:1px solid var(--line-strong); background:var(--paper); color:var(--ink-2); font:inherit; font-size:13.5px;
+}
+button.strip__s{cursor:pointer}
+button.strip__s:hover{background:var(--sunken)}
+.strip__s .mono{font-size:11px; color:var(--ink-3)}
+.strip__s--done{border-color:color-mix(in srgb,var(--ok) 40%,transparent); background:var(--ok-tint); color:var(--ink)}
+.strip__s--done .mono{color:var(--ok)}
+.strip__s--now{border-color:var(--accent); background:var(--accent-tint); color:var(--ink); font-weight:600}
+.strip__s--now .mono{color:var(--accent)}
+.strip__s--wait{opacity:.6}
 .empty{padding:var(--s-6); color:var(--ink-2)}
 .empty__t{font-weight:700; color:var(--ink); margin-bottom:4px}
 
@@ -187,6 +320,100 @@ textarea.input{min-height:42px}
 .sources ul{margin:0; padding-left:1.2em; display:flex; flex-direction:column; gap:6px}
 .sources a{color:var(--accent); word-break:break-all}
 .empty__t{font-weight:700; color:var(--ink); margin-bottom:4px}
+/* ============================================================ the committee
+   Step 1 seats people; Step 2 asks them what they want and rolls the answers
+   into one ranked read of the room. Both lean on the existing spec/pill/pick
+   patterns; only the roster row, the consensus meter, and the one-time PIN
+   card needed shapes of their own. */
+
+.seat{
+  display:grid; grid-template-columns:34px minmax(0,1fr) auto auto;
+  gap:var(--s-3); align-items:center;
+  padding:var(--s-3) 0; border-bottom:1px solid var(--line);
+}
+.seat:last-child{border-bottom:0}
+.seat--me{background:var(--accent-tint); margin:0 calc(var(--s-3) * -1); padding-left:var(--s-3); padding-right:var(--s-3); border-radius:var(--r-2)}
+.seat--mgr{border-bottom:0; padding-top:0}
+.seat__init{
+  display:flex; align-items:center; justify-content:center;
+  width:34px; height:34px; border-radius:999px;
+  background:var(--sunken); border:1px solid var(--line-strong);
+  font-size:12.5px; font-weight:700; color:var(--ink-2); letter-spacing:.02em;
+}
+.seat--mgr .seat__init{background:var(--accent); border-color:var(--accent); color:var(--accent-on)}
+.seat__who b{font-size:14.5px}
+.seat__tags{display:flex; flex-wrap:wrap; gap:6px; justify-content:flex-end}
+.seat__acts{display:flex; flex-wrap:wrap; gap:6px; justify-content:flex-end}
+
+.rosterline{display:flex; flex-wrap:wrap; gap:8px; margin-bottom:var(--s-3)}
+.rosterchip{
+  display:inline-flex; align-items:center; gap:7px;
+  border:1px solid var(--line-strong); border-radius:999px;
+  padding:3px 12px 3px 4px; font-size:13px; color:var(--ink-2); background:var(--paper);
+}
+.rosterchip--mgr{border-color:var(--accent); color:var(--ink)}
+.rosterchip svg{color:var(--ok)}
+.rosterchip__i{
+  display:flex; align-items:center; justify-content:center;
+  width:22px; height:22px; border-radius:999px; background:var(--sunken);
+  font-size:10.5px; font-weight:700; color:var(--ink-3);
+}
+.rosterchip--mgr .rosterchip__i{background:var(--accent); color:var(--accent-on)}
+
+/* The one moment a generated PIN is visible. Big enough to read aloud from
+   across a desk, and it disappears on the next render. */
+.pincard__creds{display:flex; flex-wrap:wrap; gap:var(--s-3); align-items:center; margin:var(--s-3) 0}
+.pincard__creds span{
+  border:1px solid var(--line-strong); border-radius:var(--r-2);
+  padding:6px 12px; background:var(--paper); font-size:14px;
+}
+.pincard__pin{font-size:1.35rem !important; font-weight:600; letter-spacing:.18em; color:var(--ink)}
+
+.intake-row{
+  display:grid; grid-template-columns:minmax(0,1fr) auto auto;
+  gap:var(--s-3); align-items:start;
+  padding:var(--s-3) 0; border-bottom:1px solid var(--line);
+}
+.intake-row:last-child{border-bottom:0}
+
+/* Suggestions lifted from the committee's own answers, marked so nobody
+   mistakes them for the stock list underneath. */
+.pick--room button{border-color:var(--accent); background:var(--accent-tint); color:var(--ink)}
+.pick--room button .mono{font-size:11px; color:var(--accent); margin-left:4px}
+
+.cons{padding:var(--s-3) 0; border-bottom:1px solid var(--line)}
+.cons:last-child{border-bottom:0}
+.cons__hd{display:flex; flex-wrap:wrap; gap:var(--s-3); align-items:center; justify-content:space-between}
+.cons__hd b{font-size:14.5px}
+.cons__tags{display:flex; flex-wrap:wrap; gap:6px; align-items:center}
+/* How much of the committee named this. The bar is the count, not the
+   weight, because agreement is the thing being read here. */
+.cons__bar{height:6px; border-radius:999px; background:var(--sunken); margin:8px 0 6px; overflow:hidden}
+.cons__bar span{display:block; height:100%; background:var(--accent); border-radius:999px}
+.cons__who{color:var(--ink-3)}
+.cons__flag{color:var(--stop); margin-top:4px}
+.cons__notes{margin-top:6px; padding-left:var(--s-3); border-left:2px solid var(--line)}
+.cons__notes .t-small{margin-bottom:2px}
+
+.voice{padding:var(--s-3) 0; border-bottom:1px solid var(--line)}
+.voice:last-child{border-bottom:0}
+.voice .t-small{margin-bottom:3px}
+
+.waiting{display:flex; flex-wrap:wrap; gap:8px; margin-bottom:var(--s-3)}
+.waiting .chip{font-family:inherit; font-size:13px; padding:4px 10px; color:var(--wait); background:var(--wait-tint)}
+
+.crit-src{display:inline-flex; flex-wrap:wrap; gap:4px; margin-top:6px}
+.crit-src .pill{font-size:10.5px; padding:1px 7px}
+.crit-read{
+  display:grid; grid-template-columns:3.2em minmax(0,1fr) auto;
+  gap:var(--s-3); align-items:baseline;
+  padding:var(--s-3) 0; border-bottom:1px solid var(--line);
+}
+.crit-read:last-child{border-bottom:0}
+
 @media (max-width:900px){
   .home-row,.home-row__open,.crit-row{grid-template-columns:1fr}
+  .seat{grid-template-columns:34px minmax(0,1fr)}
+  .seat__tags,.seat__acts{grid-column:2; justify-content:flex-start}
+  .intake-row,.crit-read{grid-template-columns:1fr}
 }

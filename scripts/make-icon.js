@@ -1,6 +1,6 @@
 'use strict';
 
-// Generates public/icons/icon-{192,512}.png: a flat accent-blue square with
+// Generates public/icons/icon-{192,512}.png: a flat navy-accent square with
 // a white "S" monogram, encoded by hand (PNG chunks + zlib deflate) so the
 // build has no image-library dependency. Re-run after changing the design;
 // output is committed as static assets, not regenerated on every build.

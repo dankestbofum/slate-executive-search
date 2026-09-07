@@ -1,6 +1,9 @@
 'use strict';
 
-require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
+if (process.env.NODE_ENV !== 'test') require('dotenv').config({
+  path: require('path').join(__dirname, '..', '.env'),
+  override: true
+});
 
 const fs = require('fs');
 const path = require('path');
@@ -9,6 +12,10 @@ const cookieParser = require('cookie-parser');
 const crypto = require('crypto');
 const db = require('./db');
 const ai = require('./ai');
+const committee = require('./committee');
+const integrity = require('./integrity');
+const credentials = require('./credentials');
+const jurisdictions = require('./jurisdictions');
 const {
   assembleBrochure, applyBrochureDefaults, packTheme, packScheme,
   PLACE_FIELDS, GOV_FIELDS, PACK_THEMES, PACK_SCHEMES
@@ -19,17 +26,46 @@ const PORT = Number(process.env.PORT || 4173);
 const HOST = process.env.HOST || '0.0.0.0';
 const COOKIE = 'slate_sid';
 const isProd = process.env.NODE_ENV === 'production';
-const showDemoLogins = process.env.SHOW_DEMO_LOGINS === 'true'
-  || (!isProd && process.env.SHOW_DEMO_LOGINS !== 'false');
-const NON_ARTIFACT_STEPS = new Set(['profile', 'screen', 'send2', 'finalists']);
+const showDemoLogins = !isProd && process.env.SHOW_DEMO_LOGINS !== 'false';
+const NON_ARTIFACT_STEPS = new Set(['profile', 'screen', 'send2', 'finalists', ...db.STAFF_STEPS]);
 const ARTIFACTS = new Set(db.STEPS.map(s => s.key).filter(k => !NON_ARTIFACT_STEPS.has(k)));
 
-app.set('trust proxy', 1);
+/**
+ * Whether a step is on this search's file at all. A Basic search has no
+ * brochure step, so drafting, saving, or reviewing one is refused rather than
+ * quietly stored where the UI will never show it.
+ */
+function inPackage(search, key){
+  return db.stepsOf(search).some(s => s.key === key);
+}
+
+function outsidePackage(search, key){
+  const step = db.STEPS.find(s => s.key === key);
+  const label = db.PACKAGES[db.packageOf(search.package)].label;
+  const needs = step ? db.PACKAGES[step.pkg || 'basic'].label : '';
+  return 'That step is not part of the ' + label + ' package.' + (needs ? ' It starts at ' + needs + '. Change the package on Search facts if the engagement changed.' : '');
+}
+
+function requireStepOnFile(pick){
+  return (req, res, next) => {
+    const key = pick(req);
+    if (!key || !db.STEPS.some(s => s.key === key)) return next();
+    if (!inPackage(req.search, key)) return res.status(400).json({ error: outsidePackage(req.search, key) });
+    next();
+  };
+}
+const artifactOnFile = requireStepOnFile(req => req.params.key);
+const kindOnFile = requireStepOnFile(req => req.body?.kind);
+
+// Trust only explicitly configured proxy addresses/subnets, never arbitrary client headers.
+app.set('trust proxy', process.env.TRUST_PROXY ? process.env.TRUST_PROXY.split(',').map(s => s.trim()) : false);
 app.use(express.json({ limit: '8mb' }));
 const PHOTO_SLOTS = new Set(['cover', 'place', 'org']);
 const PHOTO_FILE_RE = new RegExp('^(' + [...PHOTO_SLOTS].join('|') + ')\\.jpg$', 'i');
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, '..', 'public')));
+app.use('/api', (_req, _res, next) => { db.ensureBackup(); next(); });
+app.use('/api', (_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
 
 const SESSION_MS = db.SESSION_MS;
 const loginHits = new Map();
@@ -67,8 +103,26 @@ setInterval(() => {
   }
 }, 15 * 60 * 1000).unref();
 
+/**
+ * Consensus is only assembled for people entitled to read the room.
+ *
+ * A consultant facilitating the search sees it as answers come in. Everybody
+ * else sees it once the manager closes the window, so nobody can watch the
+ * tally move and time their own submission against it.
+ */
+function consensusFor(search, user){
+  const closed = (search.intake || {}).status === 'closed';
+  if (!db.isConsultant(user) && !(closed && db.memberOf(search, user.id))) return null;
+  return committee.aggregate(search, id => {
+    const u = db.findUserById(id);
+    return u ? u.name : 'Removed member';
+  });
+}
+
 function painted(req, search){
-  return db.decorate(search, req.user);
+  const out = db.decorate(search, req.user);
+  out.consensus = consensusFor(search, req.user);
+  return out;
 }
 
 function claudeFail(err){
@@ -77,6 +131,7 @@ function claudeFail(err){
     return { status: 400, error: err.message };
   }
   if (err.code === 'AUTH_ERROR') {
+    console.error('Claude auth failed:', err.message || 'authentication_error');
     return { status: 503, error: 'The Anthropic API key is invalid or expired. Update ANTHROPIC_API_KEY and try again.' };
   }
   if (err.code === 'RATE_LIMIT') {
@@ -106,7 +161,7 @@ function currentUser(req){
   const id = req.cookies[COOKIE];
   const sess = id && db.db.sessions[id];
   if (!sess) return null;
-  if (Number.isFinite(sess.exp) && Date.now() > sess.exp) {
+  if (!Number.isFinite(sess.exp) || Date.now() > sess.exp) {
     delete db.db.sessions[id];
     db.persist();
     return null;
@@ -126,10 +181,43 @@ function clampWeight(w){
   return Math.max(1, Math.min(5, Number.isFinite(n) ? n : 3));
 }
 
+// Where a profile line came from: the committee's own submissions, a Claude
+// draft, or the consultant typing it. Shown on the profile page so nobody has
+// to remember which lines carry the room behind them.
+const CRIT_SOURCES = new Set(['committee', 'draft', 'consultant']);
+
 function requireSearch(req, res, next){
   const s = db.findSearch(req.params.id);
   if (!s) return res.status(404).json({ error:'Search not found.' });
+  // A committee member seated on a different search must not learn this one
+  // exists, so an unauthorized read looks the same as a missing file.
+  if (!db.canView(s, req.user)) return res.status(404).json({ error:'Search not found.' });
   req.search = s;
+  if (!['GET', 'HEAD'].includes(req.method) && req.headers['if-match'] === undefined) {
+    return res.status(428).json({ error:'Reload this search before saving.', code:'REVISION_REQUIRED' });
+  }
+  if (!['GET', 'HEAD'].includes(req.method) && req.headers['if-match'] !== undefined
+      && req.headers['if-match'] !== String(s.revision)) {
+    return res.status(409).json({ error:'This search changed since you opened it. Your edits were not saved. Copy your edits, then reload the search and try again.', code:'STALE_SEARCH' });
+  }
+  next();
+}
+
+/** Writing to the search file is the firm's work, not the committee's. */
+function requireEditor(req, res, next){
+  if (!db.canEdit(req.search, req.user)) {
+    return res.status(403).json({ error:'Committee members read the search file. A consultant edits it.' });
+  }
+  next();
+}
+
+/** Rostering, the intake window, and adoption sit with the account manager. */
+function requireManager(req, res, next){
+  if (!db.canManage(req.search, req.user)) {
+    const mgr = db.accountManager(req.search);
+    const who = mgr ? (db.findUserById(mgr.userId)?.name || 'the account manager') : 'the account manager';
+    return res.status(403).json({ error: who + ' runs this search. Ask them, or reassign the account.' });
+  }
   next();
 }
 
@@ -140,30 +228,51 @@ app.get('/api/health', (_req, res) => {
 app.get('/api/config', (_req, res) => {
   const body = {
     demoLogins: showDemoLogins,
+    jurisdictionTypes: Object.values(jurisdictions.TYPES),
     communityFields: { place: PLACE_FIELDS, gov: GOV_FIELDS },
     packThemes: PACK_THEMES,
-    packSchemes: PACK_SCHEMES
+    packSchemes: PACK_SCHEMES,
+    reviewSteps: [...db.REVIEW_STEPS],
+    phases: db.PHASES,
+    steps: db.STEPS.map(s => ({ n:s.n, key:s.key, t:s.t, phase:s.phase, opt:Boolean(s.opt), pkg:s.pkg || 'basic', kind:s.kind || 'desk' })),
+    packages: db.PACKAGE_ORDER.map(k => db.PACKAGES[k]),
+    defaultPackage: db.DEFAULT_PACKAGE,
+    compare: db.COMPARE,
+    compareBands: db.COMPARE_BANDS
   };
   if (showDemoLogins) {
-    body.accounts = db.db.users.map(u => ({
-      email: u.email, pin: u.pin, name: u.name, title: u.title
+    // Only the firm's own seats. Committee accounts are created per search with
+    // a generated PIN, and listing those on the sign-in page would hand anyone
+    // who opens the app a way into a live client's search.
+    body.accounts = db.db.users.filter(u => u.role === 'consultant').map(u => ({
+      email: u.email, pin: demoPin(u), name: u.name, title: u.title
     }));
   }
   res.json(body);
 });
 
+function demoPin(user) {
+  const env = { u0: ['TEAM', '1234'], u1: ['ABE', '2468'], u2: ['MIKE', '1357'] }[user.id];
+  if (!env) return undefined;
+  const pin = process.env['SLATE_PIN_' + env[0]] || env[1];
+  return credentials.verify(user, pin) ? pin : undefined;
+}
+
 app.post('/api/login', (req, res) => {
   const ip = clientIp(req);
-  if (loginBlocked(ip)) {
+  const { email, pin } = req.body || {};
+  const account = 'account:' + String(email || '').trim().toLowerCase().slice(0, 254);
+  if (loginBlocked(ip) || loginBlocked(account)) {
     return res.status(429).json({ error:'Too many sign-in attempts. Wait a few minutes.' });
   }
-  const { email, pin } = req.body || {};
   const u = db.findUserByEmail(email);
-  if (!u || String(pin) !== u.pin) {
+  if (!credentials.verify(u, typeof pin === 'string' ? pin : '')) {
     loginFail(ip);
+    loginFail(account);
     return res.status(401).json({ error:'Email or PIN is not right.' });
   }
   loginOk(ip);
+  loginOk(account);
   const id = sid();
   db.db.sessions[id] = { userId: u.id, at: db.now(), exp: Date.now() + SESSION_MS };
   db.persist();
@@ -179,25 +288,48 @@ app.post('/api/logout', (req, res) => {
   res.json({ ok: true });
 });
 
+// The directory a viewer needs to put names to ids. Consultants work across the
+// whole book; a committee member only ever needs the people seated beside them.
+function visibleUsers(user){
+  if (db.isConsultant(user)) return db.db.users;
+  const ids = new Set([user.id]);
+  for (const s of db.db.searches) {
+    if (!db.memberOf(s, user.id)) continue;
+    for (const m of s.members || []) ids.add(m.userId);
+  }
+  return db.db.users.filter(u => ids.has(u.id));
+}
+
 app.get('/api/me', requireUser, (req, res) => {
   res.json({
     user: db.publicUser(req.user),
-    users: db.db.users.map(db.publicUser),
+    users: visibleUsers(req.user).map(db.publicUser),
     health: {
       model: process.env.CLAUDE_MODEL || 'claude-sonnet-5',
       premium: process.env.CLAUDE_MODEL_PREMIUM || 'claude-opus-5',
-      hasKey: Boolean(process.env.ANTHROPIC_API_KEY)
+      hasKey: Boolean(String(process.env.ANTHROPIC_API_KEY || '').trim())
     }
   });
 });
 
-app.get('/api/searches', requireUser, (_req, res) => {
-  res.json(db.db.searches.map(s => {
-    const d = db.decorate(s);
+app.get('/api/searches', requireUser, (req, res) => {
+  res.json(db.db.searches.filter(s => db.canView(s, req.user)).map(s => {
+    const d = db.decorate(s, req.user);
+    const seat = db.memberOf(s, req.user.id);
+    const intake = s.intake || {};
     return {
-      id:s.id, no:s.no, client:s.client, position:s.position, state:s.state,
+      id:s.id, no:s.no, client:s.client, position:s.position, state:s.state, jurisdictionType:s.jurisdictionType,
+      package: d.package, packageLabel: d.packageInfo.label,
       fog:s.fog, opened:s.opened, updatedAt:s.updatedAt,
-      progress: d.progress
+      progress: d.progress,
+      accountManager: d.accountManager ? { name: d.accountManager.name, init: d.accountManager.init } : null,
+      seats: (s.members || []).length,
+      seat: seat ? seat.seat : null,
+      // Drives the "you owe them an answer" prompt on Home. A member should not
+      // have to open every search to find the one waiting on them.
+      intakeOpen: intake.status === 'open',
+      intakeDue: intake.dueBy || '',
+      intakeMine: Boolean(((intake.submissions || {})[req.user.id] || {}).submitted)
     };
   }).sort((a,b)=> (b.updatedAt||'').localeCompare(a.updatedAt||'')));
 });
@@ -205,8 +337,12 @@ app.get('/api/searches', requireUser, (_req, res) => {
 app.post('/api/searches', requireUser, (req, res) => {
   if (req.user.role !== 'consultant') return res.status(403).json({ error:'The consultant opens a search.' });
   const body = req.body || {};
+  if (body.jurisdictionType !== undefined && (typeof body.jurisdictionType !== 'string' || !Object.hasOwn(jurisdictions.TYPES, body.jurisdictionType))) return res.status(400).json({ error:'Choose City or town, or County.' });
   if (!String(body.client || '').trim() || !String(body.position || '').trim()) {
     return res.status(400).json({ error:'Client and position are required.' });
+  }
+  if (body.package !== undefined && body.package !== '' && !Object.hasOwn(db.PACKAGES, body.package)) {
+    return res.status(400).json({ error:'Pick a package: Basic, Enhanced, or Executive.' });
   }
   const s = db.blankSearch(body, req.user);
   s.no = db.nextNo();
@@ -219,22 +355,322 @@ app.get('/api/searches/:id', requireUser, requireSearch, (req, res) => {
   res.json(painted(req, req.search));
 });
 
-app.delete('/api/searches/:id', requireUser, requireSearch, (req, res) => {
+/* ---------------------------------------------------------------------------
+ * Step 1 — the roster
+ *
+ * A search has one account manager and any number of consultants and committee
+ * members. Seating someone who has no account creates one and returns a PIN
+ * once; there is no mail server here, so the manager reads it to them.
+ * ------------------------------------------------------------------------- */
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function rosterOnly(search){
+  return { roster: db.roster(search), accountManager: db.accountManager(search) };
+}
+
+app.post('/api/searches/:id/members', requireUser, requireSearch, requireManager, (req, res) => {
+  const b = req.body || {};
+  const seat = committee.seatOf(b.seat);
+  const name = String(b.name || '').trim();
+  const email = String(b.email || '').trim().toLowerCase();
+  if (!name) return res.status(400).json({ error:'Name is required.' });
+  if (!EMAIL_RE.test(email)) return res.status(400).json({ error:'Enter a working email. It is their sign-in.' });
+
+  let user = db.findUserByEmail(email);
+  let pin = null;
+  if (user) {
+    if (String(user.name || '').trim() !== name) {
+      return res.status(409).json({
+        error: email + ' already signs in as ' + user.name + '. Seat them under that name, or use a different email.'
+      });
+    }
+  } else {
+    // Only the firm seats consultants. A manager rostering a client contact
+    // cannot mint a colleague with run-of-the-app powers.
+    const created = db.createUser({ name, email, title: b.title, role: 'committee' });
+    user = created.user;
+    pin = created.pin;
+  }
+  if (db.memberOf(req.search, user.id)) {
+    return res.status(409).json({ error: name + ' is already seated on this search.' });
+  }
+  if (seat === 'manager') {
+    return res.status(400).json({ error:'Seat them first, then hand over the account.' });
+  }
+  req.search.members.push({ userId: user.id, seat, addedAt: db.now(), addedBy: req.user.id });
+  // The roster changed, so a confirmation given before this person existed no
+  // longer describes the committee. Ask for it again.
+  req.search.team = { confirmedAt: null, confirmedBy: null };
+  db.touch(req.search, req.user, 'seated ' + name + ' as ' + committee.SEAT_LABEL[seat].toLowerCase());
+  db.persist();
+  res.json({ search: painted(req, req.search), ...rosterOnly(req.search), pin, email: user.email });
+});
+
+// Seat changes. Handing over or claiming the account is open to any consultant
+// on the file: who runs an account is a firm decision, not a wall between
+// colleagues, and gating it on the current manager leaves a search stranded
+// whenever that person is unavailable. Every other seat change stays with the
+// manager.
+// A consultant putting themselves on a search they can already see. Needed
+// because seating is otherwise the manager's job, which would leave a
+// colleague unable to join a file in order to pick it up.
+app.post('/api/searches/:id/members/self', requireUser, requireSearch, requireEditor, (req, res) => {
+  if (db.memberOf(req.search, req.user.id)) {
+    return res.status(409).json({ error:'You are already on this search.' });
+  }
+  req.search.members.push({ userId: req.user.id, seat: 'consultant', addedAt: db.now(), addedBy: req.user.id });
+  db.touch(req.search, req.user, 'joined the search');
+  db.persist();
+  res.json({ search: painted(req, req.search), ...rosterOnly(req.search) });
+});
+
+app.patch('/api/searches/:id/members/:uid', requireUser, requireSearch, requireEditor, (req, res) => {
+  const m = db.memberOf(req.search, req.params.uid);
+  if (!m) return res.status(404).json({ error:'That person is not on this search.' });
+  const seat = committee.seatOf(req.body?.seat);
+  const user = db.findUserById(m.userId);
+
+  if (seat === 'manager') {
+    if (!db.isConsultant(user)) {
+      return res.status(400).json({ error:'The account manager is a consultant at the firm.' });
+    }
+    // Exactly one manager. The outgoing one stays on the search as a
+    // consultant rather than losing their seat.
+    for (const other of req.search.members) {
+      if (other.seat === 'manager') other.seat = 'consultant';
+    }
+    m.seat = 'manager';
+    db.touch(req.search, req.user, 'handed the account to ' + user.name);
+  } else {
+    if (!db.canManage(req.search, req.user)) {
+      const mgr = db.accountManager(req.search);
+      const who = mgr ? (db.findUserById(mgr.userId)?.name || 'the account manager') : 'the account manager';
+      return res.status(403).json({ error: who + ' runs this search. Take the account first, or ask them.' });
+    }
+    if (m.seat === 'manager') {
+      return res.status(400).json({ error:'Hand the account to someone else first. A search always has a manager.' });
+    }
+    if (seat === 'consultant' && !db.isConsultant(user)) {
+      return res.status(400).json({ error:'Only firm accounts sit in a consultant seat.' });
+    }
+    m.seat = seat;
+    db.touch(req.search, req.user, 'moved ' + user.name + ' to ' + committee.SEAT_LABEL[seat].toLowerCase());
+  }
+  db.persist();
+  res.json({ search: painted(req, req.search), ...rosterOnly(req.search) });
+});
+
+app.delete('/api/searches/:id/members/:uid', requireUser, requireSearch, requireManager, (req, res) => {
+  const m = db.memberOf(req.search, req.params.uid);
+  if (!m) return res.status(404).json({ error:'That person is not on this search.' });
+  if (m.seat === 'manager') {
+    return res.status(400).json({ error:'Hand the account to someone else before leaving the search.' });
+  }
+  const user = db.findUserById(m.userId);
+  req.search.members = req.search.members.filter(x => x.userId !== m.userId);
+  // Their answers leave with them. Consensus counts people who are still on
+  // the committee, so a departed member cannot keep voting.
+  if (req.search.intake?.submissions) delete req.search.intake.submissions[m.userId];
+  db.touch(req.search, req.user, 'removed ' + (user ? user.name : 'a member') + ' from the search');
+  // If this was their only seat, their sign-in goes with it.
+  db.pruneOrphanCommittee();
+  db.persist();
+  res.json({ search: painted(req, req.search), ...rosterOnly(req.search) });
+});
+
+app.post('/api/searches/:id/members/:uid/pin', requireUser, requireSearch, requireManager, (req, res) => {
+  const m = db.memberOf(req.search, req.params.uid);
+  if (!m) return res.status(404).json({ error:'That person is not on this search.' });
+  const user = db.findUserById(m.userId);
+  if (!user) return res.status(404).json({ error:'That account no longer exists.' });
+  if (user.role === 'consultant') {
+    return res.status(403).json({ error:'Consultant PINs are set from the environment, not from a search.' });
+  }
+  const pin = db.makePin();
+  credentials.set(user, pin);
+  for (const [id, session] of Object.entries(db.db.sessions)) if (session.userId === user.id) delete db.db.sessions[id];
+  db.touch(req.search, req.user, 'reset the sign-in PIN for ' + user.name);
+  db.persist();
+  res.json({ pin, email: user.email, name: user.name, revision: req.search.revision });
+});
+
+app.post('/api/searches/:id/team/confirm', requireUser, requireSearch, requireManager, (req, res) => {
+  const confirm = req.body?.confirmed !== false;
+  req.search.team = confirm
+    ? { confirmedAt: db.now(), confirmedBy: req.user.id }
+    : { confirmedAt: null, confirmedBy: null };
+  db.touch(req.search, req.user, confirm ? 'confirmed the search committee roster' : 'reopened the roster');
+  db.persist();
+  res.json(painted(req, req.search));
+});
+
+/* ---------------------------------------------------------------------------
+ * Step 2 — intake
+ *
+ * Each seated member answers privately. The manager opens the window, watches
+ * who has answered (never what they said), and closes it when the committee
+ * has spoken. Closing is what publishes consensus to the room.
+ * ------------------------------------------------------------------------- */
+
+app.post('/api/searches/:id/intake/status', requireUser, requireSearch, requireManager, (req, res) => {
+  const want = String(req.body?.status || '');
+  if (!['draft', 'open', 'closed'].includes(want)) {
+    return res.status(400).json({ error:'Intake is draft, open, or closed.' });
+  }
+  if (want === 'open' && !req.search.team?.confirmedAt) {
+    return res.status(400).json({ error:'Confirm the roster first. People seated later would miss the window.' });
+  }
+  const intake = req.search.intake;
+  intake.status = want;
+  if ('dueBy' in (req.body || {})) intake.dueBy = String(req.body.dueBy || '').slice(0, 120);
+  if ('prompt' in (req.body || {})) intake.prompt = String(req.body.prompt || '').slice(0, 2000);
+  if (want === 'open') { intake.openedAt = db.now(); intake.closedAt = null; }
+  if (want === 'closed') intake.closedAt = db.now();
+  db.touch(req.search, req.user,
+    want === 'open' ? 'opened committee intake' :
+    want === 'closed' ? 'closed committee intake' : 'put committee intake back in draft');
+  db.persist();
+  res.json(painted(req, req.search));
+});
+
+app.put('/api/searches/:id/intake', requireUser, requireSearch, (req, res) => {
+  const seat = db.memberOf(req.search, req.user.id);
+  if (!seat) return res.status(403).json({ error:'You are not seated on this search.' });
+  if (!committee.INTAKE_SEATS.has(committee.seatOf(seat.seat))) {
+    return res.status(403).json({ error:'Your seat does not answer intake.' });
+  }
+  const intake = req.search.intake;
+  if (intake.status !== 'open') {
+    return res.status(400).json({
+      error: intake.status === 'closed'
+        ? 'Intake is closed. Ask the account manager to reopen it.'
+        : 'Intake has not opened yet.'
+    });
+  }
+  const prev = intake.submissions[req.user.id] || null;
+  const next = committee.normalizeSubmission(req.body, prev, db.now());
+  if (next.submitted && !next.items.length) {
+    return res.status(400).json({ error:'Name at least one quality before you submit.' });
+  }
+  intake.submissions[req.user.id] = next;
+  const first = !prev || !prev.submitted;
+  if (next.submitted) {
+    db.touch(req.search, req.user, first ? 'submitted committee input' : 'revised their committee input');
+  } else {
+    req.search.updatedAt = db.now();
+  }
+  db.persist();
+  res.json(painted(req, req.search));
+});
+
+app.post('/api/searches/:id/intake/adopt', requireUser, requireSearch, requireManager, (req, res) => {
+  const agg = committee.aggregate(req.search, id => db.findUserById(id)?.name || '');
+  if (!agg.submitted) {
+    return res.status(400).json({ error:'No committee input on file yet. Nothing to adopt.' });
+  }
+  req.search.criteria = committee.mergeIntoCriteria(req.search.criteria, agg);
+  db.touch(req.search, req.user, 'built the profile from ' + agg.submitted + ' committee submissions');
+  db.persist();
+  res.json({ search: painted(req, req.search), gaps: committee.adoptionGaps(agg) });
+});
+
+function removeSearch(search){
+  search.archivedAt = db.now();
+  search.archivedUsers = db.db.users.filter(u => (search.members || []).some(m => m.userId === u.id) && u.role === 'committee').map(integrity.clone);
+  db.db.archivedSearches.push(search);
+  db.db.searches = db.db.searches.filter(s => s.id !== search.id);
+}
+
+app.get('/api/archives', requireUser, (req, res) => {
+  if (!db.isConsultant(req.user)) return res.status(403).json({ error:'A consultant manages archived searches.' });
+  res.json(db.db.archivedSearches.map(s => ({ id:s.id, no:s.no, client:s.client, position:s.position, archivedAt:s.archivedAt })));
+});
+
+app.post('/api/archives/:id/restore', requireUser, (req, res) => {
+  if (!db.isConsultant(req.user)) return res.status(403).json({ error:'A consultant restores a search.' });
+  const s = db.db.archivedSearches.find(s => s.id === req.params.id);
+  if (!s) return res.status(404).json({ error:'Archived search not found.' });
+  for (const u of s.archivedUsers || []) {
+    const current = db.findUserByEmail(u.email);
+    if (current && current.id !== u.id) return res.status(409).json({ error:'A different account now uses ' + u.email + '. Resolve that account conflict before restoring this roster.' });
+  }
+  for (const u of s.archivedUsers || []) if (!db.findUserById(u.id)) db.db.users.push(u);
+  delete s.archivedUsers;
+  delete s.archivedAt;
+  for (const c of s.candidates || []) c.invite = crypto.randomBytes(24).toString('hex');
+  db.db.archivedSearches = db.db.archivedSearches.filter(x => x.id !== s.id);
+  db.db.searches.push(s);
+  db.touch(s, req.user, 'restored the search; candidate invitation links replaced');
+  db.persist();
+  res.json(painted(req, s));
+});
+
+app.get('/api/searches/:id/history', requireUser, requireSearch, requireEditor, (req, res) => {
+  const history = (req.search.history || []).map(entry => {
+    if (!entry.scores && !entry.notesBy) return entry;
+    const visible = entry.released || (entry.revision === req.search.profileRevision && req.search.released);
+    if (visible) return entry;
+    return { ...entry, scores:{ [req.user.id]:entry.scores?.[req.user.id] || {} }, notesBy:{ [req.user.id]:entry.notesBy?.[req.user.id] || {} } };
+  });
+  res.json({ history, activity: req.search.activity || [] });
+});
+
+app.post('/api/searches/:id/history/:entry/restore', requireUser, requireSearch, requireEditor, (req, res) => {
+  const entry = /^\d+$/.test(req.params.entry) && req.search.history[Number(req.params.entry)];
+  if (!entry || !['artifact', 'profile', 'facts'].includes(entry.kind)) return res.status(400).json({ error:'Choose a saved document, profile, or search facts.' });
+  if (entry.kind === 'artifact') {
+    if (!inPackage(req.search, entry.key)) return res.status(400).json({ error:outsidePackage(req.search, entry.key) });
+    req.search.artifacts[entry.key] = integrity.clone(entry.body);
+  } else if (entry.kind === 'profile') req.search.criteria = integrity.clone(entry.criteria);
+  else Object.assign(req.search, integrity.clone(entry.body));
+  db.touch(req.search, req.user, 'restored saved ' + (entry.key || entry.kind) + ' from ' + entry.at);
+  db.persist();
+  res.json(painted(req, req.search));
+});
+
+app.post('/api/searches/bulk-delete', requireUser, (req, res) => {
   if (req.user.role !== 'consultant') return res.status(403).json({ error:'The consultant deletes a search.' });
-  const media = path.join(db.DATA_DIR, 'media', req.search.id);
-  fs.rmSync(media, { recursive: true, force: true });
-  db.db.searches = db.db.searches.filter(s => s.id !== req.search.id);
+  const raw = Array.isArray(req.body?.ids) ? req.body.ids : [];
+  const ids = [...new Set(raw.map(id => String(id || '').trim()).filter(Boolean))];
+  if (!ids.length) return res.status(400).json({ error:'Pick at least one search.' });
+  const deleted = [];
+  for (const id of ids) {
+    const s = db.db.searches.find(x => x.id === id);
+    if (!s || !db.canEdit(s, req.user)) continue;
+    removeSearch(s);
+    deleted.push(id);
+  }
+  if (!deleted.length) return res.status(404).json({ error:'None of those searches are on the book.' });
+  db.pruneOrphanCommittee();
+  db.persist();
+  res.json({ ok:true, deleted: deleted.length, ids: deleted });
+});
+
+app.delete('/api/searches/:id', requireUser, requireSearch, requireEditor, (req, res) => {
+  if (req.user.role !== 'consultant') return res.status(403).json({ error:'The consultant deletes a search.' });
+  removeSearch(req.search);
+  // Committee accounts existed for this search. With it gone they are live
+  // sign-ins to nothing, so they go too.
+  db.pruneOrphanCommittee();
   db.persist();
   res.json({ ok:true, id: req.search.id });
 });
 
 const PATCH_FIELDS = [
+  'jurisdictionType',
   'client', 'position', 'state', 'website', 'fog', 'population', 'budget', 'salary', 'opened', 'firstReview', 'notes',
   { key: 'released', role: 'consultant', roleError: 'The consultant releases scores.' }
 ];
 
-app.patch('/api/searches/:id', requireUser, requireSearch, (req, res) => {
+app.patch('/api/searches/:id', requireUser, requireSearch, requireEditor, (req, res) => {
   const body = req.body || {};
+  if ('jurisdictionType' in body && (typeof body.jurisdictionType !== 'string' || !Object.hasOwn(jurisdictions.TYPES, body.jurisdictionType))) return res.status(400).json({ error:'Choose City or town, or County.' });
+  if ('package' in body && !Object.hasOwn(db.PACKAGES, body.package)) return res.status(400).json({ error:'Pick a package: Basic, Enhanced, or Executive.' });
+  for (const key of PATCH_FIELDS.filter(f => typeof f === 'string')) {
+    if (key in body && (typeof body[key] !== 'string' || body[key].length > 20000)) return res.status(400).json({ error:'Search facts must be text, no longer than 20,000 characters.' });
+  }
+  if ('released' in body && typeof body.released !== 'boolean') return res.status(400).json({ error:'Released must be true or false.' });
   for (const f of PATCH_FIELDS) {
     if (typeof f !== 'object' || !f.role) continue;
     if (f.key in body && req.user.role !== f.role) {
@@ -243,30 +679,61 @@ app.patch('/api/searches/:id', requireUser, requireSearch, (req, res) => {
   }
   for (const f of PATCH_FIELDS) {
     const key = typeof f === 'string' ? f : f.key;
+    if (key === 'jurisdictionType' && key in body && body[key] !== req.search[key]) {
+      const oldDefault = jurisdictions.TYPES[jurisdictions.typeOf(req.search[key])].governmentPlaceholder;
+      if ((body.fog ?? req.search.fog) === oldDefault) body.fog = jurisdictions.TYPES[body[key]].governmentPlaceholder;
+    }
     if (key in body) req.search[key] = body[key];
+  }
+  // The package is a commercial term, so it is changed deliberately and shows
+  // up in the activity feed by name rather than folded into "updated facts".
+  if ('package' in body) {
+    if (!db.PACKAGES[body.package]) {
+      return res.status(400).json({ error:'Pick a package: Basic, Enhanced, or Executive.' });
+    }
+    if (body.package !== req.search.package) {
+      req.search.package = body.package;
+      db.touch(req.search, req.user, 'moved the engagement to the ' + db.PACKAGES[body.package].label + ' package');
+    }
   }
   db.touch(req.search, req.user, 'updated search facts');
   db.persist();
   res.json(painted(req, req.search));
 });
 
-app.put('/api/searches/:id/profile', requireUser, requireSearch, (req, res) => {
+app.put('/api/searches/:id/profile', requireUser, requireSearch, requireEditor, (req, res) => {
   const criteria = Array.isArray(req.body?.criteria) ? req.body.criteria : [];
-  req.search.criteria = criteria.map((c,i) => ({
+  if (criteria.some(c => !c || typeof c !== 'object')) return res.status(400).json({ error:'Invalid profile criterion.' });
+  const next = criteria.map((c,i) => ({
     id: c.id || ('X'+(i+1)),
     kind: c.kind || 'skill',
     label: String(c.label||'').trim(),
     weight: clampWeight(c.weight),
-    note: String(c.note||'')
+    note: String(c.note||''),
+    // Kept so the profile page can still show which lines came out of the
+    // committee's own words after the consultant has edited around them.
+    from: CRIT_SOURCES.has(c.from) ? c.from : 'consultant'
   })).filter(c=>c.label);
+  const error = integrity.validateCriteria(next);
+  if (error) return res.status(400).json({ error });
+  req.search.criteria = next;
   db.touch(req.search, req.user, 'saved the candidate profile');
   db.persist();
   res.json(painted(req, req.search));
 });
 
-app.put('/api/searches/:id/artifact/:key', requireUser, requireSearch, (req, res) => {
+function clearReview(search, key){
+  if (search.reviews) delete search.reviews[key];
+}
+
+app.put('/api/searches/:id/artifact/:key', requireUser, requireSearch, requireEditor, artifactOnFile, (req, res) => {
   if (!ARTIFACTS.has(req.params.key)) return res.status(400).json({ error:'Unknown artifact.' });
   const incoming = req.body?.body ?? req.body;
+  if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) return res.status(400).json({ error:'Provide an artifact object.' });
+  if (['survey1', 'survey2'].includes(req.params.key)) {
+    const error = integrity.validateSurvey(incoming);
+    if (error) return res.status(400).json({ error });
+  }
   if (req.params.key === 'brochure') {
     const prev = req.search.artifacts.brochure || {};
     const next = incoming && typeof incoming === 'object' ? incoming : {};
@@ -274,12 +741,32 @@ app.put('/api/searches/:id/artifact/:key', requireUser, requireSearch, (req, res
   } else {
     req.search.artifacts[req.params.key] = incoming;
   }
+  clearReview(req.search, req.params.key);
   db.touch(req.search, req.user, 'saved '+req.params.key);
   db.persist();
   res.json(painted(req, req.search));
 });
 
-app.post('/api/searches/:id/assemble', requireUser, requireSearch, (req, res) => {
+app.post('/api/searches/:id/artifact/:key/review', requireUser, requireSearch, requireEditor, artifactOnFile, (req, res) => {
+  const key = req.params.key;
+  if (!db.REVIEW_STEPS.has(key)) return res.status(400).json({ error:'That step does not take a review.' });
+  if (req.user.role !== 'consultant') return res.status(403).json({ error:'A consultant signs off on recruiting copy.' });
+  if (!req.search.artifacts[key]) return res.status(400).json({ error:'Nothing on file yet to review.' });
+  req.search.reviews = req.search.reviews || {};
+  const approve = Boolean(req.body?.approve);
+  if (approve) {
+    delete (req.search.staleArtifacts || {})[key];
+    req.search.reviews[key] = { status:'approved', by: req.user.id, byName: req.user.name, at: db.now() };
+    db.touch(req.search, req.user, 'approved '+key);
+  } else {
+    delete req.search.reviews[key];
+    db.touch(req.search, req.user, 'marked '+key+' as needing another look');
+  }
+  db.persist();
+  res.json(painted(req, req.search));
+});
+
+app.post('/api/searches/:id/assemble', requireUser, requireSearch, requireEditor, kindOnFile, (req, res) => {
   const kind = req.body?.kind;
   if (kind !== 'brochure') return res.status(400).json({ error:'Unknown assemble kind.' });
   const community = req.search.artifacts.community;
@@ -287,6 +774,7 @@ app.post('/api/searches/:id/assemble', requireUser, requireSearch, (req, res) =>
     return res.status(400).json({ error:'Finish the community profile first.' });
   }
   req.search.artifacts.brochure = assembleBrochure(req.search);
+  clearReview(req.search, 'brochure');
   db.touch(req.search, req.user, 'filled the brochure from the community file');
   db.persist();
   res.json(painted(req, req.search));
@@ -303,7 +791,7 @@ function wipeSlotFiles(dir, slot){
   }
 }
 
-app.post('/api/searches/:id/media', requireUser, requireSearch, (req, res) => {
+app.post('/api/searches/:id/media', requireUser, requireSearch, requireEditor, requireStepOnFile(() => 'brochure'), (req, res) => {
   const slot = String(req.body?.slot || '');
   if (!PHOTO_SLOTS.has(slot)) return res.status(400).json({ error:'Unknown photo slot.' });
   const dataUrl = String(req.body?.data || '');
@@ -322,12 +810,13 @@ app.post('/api/searches/:id/media', requireUser, requireSearch, (req, res) => {
   brochure.theme = packTheme(brochure.theme);
   brochure.scheme = packScheme(brochure.scheme);
   req.search.artifacts.brochure = brochure;
+  clearReview(req.search, 'brochure');
   db.touch(req.search, req.user, 'added the ' + slot + ' photo');
   db.persist();
   res.json(painted(req, req.search));
 });
 
-app.delete('/api/searches/:id/media/:slot', requireUser, requireSearch, (req, res) => {
+app.delete('/api/searches/:id/media/:slot', requireUser, requireSearch, requireEditor, (req, res) => {
   const slot = String(req.params.slot || '');
   if (!PHOTO_SLOTS.has(slot)) return res.status(400).json({ error:'Unknown photo slot.' });
   wipeSlotFiles(photoDir(req.search.id), slot);
@@ -336,6 +825,7 @@ app.delete('/api/searches/:id/media/:slot', requireUser, requireSearch, (req, re
   delete photos[slot];
   brochure.photos = photos;
   req.search.artifacts.brochure = brochure;
+  clearReview(req.search, 'brochure');
   db.touch(req.search, req.user, 'removed the ' + slot + ' photo');
   db.persist();
   res.json(painted(req, req.search));
@@ -354,21 +844,34 @@ app.get('/media/:id/:file', requireUser, requireSearch, (req, res) => {
 });
 
 
-app.post('/api/searches/:id/generate', requireUser, requireSearch, async (req, res) => {
+app.post('/api/searches/:id/generate', requireUser, requireSearch, requireEditor, kindOnFile, async (req, res) => {
   const kind = req.body?.kind;
   const premium = Boolean(req.body?.premium);
+  const revision = req.search.revision;
+  const snapshot = integrity.clone(req.search);
   try {
-    const out = await ai.generate(kind, req.search, { premium, notes: req.body?.notes||'' });
+    // The profile draft writes from what the committee said, not from one
+    // person's recollection of the workshop. Everything else inherits the
+    // profile, so this is the only prompt that needs the room.
+    const room = kind === 'profile'
+      ? committee.packForPrompt(committee.aggregate(req.search, id => db.findUserById(id)?.name || ''))
+      : null;
+    const out = await ai.generate(kind, snapshot, { premium, notes: req.body?.notes||'', committee: room });
     if (!db.findSearch(req.search.id)) {
       return res.status(409).json({ error:'This search was deleted while the draft was generating.' });
     }
+    if (req.search.revision !== revision) return res.status(409).json({ error:'This search changed while the draft was generating. The newer work was kept. Reload the search before drafting again.', code:'STALE_SEARCH' });
+    const invalid = kind === 'profile' ? integrity.validateCriteria(out.json.criteria)
+      : ['survey1', 'survey2'].includes(kind) ? integrity.validateSurvey(out.json) : null;
+    if (invalid) return res.status(422).json({ error:'The generated draft was not saved: ' + invalid });
     if (kind === 'profile') {
       req.search.criteria = (out.json.criteria||[]).map((c,i)=>({
         id: c.id || ('X'+(i+1)),
         kind: c.kind,
         label: c.label,
         weight: clampWeight(c.weight),
-        note: c.note||''
+        note: c.note||'',
+        from: 'draft'
       }));
       db.touch(req.search, req.user, 'drafted the profile with '+out.model);
     } else {
@@ -378,33 +881,39 @@ app.post('/api/searches/:id/generate', requireUser, requireSearch, async (req, r
         const next = req.search.artifacts.brochure || {};
         req.search.artifacts.brochure = applyBrochureDefaults(next, prev, { preferPrev: true });
       }
+      clearReview(req.search, kind);
       db.touch(req.search, req.user, 'drafted '+kind+' with '+out.model);
     }
     req.search.aiUsage = ai.addUsage(req.search.aiUsage, out.usage);
     db.persist();
-    res.json({ search: painted(req, req.search), model: out.model, usage: out.usage });
+    // `desk` is the code-side review that ran before the draft landed: how
+    // many rounds it took and what, if anything, is still open for a human.
+    res.json({ search: painted(req, req.search), model: out.model, usage: out.usage, desk: out.desk });
   } catch (err) {
     const fail = claudeFail(err);
     res.status(fail.status).json({ error: fail.error });
   }
 });
 
-app.post('/api/searches/:id/research', requireUser, requireSearch, async (req, res) => {
+app.post('/api/searches/:id/research', requireUser, requireSearch, requireEditor, async (req, res) => {
   const body = req.body || {};
+  const revision = req.search.revision;
   const city = String(Object.prototype.hasOwnProperty.call(body, 'city') ? body.city : (req.search.client || '')).trim();
   const website = String(Object.prototype.hasOwnProperty.call(body, 'website') ? body.website : (req.search.website || '')).trim();
   const premium = Boolean(body.premium);
   if (!city) return res.status(400).json({ error:'Enter the city or jurisdiction name.' });
-  if (!website) return res.status(400).json({ error:'Enter the official city website.' });
+  if (!website) return res.status(400).json({ error:'Enter the official jurisdiction website.' });
   try {
     const out = await ai.researchCity({
       city, website, premium,
       position: req.search.position,
-      state: req.search.state
+      state: req.search.state,
+      jurisdictionType: req.search.jurisdictionType
     });
     if (!db.findSearch(req.search.id)) {
       return res.status(409).json({ error:'This search was deleted while research was running.' });
     }
+    if (req.search.revision !== revision) return res.status(409).json({ error:'This search changed during research. The newer work was kept. Reload before researching again.', code:'STALE_SEARCH' });
     const facts = (out.json && out.json.facts) || {};
     req.search.website = website;
     if (facts.client) req.search.client = facts.client;
@@ -429,7 +938,7 @@ app.post('/api/searches/:id/research', requireUser, requireSearch, async (req, r
       sources: out.sources || [],
       model: out.model
     };
-    db.touch(req.search, req.user, 'researched '+city+' from the city website');
+    db.touch(req.search, req.user, 'researched '+city+' from the official website');
     req.search.aiUsage = ai.addUsage(req.search.aiUsage, out.usage);
     db.persist();
     res.json({ search: painted(req, req.search), model: out.model, usage: out.usage });
@@ -439,7 +948,7 @@ app.post('/api/searches/:id/research', requireUser, requireSearch, async (req, r
   }
 });
 
-app.post('/api/searches/:id/candidates', requireUser, requireSearch, (req, res) => {
+app.post('/api/searches/:id/candidates', requireUser, requireSearch, requireEditor, (req, res) => {
   const b = req.body || {};
   const c = {
     id: db.nid('C'),
@@ -449,7 +958,8 @@ app.post('/api/searches/:id/candidates', requireUser, requireSearch, (req, res) 
     yrs: Number(b.yrs)||0,
     email: String(b.email||'').trim(),
     stage: 'applicant',
-    invite: crypto.randomBytes(9).toString('hex'),
+    invite: crypto.randomBytes(24).toString('hex'),
+    inviteVersion: 2,
     survey1: null,
     survey2: null,
     survey2SentAt: null,
@@ -463,7 +973,7 @@ app.post('/api/searches/:id/candidates', requireUser, requireSearch, (req, res) 
   res.json(painted(req, req.search));
 });
 
-app.patch('/api/searches/:id/candidates/:cid', requireUser, requireSearch, (req, res) => {
+app.patch('/api/searches/:id/candidates/:cid', requireUser, requireSearch, requireEditor, (req, res) => {
   const c = req.search.candidates.find(x=>x.id===req.params.cid);
   if (!c) return res.status(404).json({ error:'Candidate not found.' });
   const body = req.body || {};
@@ -495,11 +1005,141 @@ function sendSurvey2(search, candidate, deadline, user){
     throw err;
   }
   candidate.survey2SentAt = db.now();
+  issueSurvey(search, candidate, 'survey2');
   if (deadline != null) candidate.survey2Deadline = String(deadline);
-  db.touch(search, user, 'sent the semifinalist survey to '+candidate.name);
+  db.touch(search, user, 'opened the semifinalist questionnaire for '+candidate.name+'; notification is manual');
 }
 
-app.post('/api/searches/:id/candidates/:cid/send2', requireUser, requireSearch, (req, res) => {
+/* ---------------------------------------------------------------------------
+ * Staff steps: sourcing, video interviews, reference checks.
+ *
+ * The firm does this work off the platform and records it here. Each step has
+ * a log (who did what, when, about whom), running notes, and a completion the
+ * consultant sets. There is nothing to generate; the record is the deliverable.
+ * ------------------------------------------------------------------------- */
+
+const LOG_MAX = 2000;
+const STAFF_LOG_CAP = 200;
+
+function requireStaffStep(req, res, next){
+  const key = req.params.key;
+  if (!db.STAFF_STEPS.has(key)) return res.status(400).json({ error:'That step is not staff work.' });
+  if (!inPackage(req.search, key)) return res.status(400).json({ error: outsidePackage(req.search, key) });
+  req.staffKey = key;
+  req.staff = db.staffRecord(req.search, key);
+  next();
+}
+
+// A log entry may name a candidate only where the step is about candidates
+// on the file, and only at the stage the step works with. Reference contact
+// additionally waits for the candidate's recorded consent: a sitting manager
+// whose references are called before they agreed has just been outed.
+function staffCandidateFor(req, res){
+  const cid = req.body?.candidateId;
+  if (!cid && db.STAFF_STAGES[req.staffKey]) return { ok: false, status: 400, error:'Choose a candidate for this contact. Use working notes for general administration.' };
+  if (!cid) return { ok: true, candidate: null };
+  const stages = db.STAFF_STAGES[req.staffKey];
+  if (!stages) return { ok: false, status: 400, error: 'This step is not tied to a candidate on the file.' };
+  const c = (req.search.candidates || []).find(x => x.id === cid);
+  if (!c) return { ok: false, status: 404, error: 'Candidate not found.' };
+  if (!stages.includes(c.stage)) {
+    return { ok: false, status: 400, error: c.name + ' is not a ' + stages.join(' or ') + ' yet.' };
+  }
+  if (req.staffKey === 'references' && !c.referenceConsentAt) {
+    return { ok: false, status: 400, error: 'Record ' + c.name + '\'s consent before logging a reference contact.' };
+  }
+  return { ok: true, candidate: c };
+}
+
+app.post('/api/searches/:id/staff/:key/log', requireUser, requireSearch, requireEditor, requireStaffStep, (req, res) => {
+  const text = String(req.body?.text || '').trim().slice(0, LOG_MAX);
+  if (!text) return res.status(400).json({ error:'Write down what was done.' });
+  const who = staffCandidateFor(req, res);
+  if (!who.ok) return res.status(who.status).json({ error: who.error });
+  const entry = {
+    id: db.nid('lg'),
+    at: db.now(),
+    by: req.user.id,
+    byName: req.user.name,
+    text,
+    candidateId: who.candidate ? who.candidate.id : null,
+    candidateName: who.candidate ? who.candidate.name : ''
+  };
+  req.staff.log.unshift(entry);
+  if (req.staff.log.length > STAFF_LOG_CAP) req.staff.log.length = STAFF_LOG_CAP;
+  // Fresh work on a step that was marked complete reopens it; the completion
+  // stamp described a record that has since changed.
+  if (req.staff.doneAt) { req.staff.doneAt = null; req.staff.doneBy = null; req.staff.doneByName = ''; }
+  const step = db.STEPS.find(s => s.key === req.staffKey);
+  db.touch(req.search, req.user, 'logged ' + (step ? step.t.toLowerCase() : req.staffKey) + (who.candidate ? ' for ' + who.candidate.name : ''));
+  db.persist();
+  res.json(painted(req, req.search));
+});
+
+app.delete('/api/searches/:id/staff/:key/log/:lid', requireUser, requireSearch, requireEditor, requireStaffStep, (req, res) => {
+  const before = req.staff.log.length;
+  req.staff.log = req.staff.log.filter(e => e.id !== req.params.lid);
+  if (req.staff.log.length === before) return res.status(404).json({ error:'That entry is not on the log.' });
+  db.touch(req.search, req.user, 'removed a ' + req.staffKey + ' log entry');
+  db.persist();
+  res.json(painted(req, req.search));
+});
+
+app.put('/api/searches/:id/staff/:key', requireUser, requireSearch, requireEditor, requireStaffStep, (req, res) => {
+  req.staff.notes = String(req.body?.notes || '').slice(0, 8000);
+  db.touch(req.search, req.user, 'updated ' + req.staffKey + ' notes');
+  db.persist();
+  res.json(painted(req, req.search));
+});
+
+app.post('/api/searches/:id/staff/:key/complete', requireUser, requireSearch, requireEditor, requireStaffStep, (req, res) => {
+  if (req.user.role !== 'consultant') return res.status(403).json({ error:'A consultant signs off on staff work.' });
+  const done = Boolean(req.body?.done);
+  const step = db.STEPS.find(s => s.key === req.staffKey);
+  if (done) {
+    if (!req.staff.log.length && !String(req.staff.notes || '').trim()) {
+      return res.status(400).json({ error:'Log what was done before marking this complete. An empty record is not a completed step.' });
+    }
+    if (req.staffKey === 'references') {
+      const finalists = req.search.candidates.filter(c => c.stage === 'finalist');
+      if (!finalists.length || finalists.some(c => !c.referenceConsentAt || !req.staff.log.some(e => e.candidateId === c.id))) {
+        return res.status(400).json({ error:'Record consent and a reference contact for every current finalist before completing reference checks.' });
+      }
+    }
+    req.staff.doneAt = db.now();
+    req.staff.doneBy = req.user.id;
+    req.staff.doneByName = req.user.name;
+    db.touch(req.search, req.user, 'completed ' + step.t.toLowerCase());
+  } else {
+    req.staff.doneAt = null; req.staff.doneBy = null; req.staff.doneByName = '';
+    db.touch(req.search, req.user, 'reopened ' + step.t.toLowerCase());
+  }
+  db.persist();
+  res.json(painted(req, req.search));
+});
+
+// Consent to contact references is recorded on the candidate, so it survives
+// the step being reopened and is visible wherever the person is shown.
+app.post('/api/searches/:id/candidates/:cid/consent', requireUser, requireSearch, requireEditor, (req, res) => {
+  const c = (req.search.candidates || []).find(x => x.id === req.params.cid);
+  if (!c) return res.status(404).json({ error:'Candidate not found.' });
+  const consent = Boolean(req.body?.consent);
+  if (consent) {
+    c.referenceConsentAt = db.now();
+    c.referenceConsentBy = req.user.name;
+    db.touch(req.search, req.user, 'recorded ' + c.name + '\'s consent to contact references');
+  } else {
+    delete c.referenceConsentAt;
+    delete c.referenceConsentBy;
+    db.touch(req.search, req.user, 'withdrew ' + c.name + '\'s reference consent');
+  }
+  db.persist();
+  res.json(painted(req, req.search));
+});
+
+const send2OnFile = requireStepOnFile(() => 'send2');
+
+app.post('/api/searches/:id/candidates/:cid/send2', requireUser, requireSearch, requireEditor, send2OnFile, (req, res) => {
   if (req.user.role !== 'consultant') return res.status(403).json({ error:'The consultant sends the semifinalist survey.' });
   const c = req.search.candidates.find(x=>x.id===req.params.cid);
   if (!c) return res.status(404).json({ error:'Candidate not found.' });
@@ -512,7 +1152,7 @@ app.post('/api/searches/:id/candidates/:cid/send2', requireUser, requireSearch, 
   res.json(painted(req, req.search));
 });
 
-app.post('/api/searches/:id/send2', requireUser, requireSearch, (req, res) => {
+app.post('/api/searches/:id/send2', requireUser, requireSearch, requireEditor, send2OnFile, (req, res) => {
   if (req.user.role !== 'consultant') return res.status(403).json({ error:'The consultant sends the semifinalist survey.' });
   const deadline = req.body?.deadline;
   const eligible = req.search.candidates.filter(isSemifinalistOrFinalist);
@@ -529,6 +1169,12 @@ app.post('/api/searches/:id/send2', requireUser, requireSearch, (req, res) => {
 app.put('/api/searches/:id/scores/:cid', requireUser, requireSearch, (req, res) => {
   const c = req.search.candidates.find(x=>x.id===req.params.cid);
   if (!c) return res.status(404).json({ error:'Candidate not found.' });
+  const scores = req.body?.scores;
+  const allowed = new Set(req.search.criteria.map(c => c.id));
+  if (!scores || typeof scores !== 'object' || Array.isArray(scores)
+      || Object.entries(scores).some(([id, n]) => !allowed.has(id) || !Number.isInteger(n) || n < 1 || n > 5)) {
+    return res.status(400).json({ error:'Scores must use current criterion IDs and whole numbers from 1 to 5.' });
+  }
   if (!req.search.scores[req.user.id]) req.search.scores[req.user.id] = {};
   req.search.scores[req.user.id][c.id] = req.body?.scores || {};
   if (req.body?.note != null) {
@@ -540,18 +1186,58 @@ app.put('/api/searches/:id/scores/:cid', requireUser, requireSearch, (req, res) 
   res.json(painted(req, req.search));
 });
 
+function issueSurvey(search, candidate, key) {
+  const source = search.artifacts[key];
+  if (!source || integrity.validateSurvey(source)) return null;
+  candidate.issuedSurveys ||= {};
+  if (!candidate.issuedSurveys[key]) {
+    const survey = integrity.clone(source);
+    candidate.issuedSurveys[key] = { survey, version:integrity.digest(survey), profileRevision:search.profileRevision, criteria:integrity.clone(search.criteria) };
+  }
+  return candidate.issuedSurveys[key];
+}
+
+app.post('/api/searches/:id/candidates/:cid/invite', requireUser, requireSearch, requireEditor, (req, res) => {
+  const c = req.search.candidates.find(c => c.id === req.params.cid);
+  if (!c) return res.status(404).json({ error:'Candidate not found.' });
+  c.invite = crypto.randomBytes(24).toString('hex');
+  db.touch(req.search, req.user, 'replaced the invitation link for ' + c.name);
+  db.persist();
+  res.json(painted(req, req.search));
+});
+
+app.post('/api/searches/:id/candidates/:cid/reopen', requireUser, requireSearch, requireEditor, (req, res) => {
+  const c = req.search.candidates.find(c => c.id === req.params.cid);
+  const which = req.body?.which;
+  const reason = String(req.body?.reason || '').trim().slice(0, 2000);
+  if (!c) return res.status(404).json({ error:'Candidate not found.' });
+  if (!['survey1', 'survey2'].includes(which) || !c[which] || !reason) return res.status(400).json({ error:'Choose a submitted questionnaire and record why it is being reopened.' });
+  req.search.history.push({ kind:'response', at:db.now(), who:req.user.name, candidateId:c.id, candidateName:c.name, key:which, reason, body:integrity.clone(c[which]) });
+  c.issuedSurveys ||= {};
+  c.issuedSurveys[which] = { survey:integrity.clone(c[which].survey), version:integrity.digest(c[which].survey), profileRevision:c[which].profileRevision, criteria:c[which].criteria || [] };
+  c[which] = null;
+  c.invite = crypto.randomBytes(24).toString('hex');
+  db.touch(req.search, req.user, 'reopened ' + which + ' for ' + c.name + ': ' + reason);
+  db.persist();
+  res.json(painted(req, req.search));
+});
+
 app.get('/api/apply/:token', (req, res) => {
   const found = db.findByInvite(req.params.token);
   if (found) {
     const { search: s, candidate: c } = found;
     const sent2 = Boolean(c.survey2SentAt);
+    const first = issueSurvey(s, c, 'survey1');
+    const second = sent2 ? issueSurvey(s, c, 'survey2') : null;
+    db.persist();
     return res.json({
       token: req.params.token,
       client: s.client,
       position: s.position,
       candidate: { name:c.name, id:c.id },
-      survey1: s.artifacts.survey1 || null,
-      survey2: sent2 ? (s.artifacts.survey2 || null) : null,
+      survey1: first?.survey || null,
+      survey2: second?.survey || null,
+      versions: { survey1:first?.version, survey2:second?.version },
       submitted1: Boolean(c.survey1),
       submitted2: Boolean(c.survey2),
       sent2,
@@ -565,8 +1251,10 @@ app.post('/api/apply/:token', (req, res) => {
   const found = db.findByInvite(req.params.token);
   if (found) {
     const { search: s, candidate: c } = found;
-    const which = req.body?.which === 'survey2' ? 'survey2' : 'survey1';
-    if (!s.artifacts[which]) {
+    const which = req.body?.which || 'survey1';
+    if (!['survey1', 'survey2'].includes(which)) return res.status(400).json({ error:'Unknown questionnaire.' });
+    const issued = c.issuedSurveys?.[which];
+    if (!s.artifacts[which] && !issued) {
       return res.status(400).json({ error:'This survey is not open yet.' });
     }
     if (which === 'survey2' && !c.survey2SentAt) {
@@ -575,8 +1263,11 @@ app.post('/api/apply/:token', (req, res) => {
     if (c[which]) {
       return res.status(409).json({ error:'This questionnaire was already submitted.' });
     }
-    c[which] = { at: db.now(), answers: req.body?.answers || {} };
-    s.activity.unshift({ at: db.now(), who: c.name, x: 'submitted the '+which+' questionnaire' });
+    if (!issued || req.body?.surveyVersion !== issued.version) return res.status(409).json({ error:'Reload this questionnaire before submitting. Your answers have not been saved.' });
+    const invalid = integrity.validateAnswers(issued.survey, req.body?.answers);
+    if (invalid) return res.status(400).json({ error:invalid });
+    c[which] = { at: db.now(), answers: req.body.answers, ...integrity.clone(issued) };
+    db.touch(s, { name:c.name }, 'submitted the '+which+' questionnaire');
     db.persist();
     return res.json({ ok:true });
   }
@@ -587,8 +1278,9 @@ app.get('/apply/:token', (_req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
 });
 
-app.listen(PORT, HOST, () => {
+const server = app.listen(PORT, HOST, () => {
   console.log('Slate listening on http://'+HOST+':'+PORT);
   console.log('Default model:', process.env.CLAUDE_MODEL || 'claude-sonnet-5');
-  console.log('API key:', process.env.ANTHROPIC_API_KEY ? 'present' : 'MISSING — set ANTHROPIC_API_KEY');
+  console.log('API key:', String(process.env.ANTHROPIC_API_KEY || '').trim() ? 'present' : 'MISSING — set ANTHROPIC_API_KEY');
+  if (process.send) process.send({ port:server.address().port });
 });
