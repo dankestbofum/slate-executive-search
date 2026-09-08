@@ -5,9 +5,17 @@ Response to `CLAUDE_DEPLOYMENT_HANDOFF.md` §10.
 **Release proposed for review:** `9db2042b79efd41cb298140841462f313e00ecd0` on `main`.
 
 **Gate reached: none of the three.** Not "ready for synthetic staging", not
-"ready for county review", not "ready for authorized pilot launch". The
-software is implemented; the evidence those gates require does not exist. §6
-below says exactly what is missing and why.
+"ready for county review", not "ready for authorized pilot launch".
+
+Gate 1 is close. CI has now been read (11 runs, all green), and the container
+job passes every step — the image builds, refuses to start without storage or
+credentials, boots on an empty volume, runs as non-root, survives a restart,
+**shuts down cleanly on SIGTERM**, and restarts with no stale lock. That was
+the blocker recorded in the first version of this document, and it is resolved.
+
+What still blocks Gate 1 is coverage breadth, not the container: no
+Safari/WebKit, no real device, no screen-reader pass, no print inspection, and
+no load test. §6 lists it.
 
 ---
 
@@ -20,10 +28,10 @@ person or real infrastructure can produce.
 
 | Ticket | Commit | Implemented | Acceptance met |
 |---|---|---|---|
-| DEP-01 Runtime and release pipeline | `5a57a6a` | yes | **partial** — container never built |
+| DEP-01 Runtime and release pipeline | `5a57a6a` | yes | **yes** — container verified in CI |
 | DEP-02 Accounts, sessions, permissions | `caae399` | yes | yes |
 | DEP-03 HTTP security and input bounds | `b0f1054` | yes | yes (CSP verified later, in DEP-12) |
-| DEP-04 Failure-safe storage | `c0a6ac2` | yes | **partial** — no load test; shutdown unverified locally |
+| DEP-04 Failure-safe storage | `c0a6ac2` | yes | **partial** — shutdown verified in CI; no load test |
 | DEP-05 Scheduled recovery off-volume | `b62d3c5` | yes | **no** — no manual restore drill |
 | DEP-06 Health and monitoring | `2596afe` | yes | **partial** — no named operator or alert recipient |
 | DEP-07 County setup and fact verification | `2ac3e4f` | yes | **partial** — drafts never generated or reviewed |
@@ -52,7 +60,8 @@ npm run preflight      # AI key and model entitlement (not run against a live ac
 | Runtime under test | Node **v22.18.0** (Windows) |
 | Runtime in CI and the image | Node **24.20.0** LTS, pinned by digest |
 | Browser | Chromium 153 (Playwright 1.63), desktop + Pixel 7 emulation |
-| Container | **never built** — Docker unavailable in the development environment |
+| Container | **builds and boots** — verified in CI; Docker unavailable locally |
+| CI | GitHub Actions, **11 runs, all green** (latest `cdb2ce8`, 127s) |
 
 Server suite composition: 243 baseline, 37 integrity regression, 30 county, 26
 security, 24 roles, 20 candidates, 19 disposition, 18 AI, 17 storage, 17
@@ -129,17 +138,20 @@ Gate 1, *technical staging ready*, requires: a supported container, all
 relevant automated checks passing, security and storage controls implemented,
 and synthetic browser and recovery evidence complete.
 
-Three of those four hold. The container does not: **no image has ever been
-built, on any machine.** Docker is unavailable in the development environment,
-CI has never been observed to run, and the `container` job — including the
-`docker stop` SIGTERM check — has not executed. Until a build is observed,
-"supported container" is an assumption.
+The first three hold, and are now evidenced rather than assumed: CI run
+`cdb2ce8` builds the image and exercises every boot, restart and shutdown
+assertion on Ubuntu with Node 24.20.0, and both suites pass there.
 
-Additional evidence gaps that block the later gates:
+The fourth is incomplete. Browser evidence covers Chromium only — no
+Safari/WebKit, no real device, no screen reader, and no print output has been
+looked at. DEP-12 is a P0 ticket and its acceptance criterion explicitly
+requires real-device evidence and visually inspected print examples. Recovery
+evidence is complete synthetically but the manual drill has not been run.
+
+Evidence gaps that block the gates:
 
 | Missing | Blocks |
 |---|---|
-| Any observed CI run | Gate 1 |
 | Manual restore drill on real infrastructure | Gate 3 (the plan: "no off-volume restore evidence means no live pilot") |
 | One authorised real draft and research run, with measured latency and cost | Gate 3 |
 | Safari/WebKit, a real phone, screen-reader testing, print output | Gate 1 |

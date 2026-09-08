@@ -3,7 +3,9 @@
 Worked through in order. Nothing is ticked here on the basis that the code
 exists — a box is ticked when someone has seen the evidence.
 
-Status as of `9db2042`: **no gate reached.** See `docs/handoff.md` §6.
+Status as of `cdb2ce8`: **no gate reached**, but Gate 1's container and CI
+requirements are now satisfied. What remains for Gate 1 is browser coverage
+breadth, print, and load testing. See `docs/handoff.md` §6.
 
 ---
 
@@ -15,19 +17,18 @@ Status as of `9db2042`: **no gate reached.** See `docs/handoff.md` §6.
 - [x] `npm test` — 476 checks, exit 0
 - [x] `npm run test:browser` — 39 checks, 0 failed
 - [x] `npm audit --omit=dev` — 0 vulnerabilities
-- [ ] **A CI run has been observed to pass.** All results above are local.
+- [x] **A CI run has been observed to pass** — 11 runs green; latest `cdb2ce8`, 127s, on Ubuntu with Node 24.20.0
 
-### Container
+### Container — all verified in CI run `cdb2ce8`
 
-- [ ] The image builds. *Never attempted — Docker unavailable in development.*
-- [ ] It refuses to start without `DATA_DIR` *(asserted in CI; CI unobserved)*
-- [ ] It refuses to start without first-boot credentials *(same)*
-- [ ] It boots on an empty writable volume *(same)*
-- [ ] It runs as a non-root user *(same)*
-- [ ] It survives a restart with records intact *(same)*
-- [ ] It shuts down cleanly on SIGTERM and releases the write lock
-      *(unverifiable on Windows; asserted in CI via `docker stop`)*
-- [ ] Release identity recorded: commit and image digest
+- [x] The image builds
+- [x] It refuses to start without `DATA_DIR`
+- [x] It refuses to start without first-boot credentials
+- [x] It boots on an empty writable volume
+- [x] It runs as a non-root user
+- [x] It survives a restart with records intact
+- [x] It shuts down cleanly on SIGTERM and releases the write lock
+- [x] Release identity recorded: commit and image id in the run summary
 
 ### Security and storage
 
