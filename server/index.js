@@ -28,6 +28,7 @@ const telemetry = require('./telemetry');
 const exporter = require('./export');
 const candidates = require('./candidates');
 const disposition = require('./disposition');
+const aibudget = require('./aibudget');
 const {
   assembleBrochure, applyBrochureDefaults, packTheme, packScheme,
   PLACE_FIELDS, GOV_FIELDS, PACK_THEMES, PACK_SCHEMES
@@ -367,7 +368,7 @@ app.get('/api/ready', (_req, res) => {
     // Drafting is unavailable without a key, but nothing else is. This is
     // reported separately so an Anthropic outage never reads as the
     // application being down.
-    ai: { configured: aiConfigured(), degraded: !aiConfigured() },
+    ai: { configured: aiConfigured(), degraded: !aiConfigured(), budget: aibudget.status() },
     recovery: recoveryStatus,
     alerts: telemetry.alerts(),
     metrics: telemetry.metrics({
@@ -923,6 +924,21 @@ app.get('/api/searches/:id/disposition', requireUser, requireSearch, requireEdit
   res.json(disposition.summary(req.search));
 });
 
+
+/**
+ * Stop an AI call before it is made if it would breach a limit.
+ *
+ * Checked ahead of the request because the point is to prevent the spend. A
+ * refusal here is not an application error: manual work is unaffected.
+ */
+function withinAiBudget(req, res, next){
+  const verdict = aibudget.check(req.search?.id);
+  if (verdict.ok) return next();
+  telemetry.log.warn('ai-budget-refused', { code: verdict.code, route: 'ai' });
+  res.set('Retry-After', '900');
+  return res.status(429).json({ error: verdict.error, code: verdict.code });
+}
+
 function candidateOr404(req, res){
   const candidate = (req.search.candidates || []).find(c => c.id === req.params.cid);
   if (!candidate) { res.status(404).json({ error: 'Candidate not found.' }); return null; }
@@ -1277,7 +1293,7 @@ app.get('/media/:id/:file', requireUser, requireSearch, (req, res) => {
 });
 
 
-app.post('/api/searches/:id/generate', requireUser, requireSearch, requireEditor, generateLimit, kindOnFile, async (req, res) => {
+app.post('/api/searches/:id/generate', requireUser, requireSearch, requireEditor, generateLimit, withinAiBudget, kindOnFile, async (req, res) => {
   const kind = req.body?.kind;
   const premium = Boolean(req.body?.premium);
   const revision = req.search.revision;
@@ -1290,14 +1306,18 @@ app.post('/api/searches/:id/generate', requireUser, requireSearch, requireEditor
       ? committee.packForPrompt(committee.aggregate(req.search, id => db.findUserById(id)?.name || ''))
       : null;
     const aiStartedAt = Date.now();
+    aibudget.begin();
     let out;
     try {
       out = await ai.generate(kind, snapshot, { premium, notes: req.body?.notes||'', committee: room });
       telemetry.recordAi({ ok: true, ms: Date.now() - aiStartedAt, usage: out.usage, kind });
+      aibudget.record({ searchId: req.search.id, model: out.model, usage: out.usage, ok: true });
     } catch (error) {
       // Counted even though the work is lost: a failed call can still have
       // been billed, and an outage has to be visible in the numbers.
       telemetry.recordAi({ ok: false, ms: Date.now() - aiStartedAt, kind, code: error.code });
+      // Counted with unknown usage: a failed call may still have been billed.
+      aibudget.record({ searchId: req.search.id, model: null, usage: null, ok: false });
       throw error;
     }
     if (!db.findSearch(req.search.id)) {
@@ -1338,7 +1358,7 @@ app.post('/api/searches/:id/generate', requireUser, requireSearch, requireEditor
   }
 });
 
-app.post('/api/searches/:id/research', requireUser, requireSearch, requireEditor, researchLimit, async (req, res) => {
+app.post('/api/searches/:id/research', requireUser, requireSearch, requireEditor, researchLimit, withinAiBudget, async (req, res) => {
   const body = req.body || {};
   const revision = req.search.revision;
   const city = String(Object.prototype.hasOwnProperty.call(body, 'city') ? body.city : (req.search.client || '')).trim();
@@ -1348,6 +1368,7 @@ app.post('/api/searches/:id/research', requireUser, requireSearch, requireEditor
   if (!website) return res.status(400).json({ error:'Enter the official jurisdiction website.' });
   try {
     const researchStartedAt = Date.now();
+    aibudget.begin();
     let out;
     try {
       out = await ai.researchCity({
@@ -1357,8 +1378,10 @@ app.post('/api/searches/:id/research', requireUser, requireSearch, requireEditor
         jurisdictionType: req.search.jurisdictionType
       });
       telemetry.recordAi({ ok: true, ms: Date.now() - researchStartedAt, usage: out.usage, kind: 'research' });
+      aibudget.record({ searchId: req.search.id, model: out.model, usage: out.usage, ok: true });
     } catch (error) {
       telemetry.recordAi({ ok: false, ms: Date.now() - researchStartedAt, kind: 'research', code: error.code });
+      aibudget.record({ searchId: req.search.id, model: null, usage: null, ok: false });
       throw error;
     }
     if (!db.findSearch(req.search.id)) {

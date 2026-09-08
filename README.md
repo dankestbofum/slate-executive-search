@@ -206,6 +206,33 @@ it at startup and on `/api/health`:
 Use it to confirm which commit is actually serving before and after a deploy or
 rollback. Building by hand without the build argument reports `dev`.
 
+## AI drafting: limits and human review
+
+Drafting and research are **advisory**. A consultant reviews sources, corrects
+output, and approves the exact revision; nothing is published because a model
+produced it, and no hiring decision is automated.
+
+**Fetched pages are data, not instruction.** Web pages and pasted notes are
+wrapped in an `<untrusted>` block, with any delimiter in the source stripped so
+a page cannot close the block and have the rest read as prompt. The research
+system prompt says to quote from that content and obey nothing in it.
+
+**Spending is bounded before the call, not noticed after it** — per search, per
+day, per day in estimated dollars, and concurrently
+(`SLATE_AI_MAX_*`). Over a limit the route returns 429 and manual work is
+unaffected.
+
+**A failed call may still have been billed.** Usage is recorded on the attempt,
+including timeouts and drafts rejected as stale, and failures whose usage the
+provider did not report are counted as *unknown* rather than as zero.
+`/api/ready` reports spend, limits, and unknown-usage attempts, and labels the
+dollar figure an estimate rather than a bill.
+
+**Preflight:** `npm run preflight` checks the key and asks the account whether
+the configured models are actually available, via the Models API — metadata
+only, no tokens consumed. It deliberately does not generate anything: a real
+draft is a billed call and belongs in an authorised staging run.
+
 ## Browser and accessibility testing
 
 `npm run test:browser` (Playwright, Chromium) starts its own server against a

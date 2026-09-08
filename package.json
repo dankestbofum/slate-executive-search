@@ -10,7 +10,8 @@
     "test": "node tests/run.js",
     "test:live": "node tests/bughunt.js",
     "backup": "node scripts/backup.js",
-    "test:browser": "playwright test"
+    "test:browser": "playwright test",
+    "preflight": "node scripts/preflight.js"
   },
   "engines": {
     "node": ">=24"

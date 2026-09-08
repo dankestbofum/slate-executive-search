@@ -34,8 +34,9 @@ async function suite(file, suiteEnv) {
     const exports_ = await suite('export.js', suiteEnv);
     const cands = await suite('candidates.js', suiteEnv);
     const dispo = await suite('disposition.js', suiteEnv);
+    const aichecks = await suite('aireliability.js', suiteEnv);
     const regression = await suite('integrity.js', suiteEnv);
-    process.exitCode = baseline || counties || regression || security || roles || storage || recover || monitoring || exports_ || cands || dispo;
+    process.exitCode = baseline || counties || regression || security || roles || storage || recover || monitoring || exports_ || cands || dispo || aichecks;
     console.log('Isolated test data: ' + directory);
   } catch (error) { console.error(error); process.exitCode = 1; }
   finally { server.kill(); }
