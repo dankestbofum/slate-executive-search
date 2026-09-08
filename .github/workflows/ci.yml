@@ -1,8 +1,12 @@
 name: CI
 
-# DEP-01. A failing run here means the commit is not eligible to be marked
-# ready for release. Browser and accessibility coverage (DEP-12) is not here
-# yet; a green run is not evidence of those.
+# A failing run here means the commit is not eligible to be marked ready for
+# release. Three jobs: the isolated server suite, browser and accessibility
+# coverage in Chromium, and the container's build and boot behaviour.
+#
+# Still outside CI, and so not evidenced by a green run: real Safari/WebKit,
+# a physical phone, screen-reader testing, and print output. See
+# docs/test-evidence.md.
 
 on:
   push:
@@ -47,6 +51,38 @@ jobs:
 
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=moderate
+
+  browser:
+    name: Browser, accessibility and policy
+    runs-on: ubuntu-latest
+    needs: checks
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.20.0'
+          cache: npm
+
+      - run: npm ci
+
+      # Chromium only. Real Safari/WebKit and a physical phone are still
+      # outstanding; see docs/test-evidence.md.
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      # Starts its own server against a throwaway data directory with no API
+      # key, so nothing here touches real records or makes a paid model call.
+      - name: Browser suite
+        run: npm run test:browser
+
+      - name: Upload report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
 
   container:
     name: Container build and boot

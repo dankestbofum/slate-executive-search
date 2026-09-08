@@ -9,7 +9,8 @@
     "check": "node scripts/check.js",
     "test": "node tests/run.js",
     "test:live": "node tests/bughunt.js",
-    "backup": "node scripts/backup.js"
+    "backup": "node scripts/backup.js",
+    "test:browser": "playwright test"
   },
   "engines": {
     "node": ">=24"
@@ -20,5 +21,10 @@
     "dotenv": "^17.2.1",
     "express": "^5.1.0",
     "undici": "^7.29.0"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
+    "@playwright/test": "^1.63.0",
+    "axe-core": "^4.13.0"
   }
 }

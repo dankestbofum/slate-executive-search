@@ -11,3 +11,9 @@ data/
 *.docx
 SUPERSEDED*
 Slate - Partnership Proposal.md
+
+# Playwright output
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/

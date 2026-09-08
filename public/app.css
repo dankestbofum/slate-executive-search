@@ -417,3 +417,32 @@ textarea.input{min-height:42px}
   .seat__tags,.seat__acts{grid-column:2; justify-content:flex-start}
   .intake-row,.crit-read{grid-template-columns:1fr}
 }
+
+/* ---------------------------------------------------------------------------
+   Utilities extracted from inline style attributes (DEP-12).
+
+   The Content-Security-Policy sets style-src 'self', which blocks inline
+   style attributes. These were silently not being applied under that policy.
+   Values that vary at runtime are set through the CSSOM in app.js instead,
+   which CSP does not intercept.
+   --------------------------------------------------------------------------- */
+.u-fs-115 { font-size: 1.15rem; }
+.u-fs-135 { font-size: 1.35rem; }
+.u-fs-145 { font-size: 1.45rem; }
+.u-mt-0   { margin-top: 0; }
+.u-mt-3   { margin-top: var(--s-3); }
+.u-mt-4   { margin-top: var(--s-4); }
+.u-mt-5   { margin-top: var(--s-5); }
+.u-mb-3   { margin-bottom: var(--s-3); }
+.u-mb-4   { margin-bottom: var(--s-4); }
+.u-m-0    { margin: 0; }
+.u-gap-6  { gap: 6px; }
+.u-accent { color: var(--accent); }
+.u-default-cursor { cursor: default; }
+.u-wrap-any { white-space: pre-wrap; overflow-wrap: anywhere; }
+.u-inline-check { display: flex; gap: 8px; align-items: center; }
+.u-cols-score { grid-template-columns: 3.2em minmax(0, 1fr) auto; }
+
+/* Candidate help block: support contact, correction route, privacy notice. */
+.apply-help { border-top: 1px solid var(--line); padding-top: var(--s-4); }
+.apply-help p { margin: var(--s-2) 0 0; }

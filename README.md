@@ -206,6 +206,22 @@ it at startup and on `/api/health`:
 Use it to confirm which commit is actually serving before and after a deploy or
 rollback. Building by hand without the build argument reports `dev`.
 
+## Browser and accessibility testing
+
+`npm run test:browser` (Playwright, Chromium) starts its own server against a
+throwaway data directory and runs 39 checks across a desktop and an emulated
+mobile viewport: the critical journeys, WCAG 2.1 AA scanning with axe-core, and
+whether the Content-Security-Policy is actually enforced by a browser.
+
+That last one matters. The CSP was verified only by asserting on the header
+until DEP-12, and a real browser showed it was blocking the application's own
+styling. **A header is a claim; the browser is what enforces it.**
+
+Not covered, and so not evidenced by a green run: Safari/WebKit, a real phone,
+screen-reader testing, and print output. See
+**[docs/test-evidence.md](docs/test-evidence.md)** for the full list of what is
+and is not verified.
+
 ## Continuous integration
 
 `.github/workflows/ci.yml` runs on pushes and pull requests to `main`:

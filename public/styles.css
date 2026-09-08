@@ -13,7 +13,7 @@
 
   --ink:#163D50;
   --ink-2:#3E5A68;
-  --ink-3:#6B838E;
+  --ink-3:#5E737D; /* darkened from #6B838E for WCAG 2.1 AA: 3.63:1 -> 4.53:1 on --chrome (DEP-12) */
 
   --accent:#1D4E89;
   --accent-deep:#163C6B;

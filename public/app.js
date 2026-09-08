@@ -1,6 +1,27 @@
 /* Slate — guided executive-search product */
 const $ = (s, el=document) => el.querySelector(s);
 const $$ = (s, el=document) => [...el.querySelectorAll(s)];
+/**
+ * Apply the few styles whose values are only known at runtime.
+ *
+ * These were inline style attributes until DEP-12, where a real browser showed
+ * the Content-Security-Policy blocking every one of them. Writing through the
+ * CSSOM is not intercepted by style-src, so the policy stays strict and these
+ * still work.
+ */
+function applyDynamicStyles(root){
+  if (!root) return;
+  for (const el of root.querySelectorAll('[data-width-pct]')) {
+    el.style.width = el.getAttribute('data-width-pct') + '%';
+  }
+  for (const el of root.querySelectorAll('[data-swatch]')) {
+    el.style.background = el.getAttribute('data-swatch');
+  }
+  for (const el of root.querySelectorAll('[data-min-height]')) {
+    el.style.minHeight = el.getAttribute('data-min-height') + 'px';
+  }
+}
+
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
 const KIND = {
@@ -202,7 +223,7 @@ function packageMatrix(selected, { pick=false }={}){
   if (!rows.length) {
     const on = list.some(p => p.key === selected) ? selected : (state.health?.defaultPackage || list[list.length-1].key);
     return `<div class="pkgs"${pick?' role="radiogroup" aria-label="Service package"':''}>${list.map(p => `
-      <${pick?'label':'div'} class="pkg"${pick?'':' style="cursor:default"'}>
+      <${pick?'label':'div'} class="pkg u-default-cursor"${pick?'':''}>
         ${pick?`<input type="radio" name="package" value="${esc(p.key)}" ${p.key===on?'checked':''}>`:''}
         <div class="pkg__hd"><span class="pkg__nm">${esc(p.label)}</span><span class="pkg__fee">${esc(p.fee)}</span></div>
         <div class="t-small">${esc(p.lede)}</div>
@@ -232,7 +253,7 @@ function packageMatrix(selected, { pick=false }={}){
       ${list.map(p => `<td class="pkgmx__cell ${colClass(p)}">${mark(p.key, row)}</td>`).join('')}
     </tr>`).join('');
   }).join('');
-  return `<div class="tablewrap"${pick?' role="radiogroup" aria-label="Service package"':''}>
+  return `<div class="tablewrap" tabindex="0"${pick?' role="radiogroup" aria-label="Service package"':' role="region" aria-label="Service package comparison"'}>
     <table class="pkgmx${pick?' pkgmx--pick':''}">
       <colgroup>
         <col>
@@ -505,7 +526,7 @@ function stepFooter(view, extra=''){
   const n = nextOf(view);
   if (!n && !extra) return '';
   const label = n ? (n.n ? 'Next · Step '+n.n+' · '+n.title : 'Back to this search') : '';
-  return `<div class="row" style="margin-top:var(--s-5)">
+  return `<div class="row u-mt-5">
     ${extra}
     ${n ? nextButton(view, label) : ''}
   </div>`;
@@ -660,12 +681,12 @@ function head(eyebrow, title, lede, actions=''){
     <div class="eyebrow">${esc(eyebrow)}</div>
     <h1 class="t-display">${esc(title)}</h1>
     ${lede?`<p class="lede">${lede}</p>`:''}
-    ${actions?`<div class="row" style="margin-top:var(--s-4)">${actions}</div>`:''}
+    ${actions?`<div class="row u-mt-4">${actions}</div>`:''}
   </div></div>`;
 }
 function modelToggle(){
   const h = state.health || {};
-  return `<label class="t-small" style="display:flex;gap:8px;align-items:center">
+  return `<label class="t-small u-inline-check">
     <input type="checkbox" id="premium" ${state.premium?'checked':''}>
     Use Opus 5 for this draft
     ${pill(h.hasKey?'ok':'wait', h.hasKey?'API key ready':'No API key')}
@@ -736,7 +757,7 @@ function shell(body){
   return `<div class="shell${state.busy?' busy':''}">
     <nav class="rail" aria-label="Primary">
       <div class="rail__brand">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--accent)" aria-hidden="true"><path d="M4 20h16M6 20V9l6-4 6 4v11M10 20v-5h4v5"/></svg>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="u-accent" aria-hidden="true"><path d="M4 20h16M6 20V9l6-4 6 4v11M10 20v-5h4v5"/></svg>
         <span class="rail__name">Slate</span><span class="rail__ver">Live</span>
       </div>
       <div class="whoami">
@@ -790,7 +811,7 @@ function vGate(){
   return `<div class="gate">
     <header class="gate__bar">
       <div class="login__brand">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--accent)" aria-hidden="true"><path d="M4 20h16M6 20V9l6-4 6 4v11M10 20v-5h4v5"/></svg>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="u-accent" aria-hidden="true"><path d="M4 20h16M6 20V9l6-4 6 4v11M10 20v-5h4v5"/></svg>
         <span class="rail__name">Slate</span>
       </div>
       <button class="btn btn--primary" data-go="login">Sign in</button>
@@ -814,7 +835,7 @@ function vLogin(){
   const first = accounts[0];
   return `<div class="login"><div class="login__card">
     <div class="login__brand">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--accent)"><path d="M4 20h16M6 20V9l6-4 6 4v11M10 20v-5h4v5"/></svg>
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="u-accent"><path d="M4 20h16M6 20V9l6-4 6 4v11M10 20v-5h4v5"/></svg>
       <span class="rail__name">Slate</span>
     </div>
     <h1 class="t-title">Sign in</h1>
@@ -906,7 +927,7 @@ function vHome(){
         <div class="tile"><span class="tile__k">Searches</span><span class="tile__v">${list.length}</span></div>
         <div class="tile"><span class="tile__k">In progress</span><span class="tile__v">${live}</span></div>
         <div class="tile"><span class="tile__k">Complete</span><span class="tile__v">${complete}</span></div>
-        <div class="tile tile--hi"><span class="tile__k">Signed in</span><span class="tile__v" style="font-size:1.45rem">${esc(u.init)}</span><span class="tile__n">${esc(u.title)}</span></div>
+        <div class="tile tile--hi"><span class="tile__k">Signed in</span><span class="tile__v u-fs-145">${esc(u.init)}</span><span class="tile__n">${esc(u.title)}</span></div>
       </div>
       ${owed.length ? `<div class="notice notice--info"><div>
         <div class="notice__t">Committee intake is waiting on you</div>
@@ -965,8 +986,8 @@ function vNew(){
        <button class="btn btn--secondary" data-go="home">Cancel</button>`)}
     <div class="band"><div class="wrap"><form id="newsearch" class="stack">
       ${packages().length ? `<div>
-        <div class="sub" style="margin-top:0">Service package</div>
-        <p class="t-small" style="margin-bottom:var(--s-3)">What the client bought, and the fee that goes with it. The column you pick sets which steps are on this file; the committee and the profile are on every one. You can change it later on Search facts.</p>
+        <div class="sub u-mt-0">Service package</div>
+        <p class="t-small u-mb-3">What the client bought, and the fee that goes with it. The column you pick sets which steps are on this file; the committee and the profile are on every one. You can change it later on Search facts.</p>
         ${packagePicker(state.newPackage || state.health?.defaultPackage)}
       </div>` : ''}
       <div class="sub">The client</div>
@@ -1085,9 +1106,9 @@ function packagePanel(s){
   const left = stepsLeftOut(s.package);
   return `<div class="spec"><div class="spec__bar">${esc(s.packageInfo.label)} package · ${esc(s.packageInfo.fee)}</div>
     <div class="spec__body">
-      <p class="t-small" style="margin-bottom:var(--s-3)">${esc(s.packageInfo.lede)}</p>
+      <p class="t-small u-mb-3">${esc(s.packageInfo.lede)}</p>
       <ul class="svcs">${(s.packageInfo.services||[]).map(x => `<li>${esc(x)}</li>`).join('')}</ul>
-      ${left.length ? `<p class="t-small" style="margin-top:var(--s-3)">Not on this file: ${left.map(st => esc(STEP_NAME[st.key]||st.t)).join(', ')}.${canEdit() && !state.preview?' Change the package on <button class="btn btn--ghost btn--sm" data-go="facts">Search facts</button> if the engagement changed.':''}</p>` : ''}
+      ${left.length ? `<p class="t-small u-mt-3">Not on this file: ${left.map(st => esc(STEP_NAME[st.key]||st.t)).join(', ')}.${canEdit() && !state.preview?' Change the package on <button class="btn btn--ghost btn--sm" data-go="facts">Search facts</button> if the engagement changed.':''}</p>` : ''}
     </div></div>`;
 }
 
@@ -1097,7 +1118,7 @@ function phaseSpecs(s){
     if (!list.length) return '';
     return `<div class="spec"><div class="spec__bar">${esc(p.t)}</div>
       <div class="spec__body">
-        <p class="t-small" style="margin-bottom:var(--s-4)">${esc(p.lede)}</p>
+        <p class="t-small u-mb-4">${esc(p.lede)}</p>
         ${stepsList(list, s)}
       </div></div>`;
   }).join('');
@@ -1215,7 +1236,7 @@ function initialsOf(name){
 
 function overviewTiles(s, next, view){
   const c = s.candidates||[];
-  const upNext = `<div class="tile tile--hi"><span class="tile__k">Up next</span><span class="tile__v" style="font-size:1.45rem">${next?String(next.n).padStart(2,'0'):'—'}</span><span class="tile__n">${next?esc(next.t):'Search complete'}</span></div>`;
+  const upNext = `<div class="tile tile--hi"><span class="tile__k">Up next</span><span class="tile__v u-fs-145">${next?String(next.n).padStart(2,'0'):'—'}</span><span class="tile__n">${next?esc(next.t):'Search complete'}</span></div>`;
   if (view.layout === 'dashboard') {
     return `<div class="tiles">
       <div class="tile"><span class="tile__k">Applicants</span><span class="tile__v">${c.length}</span></div>
@@ -1314,8 +1335,8 @@ function vFacts(){
        <button class="btn btn--secondary" data-go="profile">Next · Step ${stepNo('profile')}</button>`)}
     <div class="band"><div class="wrap"><form id="facts" class="stack">
       ${packages().length ? `<div>
-        <div class="sub" style="margin-top:0">Service package</div>
-        <p class="t-small" style="margin-bottom:var(--s-3)">Pick the pay level the client bought. Moving down a column hides the steps that fee does not include; anything already drafted on them stays on file and comes back if you move up again.</p>
+        <div class="sub u-mt-0">Service package</div>
+        <p class="t-small u-mb-3">Pick the pay level the client bought. Moving down a column hides the steps that fee does not include; anything already drafted on them stays on file and comes back if you move up again.</p>
         ${packagePicker(s.package)}
       </div>
       <div class="sub">The client</div>` : ''}
@@ -1425,7 +1446,7 @@ function vTeam(){
             </select>`)}
           </form>
           <p class="t-small">${esc(SEAT.committee.hint)} A consultant seat is for firm staff and requires an account that already exists.</p>
-          <div class="row" style="margin-top:var(--s-3)"><button class="btn btn--primary" type="submit" form="newmember">Seat this person</button></div>
+          <div class="row u-mt-3"><button class="btn btn--primary" type="submit" form="newmember">Seat this person</button></div>
         </div></div>` : ''}
 
       <div class="notice notice--${confirmed?'ok':'info'}"><div>
@@ -1493,7 +1514,7 @@ function collectIntakeText(){
 
 function intakeRow(item, i){
   return `<div class="intake-row" data-row="${i}">
-    <div class="stack" style="gap:6px">
+    <div class="stack u-gap-6">
       <input class="input" data-f="label" value="${esc(item.label)}" placeholder="Name it in your own words">
       <input class="input" data-f="note" value="${esc(item.note||'')}" placeholder="Why does this matter here? (optional)">
     </div>
@@ -1574,7 +1595,7 @@ function consensusMeter(entry, submitted){
         <span class="t-small mono">avg ${entry.avgWeight.toFixed(1)}</span>
       </span>
     </div>
-    <div class="cons__bar"><span style="width:${pct}%"></span></div>
+    <div class="cons__bar"><span data-width-pct="${pct}"></span></div>
     <div class="cons__who t-small">${entry.voters.map(v => esc(v.name||'A member')+' '+v.weight).join(' · ')}</div>
     ${entry.contested ? `<div class="t-small cons__flag">Rated as low as ${entry.minWeight} and as high as ${entry.maxWeight}. Worth naming out loud before the profile is adopted.</div>` : ''}
     ${entry.notes.length ? `<div class="cons__notes">${entry.notes.slice(0,3).map(n => `<div class="t-small">${esc(n.name||'A member')}: ${esc(n.note)}</div>`).join('')}</div>` : ''}
@@ -1627,7 +1648,7 @@ function vIntakeManage(){
         <div class="tile"><span class="tile__k">Seated</span><span class="tile__v">${agg?agg.seats:(s.roster||[]).length}</span></div>
         <div class="tile"><span class="tile__k">Answered</span><span class="tile__v">${agg?agg.submitted:0}</span></div>
         <div class="tile"><span class="tile__k">Waiting on</span><span class="tile__v">${waiting.length}</span></div>
-        <div class="tile tile--hi"><span class="tile__k">Window</span><span class="tile__v" style="font-size:1.35rem">${open?'Open':closed?'Closed':'Not open'}</span><span class="tile__n">${esc(intake.dueBy||'no due date')}</span></div>
+        <div class="tile tile--hi"><span class="tile__k">Window</span><span class="tile__v u-fs-135">${open?'Open':closed?'Closed':'Not open'}</span><span class="tile__n">${esc(intake.dueBy||'no due date')}</span></div>
       </div>
 
       ${canManage() ? `<div class="spec"><div class="spec__bar">Window</div>
@@ -1635,7 +1656,7 @@ function vIntakeManage(){
           ${field('Due date','Shown to every member.', `<input class="input" name="dueBy" value="${esc(intake.dueBy||'')}" placeholder="Respond by 12 Sep 2026">`)}
           ${field('Note to the committee','Optional. Appears above their form.', `<input class="input" name="prompt" value="${esc(intake.prompt||'')}" placeholder="Answer for yourself, not for the group.">`)}
         </form>
-        <div class="row" style="margin-top:var(--s-3)"><button class="btn btn--secondary btn--sm" data-act="intake-save-window">Save window settings</button></div>
+        <div class="row u-mt-3"><button class="btn btn--secondary btn--sm" data-act="intake-save-window">Save window settings</button></div>
       </div></div>` : ''}
 
       ${waiting.length ? `<div class="spec"><div class="spec__bar">Still waiting on</div>
@@ -1711,7 +1732,7 @@ function critSource(c){
 function critRow(c, i){
   return `<div class="crit-row" data-row="${i}">
     <span class="mono t-small">${esc(c.id||'')}${critSource(c)}</span>
-    <div class="stack" style="gap:6px">
+    <div class="stack u-gap-6">
       <input class="input" data-f="label" value="${esc(c.label)}" placeholder="Label">
       <input class="input" data-f="note" value="${esc(c.note||'')}" placeholder="Why this matters here">
     </div>
@@ -1788,7 +1809,7 @@ function vProfile(){
         return `<button type="button" data-pick="${k}" data-label="${esc(label)}" aria-pressed="${on}" ${!on && atCap ? 'disabled':''}>${esc(label)}</button>`;
       }).join('')}</div>
       ${rows.map(x=>critRow(x.c,x.i)).join('') || '<div class="t-small">None selected yet.</div>'}
-      <div class="row" style="margin-top:var(--s-3)"><button class="btn btn--secondary btn--sm" data-add="${k}" ${atCap?'disabled':''}>Add another ${KIND[k].label.toLowerCase()}</button></div>
+      <div class="row u-mt-3"><button class="btn btn--secondary btn--sm" data-add="${k}" ${atCap?'disabled':''}>Add another ${KIND[k].label.toLowerCase()}</button></div>
     </div>`;
   }).join('');
 
@@ -1914,18 +1935,18 @@ function packStudioBar(a){
   const scheme = packSchemeOf(a);
   return `<div class="studio__bar">
     <div>
-      <div class="sub" style="margin:0">Color</div>
+      <div class="sub u-m-0">Color</div>
       <p class="t-small">Print palettes. The brochure and the ads stay a matched packet.</p>
       <div class="schemes" role="group" aria-label="Packet color">
         ${packSchemeOptions().map(([id,label,ink]) =>
           `<button type="button" class="scheme${scheme===id?' is-on':''}" data-act="pack-scheme" data-scheme="${id}" aria-pressed="${scheme===id}" title="${esc(label)}">
-            <span class="scheme__swatch" style="background:${ink}"></span>${esc(label)}
+            <span class="scheme__swatch" data-swatch="${esc(ink)}"></span>${esc(label)}
           </button>`
         ).join('')}
       </div>
     </div>
     <div>
-      <div class="sub" style="margin:0">Layout</div>
+      <div class="sub u-m-0">Layout</div>
       <p class="t-small">The live mockup below is what prints.</p>
       <div class="layouts" role="group" aria-label="Packet layout">
         ${packLayoutOptions().map(([id,label]) =>
@@ -1939,7 +1960,7 @@ function packStudioBar(a){
 function editArea(path, label, value, hint='', rows=4){
   const control = rows <= 1
     ? `<input class="input" data-path="${esc(path)}" value="${esc(value||'')}">`
-    : `<textarea class="input ed" data-path="${esc(path)}" style="min-height:${36+rows*20}px">${esc(value||'')}</textarea>`;
+    : `<textarea class="input ed" data-path="${esc(path)}" data-min-height="${36+rows*20}">${esc(value||'')}</textarea>`;
   return field(label, hint, control);
 }
 function setAt(obj, path, value){
@@ -2040,7 +2061,7 @@ function artifactEditor(kind, a){
   if (kind==='plan'){
     const rows = a.rows || [];
     if (!rows.length) return '';
-    return editorWrap(kind, `<div class="tablewrap"><table>
+    return editorWrap(kind, `<div class="tablewrap" tabindex="0" role="region" aria-label="Scrollable table"><table>
       <thead><tr><th>Outlet</th><th>Audience</th><th>Format</th><th>When</th><th>Cost</th><th>Who</th><th>Status</th></tr></thead>
       <tbody>${rows.map((r,i)=>`<tr>
         <td><input class="input" data-path="rows.${i}.outlet" value="${esc(r.outlet||'')}"></td>
@@ -2225,7 +2246,7 @@ function renderAdPack(kind, a, ctx){
   return `<div class="adpack">
     <div class="pack__tools">
       <div>
-        <div class="sub" style="margin:0">${esc(meta.tag)}</div>
+        <div class="sub u-m-0">${esc(meta.tag)}</div>
         <p class="t-small">${esc(meta.use)}</p>
       </div>
       ${kind==='social' ? `<span class="ad__count${over?' ad__count--over':''}">${n} characters${over?' · over 500':''}</span>` : ''}
@@ -2270,7 +2291,7 @@ function renderArtifact(key, a){
     </div></div>`;
   if (key==='brochure') return renderBrochure(a);
   if (key==='ads') return renderAds(a);
-  if (key==='plan') return `<div class="tablewrap"><table><thead><tr><th>Outlet</th><th>Audience</th><th>Format</th><th>When</th><th>Cost</th><th>Who</th><th>Status</th></tr></thead><tbody>
+  if (key==='plan') return `<div class="tablewrap" tabindex="0" role="region" aria-label="Scrollable table"><table><thead><tr><th>Outlet</th><th>Audience</th><th>Format</th><th>When</th><th>Cost</th><th>Who</th><th>Status</th></tr></thead><tbody>
     ${(a.rows||[]).map(r=>`<tr><td>${esc(r.outlet)}</td><td>${esc(r.audience)}</td><td>${esc(r.format)}</td><td>${esc(r.when)}</td><td>${esc(r.cost)}</td><td>${esc(r.who||'')}</td><td>${esc(r.status||'')}</td></tr>`).join('')}
   </tbody></table></div>`;
   if (key==='survey1'||key==='survey2') return `<div class="stack">${(a.questions||[]).map(q=>`
@@ -2302,7 +2323,7 @@ function renderArtifact(key, a){
         </div></div>` : (a.note ? `<p class="t-small">${esc(a.note)}</p>` : '')}
       ${(a.days||[]).map(d=>`
       <div class="spec"><div class="spec__bar">${esc(d.date)} · ${esc(d.title)}</div>
-      <div class="tablewrap"><table><tbody>${(d.blocks||[]).map(b=>`<tr><td class="mono">${esc(b.time)}</td><td>${esc(b.what)}</td><td>${esc(b.who)}</td></tr>`).join('')}</tbody></table></div></div>`).join('')}
+      <div class="tablewrap" tabindex="0" role="region" aria-label="Scrollable table"><table><tbody>${(d.blocks||[]).map(b=>`<tr><td class="mono">${esc(b.time)}</td><td>${esc(b.what)}</td><td>${esc(b.who)}</td></tr>`).join('')}</tbody></table></div></div>`).join('')}
     </div>`;
   }
   if (key==='contract') return `<div class="doc"><div class="doc__body">${(a.sections||[]).map(sec=>`<div><div class="doc__h">${esc(sec.h)}</div><p>${esc(sec.body)}</p></div>`).join('')}</div></div>`;
@@ -2372,11 +2393,11 @@ function vCommunity(){
       <p class="t-small">A research agent reads the official site, Census, and budget documents, then fills the facts on this search. It will not invent numbers. Check the file before you use it in recruiting.</p>
       ${sourceList(s.research)}
       ${(s.population || s.budget || s.fog || s.state || s.salary) ? `<div class="tiles">
-        ${s.state?`<div class="tile"><span class="tile__k">State</span><span class="tile__v" style="font-size:1.15rem">${esc(s.state)}</span></div>`:''}
-        ${s.fog?`<div class="tile"><span class="tile__k">Form of government</span><span class="tile__v" style="font-size:1.15rem">${esc(s.fog)}</span></div>`:''}
-        ${s.population?`<div class="tile"><span class="tile__k">Population</span><span class="tile__v" style="font-size:1.15rem">${esc(s.population)}</span></div>`:''}
-        ${s.budget?`<div class="tile"><span class="tile__k">Budget</span><span class="tile__v" style="font-size:1.15rem">${esc(s.budget)}</span></div>`:''}
-        ${s.salary?`<div class="tile"><span class="tile__k">Salary</span><span class="tile__v" style="font-size:1.15rem">${esc(s.salary)}</span></div>`:''}
+        ${s.state?`<div class="tile"><span class="tile__k">State</span><span class="tile__v u-fs-115">${esc(s.state)}</span></div>`:''}
+        ${s.fog?`<div class="tile"><span class="tile__k">Form of government</span><span class="tile__v u-fs-115">${esc(s.fog)}</span></div>`:''}
+        ${s.population?`<div class="tile"><span class="tile__k">Population</span><span class="tile__v u-fs-115">${esc(s.population)}</span></div>`:''}
+        ${s.budget?`<div class="tile"><span class="tile__k">Budget</span><span class="tile__v u-fs-115">${esc(s.budget)}</span></div>`:''}
+        ${s.salary?`<div class="tile"><span class="tile__k">Salary</span><span class="tile__v u-fs-115">${esc(s.salary)}</span></div>`:''}
       </div><p class="t-small">Those facts are also on <button class="btn btn--ghost btn--sm" data-go="facts">Search facts</button>. Check them before you draft recruiting copy.</p>`:''}
       ${has ? renderArtifact('community', s.artifacts.community) : communityEmptyNotice(s)}
       ${artifactEditor('community', s.artifacts?.community)}
@@ -2520,7 +2541,7 @@ function vScreen(){
         ${field('Organization','', `<input class="input" name="org">`)}
         ${field('Email','', `<input class="input" name="email" type="email">`)}
       </form>` : ''}
-      <div class="tablewrap"><table>
+      <div class="tablewrap" tabindex="0" role="region" aria-label="Scrollable table"><table>
         <thead><tr><th>Candidate</th><th>Title</th><th>Organization</th><th>Stage</th><th>Survey 1</th><th>${canEdit()?'Applicant link':''}</th><th></th></tr></thead>
         <tbody>${rows || `<tr><td colspan="7">No candidates yet.</td></tr>`}</tbody>
       </table></div>
@@ -2548,7 +2569,7 @@ function vSend2(){
     <div class="band"><div class="wrap stack">
       ${!s.artifacts?.survey2 ? `<div class="notice notice--info"><div><div class="notice__t">Survey not drafted yet</div><div class="notice__b">Finish the semifinalist survey (Step ${stepNo('survey2')}), then send it from this page.</div></div></div>` : ''}
       ${field('Deadline','Requested response date, shown to candidates. Late responses are accepted.', `<input class="input" id="send2-deadline" placeholder="Respond by 12 Sep 2026">`)}
-      <div class="tablewrap"><table>
+      <div class="tablewrap" tabindex="0" role="region" aria-label="Scrollable table"><table>
         <thead><tr><th>Semifinalist</th><th>Stage</th><th>Opened</th><th>Deadline</th><th>Response</th><th></th></tr></thead>
         <tbody>${rows || `<tr><td colspan="6">No semifinalists yet. Advance people from Screening.</td></tr>`}</tbody>
       </table></div>
@@ -2603,7 +2624,7 @@ function vPerson(){
     <div class="band"><div class="wrap stack">
       ${sealed?`<div class="seal">${ico('lock')}<div><div class="empty__t">Other scores are sealed</div><div class="t-small">Enter your scores. You will see the rest of the panel after scores are released.</div></div></div>`:''}
       ${(s.criteria||[]).map(cr => `
-        <div class="crit-row" style="grid-template-columns:3.2em minmax(0,1fr) auto">
+        <div class="crit-row u-cols-score">
           <span class="mono t-small">${esc(cr.id)}</span>
           <div><b>${esc(cr.label)}</b><div class="t-small">${esc(cr.note||'')}</div></div>
           <div class="wgt">${[1,2,3,4,5].map(n=>`<button type="button" data-score="${esc(cr.id)}" data-val="${n}" aria-pressed="${Number(mine[cr.id])===n}">${n}</button>`).join('')}</div>
@@ -2623,25 +2644,64 @@ function pickApplySurvey(a){
   return 'none';
 }
 
+
+/**
+ * What a candidate needs when something goes wrong.
+ *
+ * The server has supplied these since DEP-06 and DEP-08; until DEP-12 nothing
+ * rendered them, so a candidate who needed an accommodation had nowhere to go
+ * and a candidate who had submitted saw no proof of it.
+ */
+function applySupport(a){
+  const s = a.support || {};
+  const bits = [];
+  if (s.email) bits.push('<a href="mailto:' + esc(s.email) + '">' + esc(s.email) + '</a>');
+  if (s.phone) bits.push(esc(s.phone));
+  const contact = s.configured
+    ? bits.join(' · ') + (s.hours ? '<div class="t-small">' + esc(s.hours) + '</div>' : '')
+    : '<span class="t-small">A contact for this search has not been published yet.</span>';
+
+  return '<div class="apply-help u-mt-5">'
+    + '<div class="t-label">Need help or an accommodation?</div>'
+    + '<p class="t-small">' + contact + '</p>'
+    + (a.correctionNote ? '<p class="t-small">' + esc(a.correctionNote) + '</p>' : '')
+    + (a.privacyNoticeConfigured && a.privacyNotice
+        ? '<p class="t-small">' + esc(a.privacyNotice) + '</p>'
+        : '<p class="t-small">A privacy notice for this search has not been published yet.</p>')
+    + '</div>';
+}
+
+/** Proof of what was received, shown whenever a questionnaire is submitted. */
+function applyReceipt(a){
+  const list = Object.values(a.receipts || {});
+  if (!list.length) return '';
+  return '<div class="notice notice--ok"><div><div class="notice__t">Received</div>'
+    + list.map(r => '<div class="t-small">' + esc(r.questionnaire) + ' · reference '
+        + esc(r.id) + ' · ' + esc((r.submittedAt || '').slice(0, 16).replace('T', ' ')) + '</div>').join('')
+    + '</div></div>';
+}
+
 function vApply(){
   const a = state.apply;
   if (!a) return `<div class="apply-shell"><h1 class="t-title">This link is not valid</h1><p class="lede">Ask the search team for a new invitation.</p></div>`;
   const which = pickApplySurvey(a);
-  if (which === 'none') return `<div class="apply-shell">${head(a.client,'The survey is not open yet','The search team has not published a questionnaire yet.')}</div>`;
-  if (which === 'done') return `<div class="apply-shell">${head(a.client,'Received','Thank you. Your responses are on the search file.')}<div class="notice notice--ok"><div><div class="notice__t">You can close this page.</div></div></div></div>`;
+  if (which === 'none') return `<div class="apply-shell">${head(a.client,'The survey is not open yet','The search team has not published a questionnaire yet.')}${applySupport(a)}</div>`;
+  if (which === 'done') return `<div class="apply-shell">${head(a.client,'Received','Thank you. Your responses are on the search file.')}${applyReceipt(a)}<div class="notice notice--ok"><div><div class="notice__t">You can close this page.</div></div></div>${applySupport(a)}</div>`;
   const survey = a[which];
   const title = which === 'survey2' ? 'Semifinalist questionnaire' : 'Initial candidate survey';
   const due = which === 'survey2' && a.deadline2 ? ` Respond by ${esc(a.deadline2)}.` : '';
   return `<div class="apply-shell">
     ${head(a.client, title, esc(survey.intro||'')+due)}
-    <form id="applyform" class="stack" style="margin-top:var(--s-5)" data-which="${which}">
+    <form id="applyform" class="stack u-mt-5" data-which="${which}">
       ${(survey.questions||[]).map(q => `
         <div class="q">
-          <div class="q__hd"><span class="q__n">${String(q.n).padStart(2,'0')}</span><span class="q__t">${esc(q.prompt)}${q.required?' <span class="req">*</span>':''}</span></div>
-          <div class="q__bd"><textarea class="input ed" name="q${q.n}" ${q.required?'required':''}></textarea></div>
+          <div class="q__hd"><span class="q__n" aria-hidden="true">${String(q.n).padStart(2,'0')}</span><span class="q__t" id="q${q.n}-label">${esc(q.prompt)}${q.required?' <span class="req" aria-hidden="true">*</span>':''}</span></div>
+          <div class="q__bd"><textarea class="input ed" name="q${q.n}" id="q${q.n}-input" aria-labelledby="q${q.n}-label" ${q.required?'required aria-required="true"':''}></textarea></div>
         </div>`).join('')}
       <button class="btn btn--primary" type="submit">Submit questionnaire</button>
     </form>
+    ${a.deadlines && a.deadlines.note ? `<p class="t-small u-mt-3">${esc(a.deadlines.note)} (${esc(a.deadlines.timezone||'')})</p>` : ''}
+    ${applySupport(a)}
   </div>`;
 }
 
@@ -2687,8 +2747,8 @@ function vStaff(key){
       ${done ? `<div class="notice notice--ok"><div><div class="notice__t">Completed ${esc((rec.doneAt||'').slice(0,10))} by ${esc(rec.doneByName||'a consultant')}</div><div class="notice__b">Logging anything new reopens the step.</div></div></div>` : ''}
       ${key==='references' ? `<div class="spec"><div class="spec__bar">Consent to contact references</div>
         <div class="spec__body">
-          <p class="t-small" style="margin-bottom:var(--s-3)">Nothing is logged for a finalist until their consent is on this table. If nobody is listed, name finalists first (Step ${stepNo('finalists')}).</p>
-          <div class="tablewrap"><table>
+          <p class="t-small u-mb-3">Nothing is logged for a finalist until their consent is on this table. If nobody is listed, name finalists first (Step ${stepNo('finalists')}).</p>
+          <div class="tablewrap" tabindex="0" role="region" aria-label="Scrollable table"><table>
             <thead><tr><th>Finalist</th><th>Stage</th><th>Consent</th><th></th></tr></thead>
             <tbody>${consentRows || `<tr><td colspan="4">No finalists yet.</td></tr>`}</tbody>
           </table></div>
@@ -2747,7 +2807,7 @@ function historyRecord(entry){
     if (value == null) return '';
     if (Array.isArray(value)) return '<ul>' + value.map(v=>'<li>'+display(v)+'</li>').join('') + '</ul>';
     if (typeof value === 'object') return '<dl>' + Object.entries(value).map(([k,v])=>'<dt><b>'+esc(k.replace(/([a-z])([A-Z])/g,'$1 $2'))+'</b></dt><dd>'+display(v)+'</dd>').join('') + '</dl>';
-    return `<span style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(value)}</span>`;
+    return `<span class="u-wrap-any">${esc(value)}</span>`;
   };
   return display(entry.body);
 }
@@ -2784,6 +2844,7 @@ function render(){
   const root = $('#app');
   if (!root) return;
   root.innerHTML = page();
+  applyDynamicStyles(root);
   crumbs();
   const theme = document.documentElement.getAttribute('data-theme') || 'auto';
   $$('[data-theme]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.theme === theme)));
