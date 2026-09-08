@@ -22,6 +22,7 @@
 const path = require('path');
 const media = require('./media');
 const jurisdictions = require('./jurisdictions');
+const disposition = require('./disposition');
 
 const FORMAT_VERSION = 1;
 
@@ -162,6 +163,18 @@ function build(search, { viewer, users, dataDir, release }) {
     // that source was current. This is the evidence for every material public
     // claim in the recruiting material.
     factVerification: jurisdictions.factStatus(search),
+
+    // How the search concluded, and every outcome decision with its reason,
+    // evidence and actor. Corrections appear as additional entries naming what
+    // they supersede; nothing is rewritten.
+    lifecycle: disposition.summary(search),
+    dispositions: (search.candidates || []).map(c => ({
+      candidateId: c.id,
+      name: c.name,
+      stage: c.stage || null,
+      current: disposition.currentDisposition(c),
+      history: c.dispositions || []
+    })),
 
     // Where factual claims came from, so a reviewer can check them.
     sources: {

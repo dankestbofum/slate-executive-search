@@ -219,6 +219,40 @@ A failing run means the commit is not eligible to be marked ready for release.
 Browser, accessibility, and print coverage are not in CI yet, so a green run is
 not evidence of those.
 
+## Outcomes and closeout
+
+**A candidate's outcome is not their pipeline stage, and closing a search is
+not archiving it.** `stage` says where someone sits in the process; it cannot
+say a finalist withdrew or that one was hired. Archive is filing.
+
+Outcomes: `withdrawn`, `not-selected`, `selected`, `declined-offer`. Every one
+records the actor, timestamp and reason; `not-selected` and `selected` also
+require the job-related evidence they rest on. Withdrawals and declined offers
+are marked `staff-recorded-from-candidate`, so a candidate's own decision never
+reads as the firm's.
+
+**A correction is a new event.** It names the entry it supersedes and leaves
+the original in place. A hiring record that can be silently rewritten is not a
+record.
+
+An outcome constrains what follows. A withdrawn or not-selected candidate
+cannot be advanced or newly scored, and their questionnaire link is revoked
+immediately. **Scores already recorded are kept** — they are evidence of how
+the committee worked, not just of that person. A selected candidate keeps
+access through contracting.
+
+**Closeout** (`POST /api/searches/:id/close`, `closed` or `cancelled`) freezes
+ordinary edits, refuses questionnaire submissions, revokes every outstanding
+link, and summarises disposition and final documents. Reads keep working.
+
+**Reopening** requires a reason and is recorded. It restores editing but
+**does not restore revoked links** — reissuing one is a separate, deliberate
+act, so reopening a search months later never puts an old bearer URL back into
+circulation.
+
+The export carries the lifecycle and every outcome decision with its reason,
+evidence, actor, and any corrections.
+
 ## Candidate intake and submission recovery
 
 **A committed submission is never lost to a dropped connection.** Submitting

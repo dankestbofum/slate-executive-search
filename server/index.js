@@ -27,6 +27,7 @@ const recovery = require('./recovery');
 const telemetry = require('./telemetry');
 const exporter = require('./export');
 const candidates = require('./candidates');
+const disposition = require('./disposition');
 const {
   assembleBrochure, applyBrochureDefaults, packTheme, packScheme,
   PLACE_FIELDS, GOV_FIELDS, PACK_THEMES, PACK_SCHEMES
@@ -212,6 +213,9 @@ function painted(req, search){
   // on every read so the gap is visible while the work is happening, not
   // discovered when the county reads the brochure.
   out.factStatus = jurisdictions.factStatus(search);
+  // How the search concluded, if it has. Kept separate from Archive: filing a
+  // search away is not the same statement as the work having finished.
+  out.lifecycle = disposition.summary(search);
   return out;
 }
 
@@ -298,6 +302,15 @@ function requireSearch(req, res, next){
   if (!['GET', 'HEAD'].includes(req.method) && req.headers['if-match'] !== undefined
       && req.headers['if-match'] !== String(s.revision)) {
     return res.status(409).json({ error:'This search changed since you opened it. Your edits were not saved. Copy your edits, then reload the search and try again.', code:'STALE_SEARCH' });
+  }
+  // A closed or cancelled search accepts no ordinary edits, so a concluded
+  // record cannot drift afterwards. Reads continue, and reopening is the one
+  // deliberate act that is allowed through.
+  if (!['GET', 'HEAD'].includes(req.method) && disposition.isFrozen(s) && !/\/reopen\/?$/.test(req.path)) {
+    return res.status(409).json({
+      error: 'This search is ' + disposition.lifecycleOf(s) + '. Reopen it deliberately before making further changes.',
+      code: 'SEARCH_CLOSED'
+    });
   }
   next();
 }
@@ -838,6 +851,78 @@ app.post('/api/archives/:id/restore', requireUser, (req, res) => {
  * not hold resumes and does not send messages.
  * ------------------------------------------------------------------------- */
 
+/* ---------------------------------------------------------------------------
+ * Disposition and closeout (DEP-09)
+ * ------------------------------------------------------------------------- */
+
+/** Record an outcome for one candidate. */
+app.post('/api/searches/:id/candidates/:cid/disposition', requireUser, requireSearch, requireEditor, (req, res) => {
+  const candidate = candidateOr404(req, res);
+  if (!candidate) return;
+
+  const invalid = disposition.validateDisposition(req.body);
+  if (invalid) return res.status(400).json({ error: invalid });
+
+  const entry = disposition.recordDisposition(candidate, req.body, req.user);
+
+  // An outcome that ends someone's participation ends their submission access
+  // with it. Leaving a live bearer link on a withdrawn candidate means a URL
+  // that still opens a questionnaire nobody will read.
+  if (disposition.OUTCOMES[entry.outcome].revokesAccess) {
+    candidate.invite = null;
+    candidate.inviteRevokedAt = entry.at;
+  }
+
+  db.touch(req.search, req.user,
+    (entry.supersedes ? 'corrected the outcome for ' : 'recorded ' + disposition.OUTCOMES[entry.outcome].label + ' for ') + candidate.name);
+  db.persist();
+  res.json(painted(req, req.search));
+});
+
+/** Close or cancel the search. */
+app.post('/api/searches/:id/close', requireUser, requireSearch, requireEditor, (req, res) => {
+  if (disposition.isFrozen(req.search)) {
+    return res.status(409).json({ error: 'This search is already ' + disposition.lifecycleOf(req.search) + '.' });
+  }
+  const invalid = disposition.validateClose(req.body);
+  if (invalid) return res.status(400).json({ error: invalid });
+
+  const entry = disposition.close(req.search, req.body, req.user);
+
+  // Closing stops submissions. Every outstanding link is revoked here rather
+  // than left to expire, so a questionnaire cannot be filled in against a
+  // search that has concluded.
+  let revoked = 0;
+  for (const candidate of req.search.candidates || []) {
+    if (candidate.invite) { candidate.invite = null; candidate.inviteRevokedAt = entry.at; revoked += 1; }
+  }
+
+  db.touch(req.search, req.user, entry.status === 'cancelled' ? 'cancelled the search' : 'closed the search');
+  db.persist();
+  res.json({ search: painted(req, req.search), summary: disposition.summary(req.search), linksRevoked: revoked });
+});
+
+/** Reopen a closed search, deliberately and with a reason. */
+app.post('/api/searches/:id/reopen', requireUser, requireSearch, requireEditor, (req, res) => {
+  if (!disposition.isFrozen(req.search)) {
+    return res.status(409).json({ error: 'This search is already active.' });
+  }
+  const reason = String(req.body?.reason || '').trim();
+  if (!reason) return res.status(400).json({ error: 'Record why the search is being reopened.' });
+
+  disposition.reopen(req.search, { reason }, req.user);
+  db.touch(req.search, req.user, 'reopened the search');
+  db.persist();
+  // Links revoked at closeout stay revoked. Reissuing one is a separate act,
+  // so reopening never puts an old bearer URL back into circulation.
+  res.json({ search: painted(req, req.search), linksRestored: false });
+});
+
+/** How the search concluded. */
+app.get('/api/searches/:id/disposition', requireUser, requireSearch, requireEditor, (req, res) => {
+  res.json(disposition.summary(req.search));
+});
+
 function candidateOr404(req, res){
   const candidate = (req.search.candidates || []).find(c => c.id === req.params.cid);
   if (!candidate) { res.status(404).json({ error: 'Candidate not found.' }); return null; }
@@ -1348,6 +1433,15 @@ app.patch('/api/searches/:id/candidates/:cid', requireUser, requireSearch, requi
     if (req.user.role !== 'consultant') return res.status(403).json({ error:'The consultant advances candidates.' });
     const ok = ['applicant','semifinalist','finalist','declined'];
     if (!ok.includes(body.stage)) return res.status(400).json({ error:'Unknown stage.' });
+    // An outcome is a decision about this person's participation. Advancing
+    // them afterwards would put the pipeline and the record in contradiction.
+    const blocked = disposition.blocksAdvancement(c);
+    if (blocked && body.stage !== c.stage) {
+      return res.status(409).json({
+        error: c.name + ' is recorded as "' + blocked + '". Correct that outcome before changing their stage.',
+        code: 'DISPOSITION_FINAL'
+      });
+    }
   }
   const allow = ['name','cur','org','yrs','email','stage'];
   for (const k of allow) if (k in body) c[k] = body[k];
@@ -1536,6 +1630,18 @@ app.post('/api/searches/:id/send2', requireUser, requireSearch, requireEditor, s
 app.put('/api/searches/:id/scores/:cid', requireUser, requireSearch, (req, res) => {
   const c = req.search.candidates.find(x=>x.id===req.params.cid);
   if (!c) return res.status(404).json({ error:'Candidate not found.' });
+  // Scores already recorded stay: they are evidence of how the committee
+  // worked. What stops is new evaluation of someone whose participation ended.
+  const concluded = disposition.blocksAdvancement(c);
+  if (concluded) {
+    return res.status(409).json({
+      error: c.name + ' is recorded as "' + concluded + '". Existing scores are kept; new scoring is closed.',
+      code: 'DISPOSITION_FINAL'
+    });
+  }
+  if (disposition.isFrozen(req.search)) {
+    return res.status(409).json({ error: 'This search is closed. Reopen it before scoring.', code: 'SEARCH_CLOSED' });
+  }
   const scores = req.body?.scores;
   const allowed = new Set(req.search.criteria.map(c => c.id));
   if (!scores || typeof scores !== 'object' || Array.isArray(scores)
@@ -1649,6 +1755,9 @@ app.post('/api/apply/:token', candidateLimit, (req, res) => {
     const { search: s, candidate: c } = found;
     const which = req.body?.which || 'survey1';
     if (!['survey1', 'survey2'].includes(which)) return res.status(400).json({ error:'Unknown questionnaire.' });
+    if (disposition.isFrozen(s)) {
+      return res.status(409).json({ error: 'This search has closed and is no longer accepting responses. Contact the search team if you believe this is a mistake.', support: support() });
+    }
     const issued = c.issuedSurveys?.[which];
     if (!s.artifacts[which] && !issued) {
       return res.status(400).json({ error:'This survey is not open yet.' });
