@@ -21,6 +21,7 @@ const committee = require('./committee');
 const integrity = require('./integrity');
 const credentials = require('./credentials');
 const jurisdictions = require('./jurisdictions');
+const http = require('./http');
 const {
   assembleBrochure, applyBrochureDefaults, packTheme, packScheme,
   PLACE_FIELDS, GOV_FIELDS, PACK_THEMES, PACK_SCHEMES
@@ -68,13 +69,62 @@ const kindOnFile = requireStepOnFile(req => req.body?.kind);
 
 // Trust only explicitly configured proxy addresses/subnets, never arbitrary client headers.
 app.set('trust proxy', process.env.TRUST_PROXY ? process.env.TRUST_PROXY.split(',').map(s => s.trim()) : false);
-app.use(express.json({ limit: '8mb' }));
+// Express advertises itself by default; there is no reason to name the stack.
+app.disable('x-powered-by');
+
+app.use(http.correlate);
+app.use(http.securityHeaders);
+
 const PHOTO_SLOTS = new Set(['cover', 'place', 'org']);
 const PHOTO_FILE_RE = new RegExp('^(' + [...PHOTO_SLOTS].join('|') + ')\\.jpg$', 'i');
+
+// Only the photo route accepts a large body. A base64 JPEG at the 6 MB decoded
+// cap enforced below arrives as roughly 8 MB of JSON, so it gets its own
+// parser; every other endpoint takes small structured records and must not
+// inherit an upload-sized allowance. body-parser marks the request once
+// parsed, so the general parser below is a no-op for these.
+const MEDIA_UPLOAD = /^\/api\/searches\/[^/]+\/media\/?$/;
+const jsonMedia = express.json({ limit: '9mb' });
+app.use((req, res, next) => (req.method === 'POST' && MEDIA_UPLOAD.test(req.path)) ? jsonMedia(req, res, next) : next());
+app.use(express.json({ limit: '256kb' }));
+
 app.use(cookieParser());
-app.use(express.static(path.join(__dirname, '..', 'public')));
+
+// Refuse cookie-authenticated mutations that a browser did not initiate from
+// this origin. Registered before any route so it covers login and logout too.
+app.use(http.sameOrigin);
+
+app.use(express.static(path.join(__dirname, '..', 'public'), {
+  setHeaders(res, filePath) {
+    // Vendored fonts carry a content hash in the filename, so they can be
+    // cached indefinitely; everything else in the shell must revalidate.
+    if (/[\\/]fonts[\\/].*\.woff2$/.test(filePath)) res.set('Cache-Control', 'public, max-age=31536000, immutable');
+  }
+}));
+
 app.use('/api', (_req, _res, next) => { db.ensureBackup(); next(); });
 app.use('/api', (_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
+
+/* Rate limits. Bounds on abuse, not on ordinary work: a consultant drafting
+ * all day or a committee behind one county NAT address stays well under these.
+ * Candidate routes are keyed by IP because the caller is unauthenticated;
+ * everything else is keyed by account so one busy user cannot exhaust another. */
+const candidateLimit = http.limiter({
+  windowMs: 5 * 60 * 1000, max: 240, key: req => 'apply:' + clientIp(req),
+  message: 'Too many requests. Wait a few minutes and try again.'
+});
+const mediaLimit = http.limiter({
+  windowMs: 5 * 60 * 1000, max: 120, key: req => 'media:' + (req.user?.id || clientIp(req)),
+  message: 'Too many photo uploads. Wait a few minutes.'
+});
+const generateLimit = http.limiter({
+  windowMs: 10 * 60 * 1000, max: 120, key: req => 'gen:' + (req.user?.id || clientIp(req)),
+  message: 'Too many drafts requested. Wait a few minutes.'
+});
+const researchLimit = http.limiter({
+  windowMs: 10 * 60 * 1000, max: 60, key: req => 'research:' + (req.user?.id || clientIp(req)),
+  message: 'Too much research requested. Wait a few minutes.'
+});
 
 const SESSION_MS = db.SESSION_MS;
 const loginHits = new Map();
@@ -800,7 +850,7 @@ function wipeSlotFiles(dir, slot){
   }
 }
 
-app.post('/api/searches/:id/media', requireUser, requireSearch, requireEditor, requireStepOnFile(() => 'brochure'), (req, res) => {
+app.post('/api/searches/:id/media', requireUser, requireSearch, requireEditor, mediaLimit, requireStepOnFile(() => 'brochure'), (req, res) => {
   const slot = String(req.body?.slot || '');
   if (!PHOTO_SLOTS.has(slot)) return res.status(400).json({ error:'Unknown photo slot.' });
   const dataUrl = String(req.body?.data || '');
@@ -848,12 +898,17 @@ app.get('/media/:id/:file', requireUser, requireSearch, (req, res) => {
   const root = path.resolve(dir);
   if (!abs.startsWith(root + path.sep)) return res.status(404).end();
   if (!fs.existsSync(abs)) return res.status(404).end();
+  // Brochure photos are private to a search. Without this they persist in the
+  // browser's disk cache and stay readable after the session is revoked, which
+  // no server-side check can undo.
+  res.set('Cache-Control', 'no-store, private');
+  res.set('Vary', 'Cookie');
   res.type('image/jpeg');
   res.sendFile(abs);
 });
 
 
-app.post('/api/searches/:id/generate', requireUser, requireSearch, requireEditor, kindOnFile, async (req, res) => {
+app.post('/api/searches/:id/generate', requireUser, requireSearch, requireEditor, generateLimit, kindOnFile, async (req, res) => {
   const kind = req.body?.kind;
   const premium = Boolean(req.body?.premium);
   const revision = req.search.revision;
@@ -904,7 +959,7 @@ app.post('/api/searches/:id/generate', requireUser, requireSearch, requireEditor
   }
 });
 
-app.post('/api/searches/:id/research', requireUser, requireSearch, requireEditor, async (req, res) => {
+app.post('/api/searches/:id/research', requireUser, requireSearch, requireEditor, researchLimit, async (req, res) => {
   const body = req.body || {};
   const revision = req.search.revision;
   const city = String(Object.prototype.hasOwnProperty.call(body, 'city') ? body.city : (req.search.client || '')).trim();
@@ -959,6 +1014,8 @@ app.post('/api/searches/:id/research', requireUser, requireSearch, requireEditor
 
 app.post('/api/searches/:id/candidates', requireUser, requireSearch, requireEditor, (req, res) => {
   const b = req.body || {};
+  const invalid = integrity.validateCandidate(b);
+  if (invalid) return res.status(400).json({ error: invalid });
   const c = {
     id: db.nid('C'),
     name: String(b.name||'').trim(),
@@ -975,7 +1032,6 @@ app.post('/api/searches/:id/candidates', requireUser, requireSearch, requireEdit
     survey2Deadline: '',
     addedAt: db.now()
   };
-  if (!c.name) return res.status(400).json({ error:'Name is required.' });
   req.search.candidates.push(c);
   db.touch(req.search, req.user, 'added '+c.name);
   db.persist();
@@ -1231,7 +1287,7 @@ app.post('/api/searches/:id/candidates/:cid/reopen', requireUser, requireSearch,
   res.json(painted(req, req.search));
 });
 
-app.get('/api/apply/:token', (req, res) => {
+app.get('/api/apply/:token', candidateLimit, (req, res) => {
   const found = db.findByInvite(req.params.token);
   if (found) {
     const { search: s, candidate: c } = found;
@@ -1256,7 +1312,7 @@ app.get('/api/apply/:token', (req, res) => {
   res.status(404).json({ error:'This link is not valid.' });
 });
 
-app.post('/api/apply/:token', (req, res) => {
+app.post('/api/apply/:token', candidateLimit, (req, res) => {
   const found = db.findByInvite(req.params.token);
   if (found) {
     const { search: s, candidate: c } = found;
@@ -1283,9 +1339,17 @@ app.post('/api/apply/:token', (req, res) => {
   res.status(404).json({ error:'This link is not valid.' });
 });
 
-app.get('/apply/:token', (_req, res) => {
+app.get('/apply/:token', candidateLimit, (_req, res) => {
+  // The token is in the URL of this page. Keeping it out of the shared cache
+  // and out of the back/forward buffer limits how long a candidate's link
+  // survives on a borrowed or public computer.
+  res.set('Cache-Control', 'no-store, private');
   res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
 });
+
+// Terminal handler. Registered last so it sees failures from every route,
+// including malformed JSON and oversized bodies rejected by the parsers.
+app.use(http.errors());
 
 const server = app.listen(PORT, HOST, () => {
   console.log('Slate listening on http://'+HOST+':'+PORT);

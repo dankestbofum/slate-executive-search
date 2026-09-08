@@ -24,8 +24,11 @@ async function suite(file, suiteEnv) {
     const suiteEnv = { ...env, SLATE_URL:'http://127.0.0.1:'+ready.port, SLATE_TEST_DATA:env.DATA_DIR, DATA_DIR:path.join(directory, 'units') };
     const baseline = await suite('bughunt.js', suiteEnv);
     const counties = await suite('jurisdictions.js', suiteEnv);
+    // security.js runs before integrity.js: integrity's last checks deliberately
+    // exhaust the login rate limit for this IP, which would block any later sign-in.
+    const security = await suite('security.js', suiteEnv);
     const regression = await suite('integrity.js', suiteEnv);
-    process.exitCode = baseline || counties || regression;
+    process.exitCode = baseline || counties || regression || security;
     console.log('Isolated test data: ' + directory);
   } catch (error) { console.error(error); process.exitCode = 1; }
   finally { server.kill(); }

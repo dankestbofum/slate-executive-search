@@ -75,6 +75,33 @@ function reconcile(search, before) {
   if (!equal(before, search)) search.revision += 1;
 }
 
+// Candidate records are the most sensitive thing in the store and the only
+// place consultant-entered personal information lands. Bound each field so a
+// single record cannot become unbounded storage or an unreadable row in every
+// list that renders it. The request body limit alone does not do this: it
+// would still admit one 200 KB name.
+const CANDIDATE_LIMITS = { name: 120, cur: 160, org: 160, email: 254 };
+
+function validateCandidate(body) {
+  if (!body || typeof body !== 'object') return 'Provide the candidate details.';
+  for (const [field, max] of Object.entries(CANDIDATE_LIMITS)) {
+    const value = body[field];
+    if (value === undefined || value === null) continue;
+    if (typeof value !== 'string') return 'Candidate details must be text.';
+    if (value.trim().length > max) return 'Keep the candidate ' + field + ' under ' + max + ' characters.';
+  }
+  if (!String(body.name || '').trim()) return 'Name is required.';
+  const email = String(body.email || '').trim();
+  // Deliberately permissive: this catches obvious junk without rejecting the
+  // unusual-but-valid addresses a real applicant pool contains.
+  if (email && (!email.includes('@') || /\s/.test(email))) return 'Enter a valid email address, or leave it blank.';
+  if (body.yrs !== undefined && body.yrs !== null && body.yrs !== '') {
+    const yrs = Number(body.yrs);
+    if (!Number.isFinite(yrs) || yrs < 0 || yrs > 80) return 'Years of experience must be between 0 and 80.';
+  }
+  return null;
+}
+
 function validateCriteria(criteria) {
   if (!Array.isArray(criteria) || criteria.length > 100) return 'Provide a list of profile criteria.';
   const ids = new Set();
@@ -107,4 +134,4 @@ function validateAnswers(survey, answers) {
   return null;
 }
 
-module.exports = { clone, digest, reconcile, reopen, validateCriteria, validateSurvey, validateAnswers };
+module.exports = { clone, digest, reconcile, reopen, validateCandidate, validateCriteria, validateSurvey, validateAnswers };
