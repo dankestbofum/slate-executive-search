@@ -220,8 +220,16 @@ async function request(url, method = 'GET', body, cookie, revision) {
   });
   fs.appendFileSync(path.join(snapshotDir, 'slate.json'), 'tampered');
   check('backup verification catches corruption', () => assert.throws(()=>backup.verify(snapshotDir), /checksum/));
-  const day = new Date().toISOString().slice(0,10);
-  check('automatic daily backups include a verified manifest', () => assert.equal(backup.verify(path.join(process.env.SLATE_TEST_DATA, 'backups', day)).version, 1));
+  // DEP-05 moved automatic snapshots off the request path and onto a timer, so
+  // they are named by timestamp rather than by day. The contract this test
+  // guards is unchanged: the running app takes its own snapshots, and every one
+  // it publishes verifies.
+  check('automatic scheduled backups include a verified manifest', () => {
+    const dir = path.join(process.env.SLATE_TEST_DATA, 'backups');
+    const snapshots = fs.readdirSync(dir).filter(name => fs.existsSync(path.join(dir, name, 'manifest.json')));
+    assert.ok(snapshots.length, 'the running app published no verified snapshot');
+    for (const name of snapshots) assert.equal(backup.verify(path.join(dir, name)).version, 1);
+  });
   const failureDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slate-write-failure-'));
   const failureScript = `
     const assert = require('assert/strict'), fs = require('fs'), path = require('path');

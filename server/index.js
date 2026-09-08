@@ -23,6 +23,7 @@ const credentials = require('./credentials');
 const jurisdictions = require('./jurisdictions');
 const http = require('./http');
 const media = require('./media');
+const recovery = require('./recovery');
 const {
   assembleBrochure, applyBrochureDefaults, packTheme, packScheme,
   PLACE_FIELDS, GOV_FIELDS, PACK_THEMES, PACK_SCHEMES
@@ -96,6 +97,7 @@ app.use(cookieParser());
 // Set by the SIGTERM handler at the foot of this file. Declared and read here
 // because the guard has to sit ahead of every route it protects.
 let shuttingDown = false;
+let recoveryConfig = {};
 
 // Once draining, reads still succeed but writes are refused outright. A write
 // accepted now might not reach disk before the process is killed, and a
@@ -118,7 +120,10 @@ app.use(express.static(path.join(__dirname, '..', 'public'), {
   }
 }));
 
-app.use('/api', (_req, _res, next) => { db.ensureBackup(); next(); });
+// Backups used to run from here, synchronously, ahead of every API request
+// including /api/health. That put a whole-store copy on the latency path of
+// ordinary work and turned a disk problem into an opaque error on every call.
+// They now run on a timer (server/recovery.js) and report through /api/health.
 app.use('/api', (_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
 
 /* Rate limits. Bounds on abuse, not on ordinary work: a consultant drafting
@@ -305,8 +310,28 @@ function requireManager(req, res, next){
   next();
 }
 
+// Cheap liveness: is this process answering at all. No disk work, no AI call,
+// so a platform health check cannot be made expensive or flaky by either.
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, release: RELEASE, node: process.versions.node });
+});
+
+// Readiness, including recovery health. Separate from liveness because the
+// answers differ: the app can be serving correctly while its backups are
+// overdue, and an operator needs to see that without it restarting the
+// container. Deliberately unauthenticated so a platform monitor can read it;
+// it reports state, never record contents.
+app.get('/api/ready', (_req, res) => {
+  const recoveryStatus = recovery.status(recoveryConfig);
+  const ready = !shuttingDown;
+  res.status(ready ? 200 : 503).json({
+    ready,
+    shuttingDown,
+    release: RELEASE,
+    schemaVersion: db.db.schemaVersion,
+    searches: db.db.searches.length,
+    recovery: recoveryStatus
+  });
 });
 
 app.get('/api/config', (_req, res) => {
@@ -1398,6 +1423,15 @@ const server = app.listen(PORT, HOST, () => {
   console.log('Release:', RELEASE, '| Node', process.versions.node, '| data', db.DATA_DIR);
   console.log('Default model:', process.env.CLAUDE_MODEL || 'claude-sonnet-5');
   console.log('API key:', String(process.env.ANTHROPIC_API_KEY || '').trim() ? 'present' : 'MISSING — set ANTHROPIC_API_KEY');
+  try {
+    recoveryConfig = recovery.start(db.DATA_DIR, process.env);
+    console.log('Recovery: snapshot every ' + Math.round(recoveryConfig.intervalMs / 60000) + ' min; off-volume copy '
+      + (recoveryConfig.mirrorTo || recoveryConfig.mirrorCommand ? 'configured' : 'NOT CONFIGURED'));
+  } catch (error) {
+    // Misconfigured recovery must be loud, but it must not stop the app from
+    // serving work that is already underway.
+    console.error('Recovery: not scheduled. ' + error.message);
+  }
   if (process.send) process.send({ port:server.address().port });
 });
 
@@ -1424,6 +1458,7 @@ function shutdown(signal){
 
   server.close(() => {
     clearTimeout(forced);
+    recovery.stop();
     db.releaseWriterLock();
     console.log('Slate: closed cleanly.');
     process.exit(0);

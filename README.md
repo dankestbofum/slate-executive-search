@@ -219,6 +219,27 @@ A failing run means the commit is not eligible to be marked ready for release.
 Browser, accessibility, and print coverage are not in CI yet, so a green run is
 not evidence of those.
 
+## Recovery
+
+Snapshots run hourly inside the app process and are verified before they are
+published. Off-volume copies, the restore drill, monitoring, retention, and
+incident handling are in **[docs/operations.md](docs/operations.md)**.
+
+Two things to know here:
+
+- A local snapshot lives on the disk it protects. Losing the volume loses it.
+  Set `SLATE_BACKUP_MIRROR` or `SLATE_BACKUP_COMMAND`, or there is no recovery
+  from volume loss. `/api/ready` reports `offVolumeCopy: "NOT CONFIGURED"`
+  until you do.
+- **Do not run `scripts/backup.js snapshot` against a running app.** Nothing
+  orders an outside process against the writer, so the copy can catch a write
+  in progress. The CLI refuses when it detects a live writer.
+
+Alert on `recovery.overdue` from `/api/ready`. Nothing is deleted
+automatically: retention is a records policy the county has not set, and a
+destructive job running before that policy exists could destroy something
+under legal hold.
+
 ## Storage safety and the deployment lifecycle
 
 **One writer, enforced.** The store is a single JSON file rewritten whole. Two
