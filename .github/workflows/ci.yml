@@ -143,6 +143,32 @@ jobs:
           echo "store sha256 before restart: $before"
           echo "store sha256 after restart:  $(sha256sum "${RUNNER_TEMP}/data/slate.json" | cut -d' ' -f1)"
 
+      # docker stop sends SIGTERM and waits before killing. This is the only
+      # place graceful shutdown can be checked: Windows cannot deliver a
+      # catchable SIGTERM, so it is unverifiable on a developer machine.
+      - name: Shuts down cleanly on SIGTERM
+        run: |
+          docker stop --time 20 slate-ci
+          logs=$(docker logs slate-ci 2>&1)
+          echo "$logs"
+          echo "$logs" | grep -q "SIGTERM received" || { echo "FAIL: the signal was not handled"; exit 1; }
+          echo "$logs" | grep -q "closed cleanly" || { echo "FAIL: did not drain and close"; exit 1; }
+          echo "$logs" | grep -q "drain timed out" && { echo "FAIL: drain hit its ceiling"; exit 1; }
+          test ! -f "${RUNNER_TEMP}/data/.writer.lock" || { echo "FAIL: write lock not released"; exit 1; }
+
+      - name: Restarts against its own volume without a stale lock
+        run: |
+          docker start slate-ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:4173/api/health >/dev/null 2>&1; then break; fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:4173/api/health >/dev/null \
+            || { echo "FAIL: did not restart"; docker logs slate-ci; exit 1; }
+          docker logs slate-ci 2>&1 | grep -q "stale write lock" \
+            && { echo "FAIL: a cleanly stopped process left a lock behind"; exit 1; }
+          echo "restarted cleanly with no stale lock"
+
       - name: Container logs
         if: always()
         run: docker logs slate-ci || true

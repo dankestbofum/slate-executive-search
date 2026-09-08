@@ -193,10 +193,103 @@ function requireWritableDataDir(){
   }
 }
 
+/* ------------------------------------------------------------------ *
+ * Single writer
+ *
+ * The store is one JSON file rewritten whole. Two processes against the same
+ * volume do not merge, they overwrite: the second writer's save silently
+ * discards everything the first committed since it loaded. Clustering and
+ * multiple replicas are unsupported, and this makes that enforceable rather
+ * than a line in a document.
+ * ------------------------------------------------------------------ */
+const LOCK_FILE = path.join(DATA_DIR, '.writer.lock');
+
+function holderIsAlive(pid){
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try { process.kill(pid, 0); return true; }
+  catch (error) { return error.code === 'EPERM'; } // exists, owned by someone else
+}
+
+function claimWriterLock(){
+  try {
+    const held = JSON.parse(fs.readFileSync(LOCK_FILE, 'utf8'));
+    if (held.pid !== process.pid && holderIsAlive(held.pid)) {
+      console.error('Slate: another process (pid ' + held.pid + ', started ' + held.at + ') is already writing '
+        + DATA_DIR + '.');
+      console.error('Slate: the JSON store supports one writer. Do not run multiple replicas or PM2 cluster mode.');
+      process.exit(1);
+    }
+    // Holder is gone: an unclean shutdown, not a running peer.
+    console.warn('Slate: taking over a stale write lock from pid ' + held.pid + '.');
+  } catch (error) {
+    if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
+  }
+  fs.writeFileSync(LOCK_FILE, JSON.stringify({ pid: process.pid, at: now(), release: process.env.SLATE_RELEASE || 'dev' }));
+}
+
+function releaseWriterLock(){
+  try {
+    const held = JSON.parse(fs.readFileSync(LOCK_FILE, 'utf8'));
+    if (held.pid === process.pid) fs.unlinkSync(LOCK_FILE);
+  } catch { /* never block shutdown on the lock file */ }
+}
+
+/* ------------------------------------------------------------------ *
+ * Schema version and ordered migrations
+ *
+ * MIGRATIONS[i] upgrades a store at version i to version i+1. A store from a
+ * newer release is refused outright: rolling the application back onto a store
+ * it does not understand is how a rollback turns into data loss.
+ * ------------------------------------------------------------------ */
+const SCHEMA_VERSION = 1;
+
+const MIGRATIONS = [
+  // 0 -> 1: the shape that predates explicit versioning. The backfills in
+  // migrate() below are idempotent and already ran on every boot, so this
+  // records the version rather than changing data.
+  store => { store.archivedSearches ||= []; }
+];
+
+function runMigrations(store){
+  const from = Number.isInteger(store.schemaVersion) ? store.schemaVersion : 0;
+
+  if (from > SCHEMA_VERSION) {
+    console.error('Slate: this store was written by a newer release (schema ' + from
+      + '; this build understands ' + SCHEMA_VERSION + ').');
+    console.error('Slate: deploy the matching release, or restore the snapshot that belongs to this one.');
+    process.exit(1);
+  }
+  if (from === SCHEMA_VERSION) return false;
+
+  // A snapshot before any structural change, so a failed migration leaves a
+  // recoverable copy rather than a partly-upgraded store.
+  const preserved = path.join(DATA_DIR, 'backups', 'pre-migration-' + from + '-to-' + SCHEMA_VERSION + '-' + Date.now());
+  try {
+    backup.snapshot(DATA_DIR, preserved);
+    console.log('Slate: pre-migration snapshot written to ' + preserved);
+  } catch (error) {
+    console.error('Slate: could not snapshot before migrating: ' + error.message);
+    process.exit(1);
+  }
+
+  try {
+    for (let v = from; v < SCHEMA_VERSION; v += 1) MIGRATIONS[v](store);
+    store.schemaVersion = SCHEMA_VERSION;
+  } catch (error) {
+    // Fail closed. A half-migrated store must not start serving.
+    console.error('Slate: migration ' + from + ' -> ' + SCHEMA_VERSION + ' failed: ' + error.message);
+    console.error('Slate: the store was not modified on disk. Restore ' + preserved + ' if needed.');
+    process.exit(1);
+  }
+  console.log('Slate: migrated store schema ' + from + ' -> ' + SCHEMA_VERSION + '.');
+  return true;
+}
+
 function load(){
   requireWritableDataDir();
+  claimWriterLock();
   if (!fs.existsSync(DATA_FILE)) {
-    const db = { users: seedUsers(), sessions: {}, searches: [], seq: 0 };
+    const db = { schemaVersion: SCHEMA_VERSION, users: seedUsers(), sessions: {}, searches: [], seq: 0 };
     // A fresh store goes through the same path as an existing one, so the
     // shared team sign-in is never a first-boot-only accident.
     migrate(db);
@@ -211,6 +304,7 @@ function load(){
     if (!sess.exp) sess.exp = Date.parse(sess.at || '') + SESSION_MS;
     if (!Number.isFinite(sess.exp) || sess.exp <= Date.now()) delete loaded.sessions[id];
   }
+  runMigrations(loaded);
   migrate(loaded);
   if (isProd) auditWeakCredentials(loaded);
   save(loaded);
@@ -637,6 +731,10 @@ module.exports = {
   blankSearch,
   createUser,
   auditWeakCredentials,
+  SCHEMA_VERSION,
+  runMigrations,
+  releaseWriterLock,
+  LOCK_FILE,
   revokeSessions,
   setDisabled,
   isDisabled,

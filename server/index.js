@@ -22,6 +22,7 @@ const integrity = require('./integrity');
 const credentials = require('./credentials');
 const jurisdictions = require('./jurisdictions');
 const http = require('./http');
+const media = require('./media');
 const {
   assembleBrochure, applyBrochureDefaults, packTheme, packScheme,
   PLACE_FIELDS, GOV_FIELDS, PACK_THEMES, PACK_SCHEMES
@@ -76,7 +77,9 @@ app.use(http.correlate);
 app.use(http.securityHeaders);
 
 const PHOTO_SLOTS = new Set(['cover', 'place', 'org']);
-const PHOTO_FILE_RE = new RegExp('^(' + [...PHOTO_SLOTS].join('|') + ')\\.jpg$', 'i');
+// Content-addressed names written by server/media.js, plus the legacy
+// slot.jpg written before DEP-04, so brochures created earlier keep rendering.
+const PHOTO_FILE_RE = new RegExp('^(' + [...PHOTO_SLOTS].join('|') + ')(\\.[a-f0-9]{16})?\\.jpg$', 'i');
 
 // Only the photo route accepts a large body. A base64 JPEG at the 6 MB decoded
 // cap enforced below arrives as roughly 8 MB of JSON, so it gets its own
@@ -89,6 +92,19 @@ app.use((req, res, next) => (req.method === 'POST' && MEDIA_UPLOAD.test(req.path
 app.use(express.json({ limit: '256kb' }));
 
 app.use(cookieParser());
+
+// Set by the SIGTERM handler at the foot of this file. Declared and read here
+// because the guard has to sit ahead of every route it protects.
+let shuttingDown = false;
+
+// Once draining, reads still succeed but writes are refused outright. A write
+// accepted now might not reach disk before the process is killed, and a
+// half-applied change is worse than a retry.
+app.use((req, res, next) => {
+  if (!shuttingDown || ['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
+  res.set('Retry-After', '15');
+  return res.status(503).json({ error: 'Slate is restarting. Your work was not saved; try again in a moment.' });
+});
 
 // Refuse cookie-authenticated mutations that a browser did not initiate from
 // this origin. Registered before any route so it covers login and logout too.
@@ -854,42 +870,50 @@ function photoDir(searchId){
   return path.join(db.DATA_DIR, 'media', searchId);
 }
 
-function wipeSlotFiles(dir, slot){
-  if (!fs.existsSync(dir)) return;
-  for (const f of fs.readdirSync(dir)) {
-    if (f.startsWith(slot + '.')) fs.unlinkSync(path.join(dir, f));
-  }
-}
+// wipeSlotFiles was removed in DEP-04. It deleted the committed photo before
+// the replacement record was saved, so a failed save rolled the record back
+// over an image that no longer existed. server/media.js stages, commits, then
+// sweeps instead.
 
 app.post('/api/searches/:id/media', requireUser, requireSearch, requireEditor, mediaLimit, requireStepOnFile(() => 'brochure'), (req, res) => {
   const slot = String(req.body?.slot || '');
   if (!PHOTO_SLOTS.has(slot)) return res.status(400).json({ error:'Unknown photo slot.' });
-  const dataUrl = String(req.body?.data || '');
-  const m = dataUrl.match(/^data:image\/jpeg;base64,([A-Za-z0-9+/]+=*)$/);
-  if (!m) return res.status(400).json({ error:'Send a JPEG photo.' });
-  const buf = Buffer.from(m[1], 'base64');
-  if (!buf.length) return res.status(400).json({ error:'That photo is empty.' });
-  if (buf.length > 6 * 1024 * 1024) return res.status(400).json({ error:'That photo is too large.' });
+
+  const decoded = media.decodeJpeg(req.body?.data);
+  if (decoded.error) return res.status(400).json({ error: decoded.error });
+
   const dir = photoDir(req.search.id);
-  fs.mkdirSync(dir, { recursive: true });
-  wipeSlotFiles(dir, slot);
-  const file = slot + '.jpg';
-  fs.writeFileSync(path.join(dir, file), buf);
+  // Staged under a content-addressed name nothing references yet, so the photo
+  // currently on the record is untouched until the new one is committed.
+  const file = media.stage(dir, slot, decoded.buf);
+
   const brochure = req.search.artifacts.brochure || {};
-  brochure.photos = { ...(brochure.photos || {}), [slot]: '/media/' + req.search.id + '/' + file + '?v=' + Date.now() };
+  brochure.photos = { ...(brochure.photos || {}), [slot]: '/media/' + req.search.id + '/' + file };
   brochure.theme = packTheme(brochure.theme);
   brochure.scheme = packScheme(brochure.scheme);
   req.search.artifacts.brochure = brochure;
   clearReview(req.search, 'brochure');
   db.touch(req.search, req.user, 'added the ' + slot + ' photo');
-  db.persist();
+
+  try {
+    db.persist();
+  } catch (error) {
+    // The record rolled back, so nothing points at the staged file. Remove it
+    // and leave the previously committed photo exactly as it was.
+    media.discard(dir, file);
+    throw error;
+  }
+
+  // Committed. Only now is it safe to reclaim files the record and its history
+  // no longer reference.
+  media.sweep(dir, req.search);
   res.json(painted(req, req.search));
 });
 
 app.delete('/api/searches/:id/media/:slot', requireUser, requireSearch, requireEditor, (req, res) => {
   const slot = String(req.params.slot || '');
   if (!PHOTO_SLOTS.has(slot)) return res.status(400).json({ error:'Unknown photo slot.' });
-  wipeSlotFiles(photoDir(req.search.id), slot);
+
   const brochure = req.search.artifacts.brochure || {};
   const photos = { ...(brochure.photos || {}) };
   delete photos[slot];
@@ -897,7 +921,14 @@ app.delete('/api/searches/:id/media/:slot', requireUser, requireSearch, requireE
   req.search.artifacts.brochure = brochure;
   clearReview(req.search, 'brochure');
   db.touch(req.search, req.user, 'removed the ' + slot + ' photo');
+
+  // Drop the reference first. If the save fails the record rolls back with its
+  // photo intact, which it could not do if the bytes were already deleted.
   db.persist();
+
+  // Sweep keeps anything an earlier brochure revision still points at, so
+  // removing today's photo does not blank a historical one.
+  media.sweep(photoDir(req.search.id), req.search);
   res.json(painted(req, req.search));
 });
 
@@ -1369,3 +1400,34 @@ const server = app.listen(PORT, HOST, () => {
   console.log('API key:', String(process.env.ANTHROPIC_API_KEY || '').trim() ? 'present' : 'MISSING — set ANTHROPIC_API_KEY');
   if (process.send) process.send({ port:server.address().port });
 });
+
+/* ---------------------------------------------------------------------------
+ * Shutdown
+ *
+ * A deploy sends SIGTERM and then waits a bounded time before killing the
+ * process. Stop accepting new writes immediately so nothing is half-applied,
+ * let reads and in-flight requests drain, then release the write lock so the
+ * replacement process does not find a lock it has to treat as stale.
+ * ------------------------------------------------------------------------- */
+function shutdown(signal){
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log('Slate: ' + signal + ' received, draining requests.');
+
+  // Hard ceiling well inside a typical platform termination allowance, so the
+  // process exits deliberately rather than being killed mid-write.
+  const forced = setTimeout(() => {
+    console.error('Slate: drain timed out, exiting anyway.');
+    db.releaseWriterLock();
+    process.exit(1);
+  }, 10000).unref();
+
+  server.close(() => {
+    clearTimeout(forced);
+    db.releaseWriterLock();
+    console.log('Slate: closed cleanly.');
+    process.exit(0);
+  });
+}
+
+for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, () => shutdown(signal));

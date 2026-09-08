@@ -219,6 +219,55 @@ A failing run means the commit is not eligible to be marked ready for release.
 Browser, accessibility, and print coverage are not in CI yet, so a green run is
 not evidence of those.
 
+## Storage safety and the deployment lifecycle
+
+**One writer, enforced.** The store is a single JSON file rewritten whole. Two
+processes against one volume do not merge — the second writer's save discards
+everything the first committed since it loaded. Slate takes a lock
+(`DATA_DIR/.writer.lock`) at startup and refuses to run if a live process
+already holds it. **Do not run multiple replicas, and do not use PM2 cluster
+mode.** A lock left by a crashed process is detected and taken over, with a
+warning in the log.
+
+**Photos are content addressed and never overwritten.** Files are named
+`slot.<hash>.jpg`. Replacing a photo stages the new file under a name nothing
+references, commits the record, and only then reclaims files that neither the
+record nor its history points at. The previous implementation deleted the old
+photo first, so a failed save rolled the record back over an image that no
+longer existed — a successful rollback that still lost data. Uploads are also
+decoded and checked for real JPEG markers before anything references them.
+
+Because history is included in what the sweep keeps, **restoring an earlier
+brochure shows the photo it was approved with**, not whatever replaced it.
+
+**Schema version.** The store carries `schemaVersion`, with ordered migrations
+and a pre-migration snapshot. A store written by a *newer* release is refused
+outright rather than downgraded: rolling the app back onto a store it does not
+understand is how a rollback becomes data loss. Roll back the application and
+its matching snapshot together.
+
+**Shutdown.** On SIGTERM the app stops accepting writes (reads continue,
+mutations get 503 with `Retry-After`), drains in-flight requests, releases the
+write lock, and exits — with a 10-second ceiling so it exits deliberately
+rather than being killed mid-write.
+
+### Residual limitations
+
+- **Graceful shutdown cannot be verified on Windows.** Node emulates SIGTERM
+  there as unconditional termination, so the handler never runs on a developer
+  machine. It is checked in CI with `docker stop`, which sends a real SIGTERM.
+  An unclean kill is survivable regardless: the next start finds a stale lock
+  and takes over.
+- **The lock is advisory and pid-based.** It protects against a second process
+  on the same host and filesystem. It does not coordinate two hosts sharing a
+  network volume, and pid reuse after an unclean shutdown could in principle
+  make a live lock look stale.
+- **No load testing has been done.** The plan's pilot envelope (100 candidates,
+  20 concurrent sessions, p95 under a second) is unmeasured. Whether JSON is
+  adequate for it is an open question, not an answered one.
+- Growth is bounded only by the media sweep. History and store growth are
+  **not** yet monitored or archived on a schedule.
+
 ## Account administration
 
 Named consultant accounts are managed with a CLI, run inside the deployment
