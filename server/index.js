@@ -225,7 +225,16 @@ function currentUser(req){
     db.persist();
     return null;
   }
-  return db.findUserById(sess.userId);
+  const user = db.findUserById(sess.userId);
+  // Disabling revokes sessions, but this is checked on every request as well:
+  // a session restored from a backup, or written by an older release, must not
+  // outlive the decision to withdraw someone's access.
+  if (!user || db.isDisabled(user)) {
+    delete db.db.sessions[id];
+    db.persist();
+    return null;
+  }
+  return user;
 }
 
 function requireUser(req, res, next){
@@ -325,7 +334,9 @@ app.post('/api/login', (req, res) => {
     return res.status(429).json({ error:'Too many sign-in attempts. Wait a few minutes.' });
   }
   const u = db.findUserByEmail(email);
-  if (!credentials.verify(u, typeof pin === 'string' ? pin : '')) {
+  // A disabled account still verifies its credential before being refused, so
+  // the response and its timing do not reveal which accounts exist.
+  if (!credentials.verify(u, typeof pin === 'string' ? pin : '') || db.isDisabled(u)) {
     loginFail(ip);
     loginFail(account);
     return res.status(401).json({ error:'Email or PIN is not right.' });

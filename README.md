@@ -219,6 +219,54 @@ A failing run means the commit is not eligible to be marked ready for release.
 Browser, accessibility, and print coverage are not in CI yet, so a green run is
 not evidence of those.
 
+## Account administration
+
+Named consultant accounts are managed with a CLI, run inside the deployment
+against its `DATA_DIR`:
+
+```bash
+node scripts/accounts.js list
+node scripts/accounts.js create "Dana Ruiz" dana@firm.example "Search consultant"
+node scripts/accounts.js rename u3 "Dana Ruiz-Alvarez"
+node scripts/accounts.js reset u3        # new PIN, revokes that account's sessions
+node scripts/accounts.js disable u3      # revokes access, keeps the record
+node scripts/accounts.js enable u3
+node scripts/accounts.js audit           # flags published development PINs
+```
+
+This is deliberately **not** an HTTP route. Account administration is the
+authority that grants every other authority, and the app has no role above
+consultant to hold it. Over HTTP, any compromised consultant session could
+mint or reset accounts; requiring shell access keeps it behind whatever
+controls the hosting account has. If the county needs delegated in-app
+administration, that is a new role and a new decision, not a flag.
+
+`create` and `reset` print a PIN once. It is stored only as a scrypt hash and
+cannot be printed again — issue a new one with `reset`.
+
+**Disabling keeps the record.** History attributes decisions to accounts, and a
+search must stay readable after someone leaves, so a disabled account retains
+its identity and loses its access. Sessions are revoked immediately, and every
+request re-checks the flag, so a session restored from a backup cannot outlive
+the decision to withdraw access.
+
+**Credential strength.** New production credentials must be at least 8
+characters and must not be a published development PIN, a repeated character,
+or a simple run. The app refuses to boot in production with a credential that
+fails this. Hashing an old weak PIN does not make it strong, so
+`accounts.js audit` reports existing accounts that still authenticate with a
+published default, and production logs the same warning at startup.
+
+That audit rules out the *published* PINs. It cannot tell you whether a
+remaining PIN is otherwise guessable.
+
+**Sessions** last `SLATE_SESSION_DAYS` (default 14), capped at 30 by the
+server. Configuration cannot raise the ceiling.
+
+**Still an owner decision:** MFA/SSO. If the county requires it, it should come
+from an established identity provider rather than a bespoke implementation
+here. Nothing in this section substitutes for that.
+
 ## Browser security boundary
 
 Implemented in `server/http.js` and covered by `tests/security.js`.

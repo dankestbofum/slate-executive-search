@@ -13,7 +13,15 @@ const DATA_DIR = process.env.DATA_DIR
   || process.env.RAILWAY_VOLUME_MOUNT_PATH
   || path.join(__dirname, '..', 'data');
 const DATA_FILE = path.join(DATA_DIR, 'slate.json');
-const SESSION_MS = 14 * 24 * 60 * 60 * 1000;
+// Session length. Configurable so the county can set its own, with a ceiling
+// that cannot be raised by configuration: a cookie that outlives the
+// engagement is not a session, it is a standing key.
+const SESSION_MAX_DAYS = 30;
+const SESSION_DAYS = Math.min(
+  Math.max(Number(process.env.SLATE_SESSION_DAYS) || 14, 1),
+  SESSION_MAX_DAYS
+);
+const SESSION_MS = SESSION_DAYS * 24 * 60 * 60 * 1000;
 
 if (isProd && !process.env.DATA_DIR && !process.env.RAILWAY_VOLUME_MOUNT_PATH) {
   console.error('Slate: production needs a persistent disk. Set DATA_DIR or attach a volume.');
@@ -41,6 +49,7 @@ function ensureTeamAccount(store){
   // No PIN configured in production: leave any existing account alone rather
   // than locking someone out mid-search, and do not conjure a new one.
   if (!pin) return;
+  requireStrong('SLATE_PIN_TEAM', pin);
   if (existing) {
     existing.email = email;
     if (!credentials.verify(existing, String(pin))) {
@@ -54,6 +63,35 @@ function ensureTeamAccount(store){
   store.users.unshift({ ...TEAM_ACCOUNT, email, pin: String(pin) });
 }
 
+// New production credentials must clear the strength policy. Applied when a
+// value is supplied, in any environment, so the rule is exercised by the test
+// suite rather than only discovered on a production first boot.
+function requireStrong(label, secret){
+  if (!isProd) return;
+  const weak = credentials.weakness(secret);
+  if (weak) {
+    console.error('Slate: ' + label + ' is not acceptable for production. ' + weak);
+    process.exit(1);
+  }
+}
+
+/**
+ * Report accounts that still authenticate with a published development PIN.
+ *
+ * Migration hashed whatever PIN an account already had. Hashing a weak secret
+ * does not make it strong, so an operator needs to be told rather than left to
+ * assume the upgrade fixed it.
+ */
+function auditWeakCredentials(store){
+  const weak = (store.users || []).filter(user =>
+    [...credentials.DEV_DEFAULTS].some(guess => credentials.verify(user, guess)));
+  if (!weak.length) return [];
+  console.error('Slate: ' + weak.length + ' account(s) still use a published development PIN: '
+    + weak.map(u => u.email || u.id).join(', '));
+  console.error('Slate: reset them with `node scripts/accounts.js reset <id>` before real records are entered.');
+  return weak;
+}
+
 function seedUsers(){
   const abePin = process.env.SLATE_PIN_ABE || (isProd ? '' : '2468');
   const mikePin = process.env.SLATE_PIN_MIKE || (isProd ? '' : '1357');
@@ -61,6 +99,8 @@ function seedUsers(){
     console.error('Slate: first boot needs SLATE_PIN_ABE and SLATE_PIN_MIKE.');
     process.exit(1);
   }
+  requireStrong('SLATE_PIN_ABE', abePin);
+  requireStrong('SLATE_PIN_MIKE', mikePin);
   return [
     { id:'u1', email: process.env.SLATE_EMAIL_ABE || 'abe@slate.local',  pin: String(abePin), name:'Abe Macy',     init:'AM', role:'consultant', title:'Operations' },
     { id:'u2', email: process.env.SLATE_EMAIL_MIKE || 'mike@slate.local', pin: String(mikePin), name:'Mike Letcher', init:'ML', role:'consultant', title:'Search consultant' }
@@ -172,6 +212,7 @@ function load(){
     if (!Number.isFinite(sess.exp) || sess.exp <= Date.now()) delete loaded.sessions[id];
   }
   migrate(loaded);
+  if (isProd) auditWeakCredentials(loaded);
   save(loaded);
   return loaded;
 }
@@ -526,6 +567,48 @@ function findUserByEmail(email){
  * handed back. The consultant reads it to the member; only its salted hash
  * remains in the store.
  */
+/**
+ * Sessions belonging to one account.
+ *
+ * Every path that weakens or withdraws an account's authority calls this.
+ * Changing a credential or disabling an account has to take effect now, not
+ * whenever a fourteen-day cookie happens to lapse.
+ */
+function revokeSessions(userId){
+  let n = 0;
+  for (const [id, sess] of Object.entries(db.sessions || {})) {
+    if (sess.userId === userId) { delete db.sessions[id]; n += 1; }
+  }
+  return n;
+}
+
+/**
+ * Disable or restore an account without deleting it.
+ *
+ * Deleting would break attribution: history records who made each decision,
+ * and a search record has to stay readable after someone leaves. A disabled
+ * account keeps its identity, loses its access immediately, and can be
+ * restored if the person returns.
+ */
+function setDisabled(user, disabled, actor){
+  if (!user) return null;
+  if (disabled) {
+    user.disabled = true;
+    user.disabledAt = now();
+    user.disabledBy = actor || 'operator';
+    revokeSessions(user.id);
+  } else {
+    delete user.disabled;
+    delete user.disabledAt;
+    delete user.disabledBy;
+  }
+  return user;
+}
+
+function isDisabled(user){
+  return Boolean(user && user.disabled);
+}
+
 function createUser({ name, email, title, role }){
   const pin = makePin();
   const u = {
@@ -546,13 +629,17 @@ function createUser({ name, email, title, role }){
 module.exports = {
   PHASES, STEPS, STAFF_STEPS, STAFF_STAGES, PACKAGES, PACKAGE_ORDER, DEFAULT_PACKAGE, COMPARE, COMPARE_BANDS, packageOf, stepsOf,
   staffRecord,
-  REVIEW_STEPS, reviewed, nid, now, persist, DATA_DIR, SESSION_MS,
+  REVIEW_STEPS, reviewed, nid, now, persist, DATA_DIR, SESSION_MS, SESSION_DAYS, SESSION_MAX_DAYS,
   get db(){ return db; },
   publicUser,
   decorate,
   nextNo,
   blankSearch,
   createUser,
+  auditWeakCredentials,
+  revokeSessions,
+  setDisabled,
+  isDisabled,
   initials,
   makePin,
   ensureBackup: () => backup.ensureDaily(DATA_DIR),
