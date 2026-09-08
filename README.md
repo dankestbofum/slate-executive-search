@@ -219,6 +219,26 @@ A failing run means the commit is not eligible to be marked ready for release.
 Browser, accessibility, and print coverage are not in CI yet, so a green run is
 not evidence of those.
 
+## Monitoring
+
+`GET /api/health` is cheap liveness for the platform health check.
+`GET /api/ready` reports readiness, recovery health, metrics, and alert status.
+Keep the platform check on `/api/health`: pointing it at `/api/ready` would let
+an overdue backup restart the container instead of paging someone.
+
+Requests and errors are logged as one JSON object per line with the same
+correlation id the caller was given (`X-Request-Id`), so a support call can be
+traced to a log entry. Route names are templates and actors are account ids —
+no bodies, names, emails, or bearer tokens reach the logs.
+
+Alerts (`SLATE_ALERT_WEBHOOK` or `SLATE_ALERT_COMMAND`) fire on
+`backup-overdue`, `storage-unwritable`, and `error-rate`, deduplicated so a
+persisting condition pages once. AI availability is reported separately from
+readiness: an Anthropic outage stops drafting, not the application.
+
+Details, drills, and the incident quick reference are in
+**[docs/operations.md](docs/operations.md)**.
+
 ## Recovery
 
 Snapshots run hourly inside the app process and are verified before they are

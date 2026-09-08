@@ -30,8 +30,9 @@ async function suite(file, suiteEnv) {
     const roles = await suite('roles.js', suiteEnv);
     const storage = await suite('storage.js', suiteEnv);
     const recover = await suite('recovery.js', suiteEnv);
+    const monitoring = await suite('monitoring.js', suiteEnv);
     const regression = await suite('integrity.js', suiteEnv);
-    process.exitCode = baseline || counties || regression || security || roles || storage || recover;
+    process.exitCode = baseline || counties || regression || security || roles || storage || recover || monitoring;
     console.log('Isolated test data: ' + directory);
   } catch (error) { console.error(error); process.exitCode = 1; }
   finally { server.kill(); }

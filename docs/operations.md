@@ -206,3 +206,127 @@ administration section in README.
   (`X-Request-Id` is returned on every response); log aggregation and retention
   are DEP-06.
 - **A named on-call rotation.** Owner decision.
+
+---
+
+## 10. Monitoring and logs (DEP-06)
+
+### Endpoints
+
+| Endpoint | Use | Cost |
+|---|---|---|
+| `GET /api/health` | Platform health check | Trivial. No disk, no AI |
+| `GET /api/ready` | Readiness, recovery, metrics, alert status | One small write probe |
+
+Keep the platform health check on `/api/health`. If it pointed at `/api/ready`,
+an overdue backup would restart the container instead of paging someone.
+
+`/api/ready` returns 503 when shutting down, when `DATA_DIR` is not writable,
+or when the store's schema version does not match the build.
+
+### Structured logs
+
+One JSON object per line on stdout/stderr, for the platform to index:
+
+```json
+{"at":"2026-09-08T13:02:11.417Z","level":"info","event":"request","release":"b62d3c5",
+ "ref":"9f2a1b7c4d0e8a35","method":"POST","route":"/api/searches/:search/candidates",
+ "status":200,"ms":14,"actor":"u1"}
+```
+
+Events: `started`, `request`, `ai`, `alert`, `alert-delivery-failed`.
+
+What is deliberately absent: request bodies, candidate answers, names, emails,
+and bearer tokens. `route` is a template, so the log is not a list of which
+searches exist, and `actor` is an opaque account id. Telemetry is read by more
+people and kept longer than the record itself, and Slate holds applications
+from people who have not told their employer they are looking.
+
+### Finding a request from a support call
+
+Every response carries `X-Request-Id`, and error replies repeat it as `ref`.
+Ask the person for the reference they were shown, then search the logs:
+
+```
+ref="9f2a1b7c4d0e8a35"
+```
+
+That gives the route, status, timing, and actor — without the record contents.
+
+### Metrics on `/api/ready`
+
+Uptime, request counts by status class, error rate, slow requests (over 1s),
+**event-loop delay**, memory, `DATA_DIR` size and file count, store size,
+search counts, and AI calls / failures / latency / tokens.
+
+Event-loop delay is the one to watch as volume grows. The store is rewritten
+whole and synchronously, so the event loop degrades before CPU or memory does.
+It is the cheapest early warning that JSON has stopped being adequate.
+
+### Alerts
+
+```bash
+SLATE_ALERT_WEBHOOK=https://hooks.example.com/slate    # POSTs JSON
+# or
+SLATE_ALERT_COMMAND="/usr/local/bin/notify"            # JSON on stdin
+```
+
+Three conditions, checked every 60 seconds:
+
+| Alert | Fires when |
+|---|---|
+| `backup-overdue` | No verified snapshot or off-volume copy within two intervals, or either errored |
+| `storage-unwritable` | `DATA_DIR` refuses a write |
+| `error-rate` | Over 5% server errors, after at least 20 requests |
+
+Deduplicated: one notification when a condition starts, one when it clears. An
+operator paged every minute stops reading pages.
+
+Deliberately few. The things that actually lose a search are storage failing
+and backups silently not happening.
+
+**Drill:** unset `SLATE_BACKUP_MIRROR` and wait two intervals, or point
+`DATA_DIR` at a read-only path in staging. Confirm `firing` on `/api/ready`
+lists the alert, the destination received it, and it clears.
+
+> **Owner decision — not made.** Who receives alerts, their backup, and the
+> escalation path. `/api/ready` reports `"NOT CONFIGURED"` until a destination
+> is set. An alert with no named recipient is not monitoring.
+
+### AI outages
+
+`ai.configured` and `ai.degraded` on `/api/ready` are separate from `ready`.
+Drafting and research stop; opening searches, seating committees, scoring, and
+candidate questionnaires all keep working. An Anthropic outage must never read
+as Slate being down.
+
+Failed AI calls are counted as well as successful ones — a failed call can
+still have been billed.
+
+### Candidate support contact
+
+```bash
+SLATE_SUPPORT_EMAIL=recruitment@example.gov
+SLATE_SUPPORT_PHONE=+1-555-0100
+SLATE_SUPPORT_HOURS="Weekdays 8am-5pm Arizona time"
+```
+
+Served on the candidate questionnaire page. Until configured, the page reports
+support as unavailable rather than showing a contact nobody reads.
+
+> **Owner decision — not made.** Who staffs this, during what hours, and how an
+> accommodation request is handled. The plan requires it be visible and staffed
+> for the pilot.
+
+### Incident quick reference
+
+| Symptom | First step |
+|---|---|
+| Someone cannot sign in | `node scripts/accounts.js list` — check for `disabled`; `reset` issues a new PIN |
+| Candidate link not working | Replace it from the candidate record; old links stop working immediately |
+| Candidate says a submission failed | Check whether it committed before asking them to resubmit |
+| "This search changed since you opened it" | Expected stale-write protection. Their edits were not lost; copy, reload, reapply |
+| Wrong copy published | Restore the prior revision from history; approvals invalidate on edit |
+| AI unavailable | Confirm `ai.degraded`; manual work continues. Check the key and model access |
+| Volume lost | §8, then §5 |
+| Suspected disclosure | Reset affected credentials, replace candidate links, preserve logs, follow the county's incident procedure |

@@ -24,6 +24,7 @@ const jurisdictions = require('./jurisdictions');
 const http = require('./http');
 const media = require('./media');
 const recovery = require('./recovery');
+const telemetry = require('./telemetry');
 const {
   assembleBrochure, applyBrochureDefaults, packTheme, packScheme,
   PLACE_FIELDS, GOV_FIELDS, PACK_THEMES, PACK_SCHEMES
@@ -76,6 +77,9 @@ app.disable('x-powered-by');
 
 app.use(http.correlate);
 app.use(http.securityHeaders);
+// Logged after correlate so every line carries the same reference the client
+// was given, which is what makes a support request traceable to a log entry.
+app.use(telemetry.requests());
 
 const PHOTO_SLOTS = new Set(['cover', 'place', 'org']);
 // Content-addressed names written by server/media.js, plus the legacy
@@ -323,16 +327,102 @@ app.get('/api/health', (_req, res) => {
 // it reports state, never record contents.
 app.get('/api/ready', (_req, res) => {
   const recoveryStatus = recovery.status(recoveryConfig);
-  const ready = !shuttingDown;
+  let storage = { writable: true };
+  try {
+    // Cheap: proves the volume still takes a write, without copying the store.
+    const probe = path.join(db.DATA_DIR, '.ready-probe');
+    fs.writeFileSync(probe, String(Date.now()));
+    fs.unlinkSync(probe);
+  } catch (error) {
+    storage = { writable: false, error: error.code || 'unknown' };
+  }
+
+  const ready = !shuttingDown && storage.writable && db.db.schemaVersion === db.SCHEMA_VERSION;
+
   res.status(ready ? 200 : 503).json({
     ready,
     shuttingDown,
     release: RELEASE,
     schemaVersion: db.db.schemaVersion,
-    searches: db.db.searches.length,
-    recovery: recoveryStatus
+    storage,
+    // Drafting is unavailable without a key, but nothing else is. This is
+    // reported separately so an Anthropic outage never reads as the
+    // application being down.
+    ai: { configured: aiConfigured(), degraded: !aiConfigured() },
+    recovery: recoveryStatus,
+    alerts: telemetry.alerts(),
+    metrics: telemetry.metrics({
+      dataDir: db.DATA_DIR,
+      storeSize: storeBytes(),
+      searches: db.db.searches.length,
+      archived: (db.db.archivedSearches || []).length
+    })
   });
 });
+
+function aiConfigured(){
+  return Boolean(String(process.env.ANTHROPIC_API_KEY || '').trim());
+}
+
+/**
+ * The support and accommodation contact shown to candidates.
+ *
+ * Who staffs this, and during what hours, is an owner decision. Reporting it
+ * as unconfigured is the honest default: a candidate needing an accommodation
+ * should never be shown a contact that nobody reads.
+ */
+function support(){
+  const email = String(process.env.SLATE_SUPPORT_EMAIL || '').trim();
+  const phone = String(process.env.SLATE_SUPPORT_PHONE || '').trim();
+  const hours = String(process.env.SLATE_SUPPORT_HOURS || '').trim();
+  return {
+    configured: Boolean(email || phone),
+    email: email || null,
+    phone: phone || null,
+    hours: hours || null
+  };
+}
+
+function storeBytes(){
+  try { return fs.statSync(path.join(db.DATA_DIR, 'slate.json')).size; }
+  catch { return null; }
+}
+
+/**
+ * Watch the conditions worth waking someone for.
+ *
+ * Deliberately few. An alert that fires often is an alert that gets ignored,
+ * and the two things that actually lose a search are storage failing and
+ * backups silently not happening.
+ */
+function watchAlerts(){
+  const check = () => {
+    const status = recovery.status(recoveryConfig);
+    telemetry.alert('backup-overdue', Boolean(status.overdue), {
+      lastSnapshotAt: status.lastSnapshotAt,
+      lastMirrorAt: status.lastMirrorAt,
+      offVolumeCopy: status.offVolumeCopy,
+      error: status.lastSnapshotError || status.lastMirrorError || null
+    });
+
+    let writable = true;
+    try {
+      const probe = path.join(db.DATA_DIR, '.alert-probe');
+      fs.writeFileSync(probe, '1');
+      fs.unlinkSync(probe);
+    } catch { writable = false; }
+    telemetry.alert('storage-unwritable', !writable, { dataDir: db.DATA_DIR });
+
+    const m = telemetry.metrics();
+    // Rate alone would fire on the first failed request after a restart.
+    telemetry.alert('error-rate', m.requests >= 20 && m.errorRate > 0.05, {
+      errorRate: m.errorRate, requests: m.requests
+    });
+  };
+  const timer = setInterval(check, 60000);
+  timer.unref();
+  return timer;
+}
 
 app.get('/api/config', (_req, res) => {
   const body = {
@@ -987,7 +1077,17 @@ app.post('/api/searches/:id/generate', requireUser, requireSearch, requireEditor
     const room = kind === 'profile'
       ? committee.packForPrompt(committee.aggregate(req.search, id => db.findUserById(id)?.name || ''))
       : null;
-    const out = await ai.generate(kind, snapshot, { premium, notes: req.body?.notes||'', committee: room });
+    const aiStartedAt = Date.now();
+    let out;
+    try {
+      out = await ai.generate(kind, snapshot, { premium, notes: req.body?.notes||'', committee: room });
+      telemetry.recordAi({ ok: true, ms: Date.now() - aiStartedAt, usage: out.usage, kind });
+    } catch (error) {
+      // Counted even though the work is lost: a failed call can still have
+      // been billed, and an outage has to be visible in the numbers.
+      telemetry.recordAi({ ok: false, ms: Date.now() - aiStartedAt, kind, code: error.code });
+      throw error;
+    }
     if (!db.findSearch(req.search.id)) {
       return res.status(409).json({ error:'This search was deleted while the draft was generating.' });
     }
@@ -1035,12 +1135,20 @@ app.post('/api/searches/:id/research', requireUser, requireSearch, requireEditor
   if (!city) return res.status(400).json({ error:'Enter the city or jurisdiction name.' });
   if (!website) return res.status(400).json({ error:'Enter the official jurisdiction website.' });
   try {
-    const out = await ai.researchCity({
-      city, website, premium,
-      position: req.search.position,
-      state: req.search.state,
-      jurisdictionType: req.search.jurisdictionType
-    });
+    const researchStartedAt = Date.now();
+    let out;
+    try {
+      out = await ai.researchCity({
+        city, website, premium,
+        position: req.search.position,
+        state: req.search.state,
+        jurisdictionType: req.search.jurisdictionType
+      });
+      telemetry.recordAi({ ok: true, ms: Date.now() - researchStartedAt, usage: out.usage, kind: 'research' });
+    } catch (error) {
+      telemetry.recordAi({ ok: false, ms: Date.now() - researchStartedAt, kind: 'research', code: error.code });
+      throw error;
+    }
     if (!db.findSearch(req.search.id)) {
       return res.status(409).json({ error:'This search was deleted while research was running.' });
     }
@@ -1373,7 +1481,12 @@ app.get('/api/apply/:token', candidateLimit, (req, res) => {
       submitted1: Boolean(c.survey1),
       submitted2: Boolean(c.survey2),
       sent2,
-      deadline2: c.survey2Deadline || ''
+      deadline2: c.survey2Deadline || '',
+      // A candidate who cannot submit, or who needs an accommodation to
+      // complete the questionnaire, must have somewhere to go that is not a
+      // dead end. Empty until an operator configures it, and the page says so
+      // rather than pretending help exists.
+      support: support()
     });
   }
   res.status(404).json({ error:'This link is not valid.' });
@@ -1432,6 +1545,15 @@ const server = app.listen(PORT, HOST, () => {
     // serving work that is already underway.
     console.error('Recovery: not scheduled. ' + error.message);
   }
+  telemetry.watchEventLoop();
+  watchAlerts();
+  console.log('Alerts:', telemetry.alerts().destination);
+  telemetry.log.info('started', {
+    port: server.address().port,
+    schemaVersion: db.db.schemaVersion,
+    ai: aiConfigured() ? 'configured' : 'no-key',
+    alerts: telemetry.alerts().destination
+  });
   if (process.send) process.send({ port:server.address().port });
 });
 
@@ -1459,6 +1581,7 @@ function shutdown(signal){
   server.close(() => {
     clearTimeout(forced);
     recovery.stop();
+    telemetry.stop();
     db.releaseWriterLock();
     console.log('Slate: closed cleanly.');
     process.exit(0);
