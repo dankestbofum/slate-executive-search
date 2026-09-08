@@ -25,6 +25,7 @@ const http = require('./http');
 const media = require('./media');
 const recovery = require('./recovery');
 const telemetry = require('./telemetry');
+const exporter = require('./export');
 const {
   assembleBrochure, applyBrochureDefaults, packTheme, packScheme,
   PLACE_FIELDS, GOV_FIELDS, PACK_THEMES, PACK_SCHEMES
@@ -805,6 +806,37 @@ app.post('/api/archives/:id/restore', requireUser, (req, res) => {
   db.touch(s, req.user, 'restored the search; candidate invitation links replaced');
   db.persist();
   res.json(painted(req, s));
+});
+
+/**
+ * The complete record of one search, for county records review.
+ *
+ * requireEditor, so a committee member cannot obtain through an export what
+ * they cannot read in the application. The export is a different format for
+ * the same authority, never a wider one.
+ *
+ * ?format=text returns the readable report; the default is the machine-readable
+ * bundle. Both come from one build so they cannot drift apart.
+ */
+app.get('/api/searches/:id/export', requireUser, requireSearch, requireEditor, (req, res) => {
+  const bundle = exporter.build(req.search, {
+    viewer: req.user,
+    users: db.db.users,
+    dataDir: db.DATA_DIR,
+    release: RELEASE
+  });
+
+  db.touch(req.search, req.user, 'exported the search record');
+  db.persist();
+
+  const stem = 'slate-' + (req.search.no || req.search.id);
+  if (req.query.format === 'text') {
+    res.type('text/plain; charset=utf-8');
+    res.set('Content-Disposition', 'attachment; filename="' + stem + '.txt"');
+    return res.send(exporter.report(bundle));
+  }
+  res.set('Content-Disposition', 'attachment; filename="' + stem + '.json"');
+  res.json(bundle);
 });
 
 app.get('/api/searches/:id/history', requireUser, requireSearch, requireEditor, (req, res) => {

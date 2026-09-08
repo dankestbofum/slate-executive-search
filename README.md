@@ -219,6 +219,36 @@ A failing run means the commit is not eligible to be marked ready for release.
 Browser, accessibility, and print coverage are not in CI yet, so a green run is
 not evidence of those.
 
+## Records export
+
+`GET /api/searches/:id/export` produces the complete record of one search:
+facts and sources, committee and intake, adopted criteria with their revision,
+artifacts and approvals, candidates with their responses **and the questions
+those responses answer**, staff work, decision history with actor attribution,
+and a document inventory. Add `?format=text` for a plain-text report that
+stands alone without the application.
+
+Restricted to consultants. A committee member cannot obtain through an export
+what they cannot read in the app — the export is a different format for the
+same authority, never a wider one.
+
+Never included: credential hashes, sessions, invitation tokens, API keys, or
+any other search. **Sealed scores stay sealed**, and are reported as withheld
+rather than quietly omitted. External documents are named so a reviewer knows
+what to retrieve from the repository that holds them.
+
+Material actions carry a stable actor id alongside a display name. The shared
+firm sign-in is marked `shared-account` and stated to identify the firm rather
+than an individual. Entries predating actor ids are labelled `name-only`, not
+presented as attributed.
+
+Every bundle states that this is **recoverable history, not a tamper-evident
+audit log**. If the county requires tamper-evident audit, that is separate
+infrastructure Slate does not provide.
+
+Decisions the pilot depends on that cannot be answered in code are registered
+in **[docs/pilot-decisions.md](docs/pilot-decisions.md)**.
+
 ## Monitoring
 
 `GET /api/health` is cheap liveness for the platform health check.

@@ -148,6 +148,22 @@ async function revisionOf(id, cookie) {
     assert.ok(res.status >= 400, 'expected refusal, got ' + res.status);
   });
 
+  // The export column of the matrix. Left open in DEP-02 because the export
+  // did not exist yet; it does now (DEP-10).
+  await check('the records export is refused to the committee', async () => {
+    const res = await api('/api/searches/' + own + '/export', { cookie: member });
+    assert.ok(res.status === 403 || res.status === 404, 'expected refusal, got ' + res.status);
+  });
+
+  await check('the records export is refused to an unrelated committee member', async () => {
+    const res = await api('/api/searches/' + own + '/export', { cookie: outsider });
+    assert.strictEqual(res.status, 404, 'expected 404, got ' + res.status);
+  });
+
+  await check('the records export requires a session', async () => {
+    assert.strictEqual((await api('/api/searches/' + own + '/export')).status, 401);
+  });
+
   await check('archive actions are refused to the committee', async () => {
     const res = await api('/api/searches/' + own, {
       cookie: member, method: 'DELETE', revision: await revisionOf(own, member)

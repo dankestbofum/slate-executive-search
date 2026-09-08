@@ -24,7 +24,11 @@ function reconcile(search, before) {
   if (!before) return;
   const at = new Date().toISOString();
   const who = search.activity?.[0]?.who || 'Search team';
-  const remember = entry => search.history.push({ at, who, ...clone(entry) });
+  // The stable account id alongside the display name. Entries written before
+  // DEP-10 carry only a name; the export reports that rather than inventing an
+  // id for them.
+  const by = search.activity?.[0]?.by || null;
+  const remember = entry => search.history.push({ at, who, by, ...clone(entry) });
   const stale = (keys, reason) => {
     for (const key of keys) {
       if (search.artifacts?.[key]) search.staleArtifacts[key] = reason;

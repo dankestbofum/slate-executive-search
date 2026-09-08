@@ -31,8 +31,9 @@ async function suite(file, suiteEnv) {
     const storage = await suite('storage.js', suiteEnv);
     const recover = await suite('recovery.js', suiteEnv);
     const monitoring = await suite('monitoring.js', suiteEnv);
+    const exports_ = await suite('export.js', suiteEnv);
     const regression = await suite('integrity.js', suiteEnv);
-    process.exitCode = baseline || counties || regression || security || roles || storage || recover || monitoring;
+    process.exitCode = baseline || counties || regression || security || roles || storage || recover || monitoring || exports_;
     console.log('Isolated test data: ' + directory);
   } catch (error) { console.error(error); process.exitCode = 1; }
   finally { server.kill(); }

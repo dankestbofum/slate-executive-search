@@ -171,7 +171,7 @@ function blankSearch(input, user){
     scores: {},
     notesBy: {},
     released: false,
-    activity: [{ at: now(), who: user.name, x: 'opened the search' }]
+    activity: [{ at: now(), who: user.name, by: user.id || null, role: user.role || null, x: 'opened the search' }]
   };
 }
 
@@ -761,6 +761,10 @@ module.exports = {
   },
   touch(search, user, x){
     search.updatedAt = now();
-    if (x) search.activity.unshift({ at: now(), who: user.name, x });
+    // `who` is the display name a reader recognises; `by` is the stable account
+    // id a record has to carry, because names change and two people can share
+    // one. `role` separates a firm decision from a committee action without
+    // needing to resolve the account later.
+    if (x) search.activity.unshift({ at: now(), who: user.name, by: user.id || null, role: user.role || null, x });
   }
 };
