@@ -26,6 +26,7 @@ const media = require('./media');
 const recovery = require('./recovery');
 const telemetry = require('./telemetry');
 const exporter = require('./export');
+const candidates = require('./candidates');
 const {
   assembleBrochure, applyBrochureDefaults, packTheme, packScheme,
   PLACE_FIELDS, GOV_FIELDS, PACK_THEMES, PACK_SCHEMES
@@ -830,6 +831,63 @@ app.post('/api/archives/:id/restore', requireUser, (req, res) => {
  * offices are separately elected, and the record has to show which of the two
  * happened.
  */
+/* ---------------------------------------------------------------------------
+ * Candidate documents and communications (DEP-08)
+ *
+ * Both are staff-recorded. Slate stores references and a contact log; it does
+ * not hold resumes and does not send messages.
+ * ------------------------------------------------------------------------- */
+
+function candidateOr404(req, res){
+  const candidate = (req.search.candidates || []).find(c => c.id === req.params.cid);
+  if (!candidate) { res.status(404).json({ error: 'Candidate not found.' }); return null; }
+  return candidate;
+}
+
+app.post('/api/searches/:id/candidates/:cid/documents', requireUser, requireSearch, requireEditor, (req, res) => {
+  const candidate = candidateOr404(req, res);
+  if (!candidate) return;
+
+  const invalid = candidates.validateDocument(req.body);
+  if (invalid) return res.status(400).json({ error: invalid });
+
+  const record = candidates.addDocument(candidate, req.body, req.user);
+  db.touch(req.search, req.user, 'recorded a ' + record.kind + ' for ' + candidate.name);
+  db.persist();
+  res.json(painted(req, req.search));
+});
+
+app.delete('/api/searches/:id/candidates/:cid/documents/:docId', requireUser, requireSearch, requireEditor, (req, res) => {
+  const candidate = candidateOr404(req, res);
+  if (!candidate) return;
+
+  const before = (candidate.documents || []).length;
+  candidate.documents = (candidate.documents || []).filter(d => d.id !== req.params.docId);
+  if (candidate.documents.length === before) return res.status(404).json({ error: 'Document not found.' });
+
+  db.touch(req.search, req.user, 'removed a document reference for ' + candidate.name);
+  db.persist();
+  res.json(painted(req, req.search));
+});
+
+app.post('/api/searches/:id/candidates/:cid/communications', requireUser, requireSearch, requireEditor, (req, res) => {
+  const candidate = candidateOr404(req, res);
+  if (!candidate) return;
+
+  const invalid = candidates.validateCommunication(req.body);
+  if (invalid) return res.status(400).json({ error: invalid });
+
+  const record = candidates.addCommunication(candidate, req.body, req.user);
+  db.touch(req.search, req.user, 'logged ' + record.channel + ' contact with ' + candidate.name);
+  db.persist();
+  res.json(painted(req, req.search));
+});
+
+/** Who has not been contacted, and whose follow-up date has passed. */
+app.get('/api/searches/:id/follow-ups', requireUser, requireSearch, requireEditor, (req, res) => {
+  res.json(candidates.followUps(req.search));
+});
+
 app.put('/api/searches/:id/verification', requireUser, requireSearch, requireEditor, (req, res) => {
   const invalid = jurisdictions.validateVerification(req.body);
   if (invalid) return res.status(400).json({ error: invalid });
@@ -1551,6 +1609,30 @@ app.get('/api/apply/:token', candidateLimit, (req, res) => {
       submitted2: Boolean(c.survey2),
       sent2,
       deadline2: c.survey2Deadline || '',
+      // Proof of what arrived and when. Returned on every load so a candidate
+      // who lost the response can reload and see their submission stood,
+      // instead of guessing and sending it again.
+      receipts: candidates.receipts(c),
+      // Whatever they had typed but not sent, if it has not expired.
+      drafts: {
+        survey1: candidates.readDraft(c, 'survey1'),
+        survey2: candidates.readDraft(c, 'survey2')
+      },
+      deadlines: {
+        survey2: c.survey2Deadline || null,
+        // Stated rather than left to be inferred from a bare date.
+        enforced: false,
+        note: c.survey2Deadline
+          ? 'This date is when the search team plans to review responses. It is not enforced by this page; '
+            + 'if you need more time, contact the team using the details below.'
+          : null,
+        timezone: process.env.SLATE_TIMEZONE || 'America/Phoenix'
+      },
+      instructions: String(process.env.SLATE_CANDIDATE_INSTRUCTIONS || '').trim() || null,
+      privacyNotice: String(process.env.SLATE_PRIVACY_NOTICE || '').trim() || null,
+      privacyNoticeConfigured: Boolean(String(process.env.SLATE_PRIVACY_NOTICE || '').trim()),
+      correctionNote: 'If you need to change an answer after submitting, contact the search team. '
+        + 'They can reopen the questionnaire; your original response is kept either way.',
       // A candidate who cannot submit, or who needs an accommodation to
       // complete the questionnaire, must have somewhere to go that is not a
       // dead end. Empty until an operator configures it, and the page says so
@@ -1574,18 +1656,71 @@ app.post('/api/apply/:token', candidateLimit, (req, res) => {
     if (which === 'survey2' && !c.survey2SentAt) {
       return res.status(400).json({ error:'The search team has not sent this questionnaire yet.' });
     }
-    if (c[which]) {
-      return res.status(409).json({ error:'This questionnaire was already submitted.' });
-    }
     if (!issued || req.body?.surveyVersion !== issued.version) return res.status(409).json({ error:'Reload this questionnaire before submitting. Your answers have not been saved.' });
     const invalid = integrity.validateAnswers(issued.survey, req.body?.answers);
     if (invalid) return res.status(400).json({ error:invalid });
-    c[which] = { at: db.now(), answers: req.body.answers, ...integrity.clone(issued) };
-    db.touch(s, { name:c.name }, 'submitted the '+which+' questionnaire');
+
+    // Fingerprint of exactly what was sent, so a retry can be told apart from
+    // a different set of answers.
+    const digest = integrity.digest(req.body.answers);
+
+    if (c[which]) {
+      const existing = c[which];
+      // The submission committed but the candidate never saw the response:
+      // the connection dropped, the phone suspended the tab, they hit submit
+      // twice. Returning an error here is what pushes someone into sending a
+      // second, conflicting set of answers. Their work is safe, so say so.
+      if (existing.digest === digest && existing.version === issued.version) {
+        return res.json({
+          ok: true,
+          duplicate: true,
+          receipt: candidates.receiptOf(c, which),
+          message: 'This questionnaire was already received. Your answers are safe; nothing was sent twice.'
+        });
+      }
+      // Genuinely different answers against an already-submitted questionnaire.
+      // Never silently overwrite a submitted response: the first one is part of
+      // the record, and replacing it is a correction a person has to make.
+      return res.status(409).json({
+        error: 'This questionnaire was already submitted with different answers. Your earlier response is safe. '
+          + 'Contact the search team to request a correction; they can reopen it for you.',
+        receipt: candidates.receiptOf(c, which),
+        support: support()
+      });
+    }
+
+    c[which] = { at: db.now(), answers: req.body.answers, digest, ...integrity.clone(issued) };
+    candidates.clearDraft(c, which);
+    // Recorded as the candidate's own action, not a consultant decision.
+    db.touch(s, { name: c.name, id: null, role: 'candidate' }, 'submitted the ' + which + ' questionnaire');
     db.persist();
-    return res.json({ ok:true });
+    return res.json({ ok: true, receipt: candidates.receiptOf(c, which) });
   }
   res.status(404).json({ error:'This link is not valid.' });
+});
+
+/**
+ * Save what a candidate has typed but not sent.
+ *
+ * Server-side and expiring, rather than left in localStorage: a long answer
+ * typed on a borrowed or shared phone should not sit in that browser
+ * indefinitely with nothing to remove it.
+ *
+ * A draft can never touch a submitted response.
+ */
+app.post('/api/apply/:token/draft', candidateLimit, (req, res) => {
+  const found = db.findByInvite(req.params.token);
+  if (!found) return res.status(404).json({ error: 'This link is not valid.' });
+
+  const { search: s, candidate: c } = found;
+  const which = req.body?.which || 'survey1';
+  if (!['survey1', 'survey2'].includes(which)) return res.status(400).json({ error: 'Unknown questionnaire.' });
+
+  const result = candidates.saveDraft(c, which, req.body?.answers);
+  if (result.error) return res.status(400).json({ error: result.error });
+
+  db.persist();
+  res.json({ ok: true, savedAt: result.saved.at, expiresAt: result.saved.expiresAt });
 });
 
 app.get('/apply/:token', candidateLimit, (_req, res) => {

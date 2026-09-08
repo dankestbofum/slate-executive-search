@@ -219,6 +219,41 @@ A failing run means the commit is not eligible to be marked ready for release.
 Browser, accessibility, and print coverage are not in CI yet, so a green run is
 not evidence of those.
 
+## Candidate intake and submission recovery
+
+**A committed submission is never lost to a dropped connection.** Submitting
+returns a receipt with a reference and a timestamp, and the receipt comes back
+on every reload. If the same answers arrive again — the response was lost, the
+phone suspended the tab, they pressed submit twice — the server returns 200
+with the original receipt and says the questionnaire was already received.
+Previously this returned 409, which reads as failure and pushes a candidate
+into sending a second, conflicting set of answers.
+
+Genuinely *different* answers against a submitted questionnaire are still
+refused, with the original kept and instructions to request a correction. A
+submitted response is part of the record; replacing it is a decision a person
+makes, not a side effect of a retry.
+
+**Drafts are server-side and expire** (14 days). A long answer typed on a phone
+survives a lost connection without leaving the candidate's text sitting in the
+browser of a possibly shared device with nothing to remove it. A draft can
+never modify a submitted response, and is cleared once its questionnaire is
+submitted.
+
+**Documents are references, not files.** Resumes live in the county-approved
+repository. Slate records that a document was received and where it is;
+`https` links only, so a record cannot point at `file://` or a
+`javascript:` URL. Reference and background material is flagged `restricted`.
+
+**The communication log is staff-recorded.** Slate sends nothing, so every
+entry is labelled `staff-recorded` with a note that delivery cannot be
+confirmed. `GET /api/searches/:id/follow-ups` lists candidates never
+contacted and those whose follow-up date has passed.
+
+Candidate pages state whether a date is enforced (it is not) and in which
+timezone, and carry the support contact, correction instructions, and the
+privacy notice — reporting the notice as missing until one is configured.
+
 ## County searches: facts that need a person
 
 A county's authority structure cannot be inferred from a position title. Two
