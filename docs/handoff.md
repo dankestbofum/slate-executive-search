@@ -1,0 +1,214 @@
+# Slate implementation handoff
+
+Response to `CLAUDE_DEPLOYMENT_HANDOFF.md` §10.
+
+**Release proposed for review:** `9db2042b79efd41cb298140841462f313e00ecd0` on `main`.
+
+**Gate reached: none of the three.** Not "ready for synthetic staging", not
+"ready for county review", not "ready for authorized pilot launch". The
+software is implemented; the evidence those gates require does not exist. §6
+below says exactly what is missing and why.
+
+---
+
+## 1. Ticket status
+
+All twelve tickets are implemented with automated coverage. "Implemented" here
+means the code exists and is tested; it does not mean the ticket's acceptance
+criteria are satisfied, which for several tickets requires evidence only a
+person or real infrastructure can produce.
+
+| Ticket | Commit | Implemented | Acceptance met |
+|---|---|---|---|
+| DEP-01 Runtime and release pipeline | `5a57a6a` | yes | **partial** — container never built |
+| DEP-02 Accounts, sessions, permissions | `caae399` | yes | yes |
+| DEP-03 HTTP security and input bounds | `b0f1054` | yes | yes (CSP verified later, in DEP-12) |
+| DEP-04 Failure-safe storage | `c0a6ac2` | yes | **partial** — no load test; shutdown unverified locally |
+| DEP-05 Scheduled recovery off-volume | `b62d3c5` | yes | **no** — no manual restore drill |
+| DEP-06 Health and monitoring | `2596afe` | yes | **partial** — no named operator or alert recipient |
+| DEP-07 County setup and fact verification | `2ac3e4f` | yes | **partial** — drafts never generated or reviewed |
+| DEP-08 Candidate intake and recovery | `3f3a319` | yes | **partial** — no real-device submission |
+| DEP-09 Withdrawal, disposition, closeout | `62e4250` | yes | **partial** — API only, no consultant UI |
+| DEP-10 Records export and attribution | `c922337` | yes | **partial** — no county records review |
+| DEP-11 AI reliability and cost control | `9db2042` | yes | **no** — no real model call |
+| DEP-12 Browser, accessibility, print | `01409a3` | yes | **partial** — Chromium only; no print check |
+
+Two commits precede these: `48a0d63` squashed pre-existing uncommitted work
+into a working baseline (before it, `HEAD` could neither build nor test), and
+`76598b9` added the plan and the prior audit.
+
+## 2. Commands, versions, results
+
+```bash
+npm ci
+npm run check          # 46 files parsed, 0 failed
+npm test               # 476 checks, exit 0
+npm run test:browser   # 39 checks, 0 failed
+npm run preflight      # AI key and model entitlement (not run against a live account)
+```
+
+| | |
+|---|---|
+| Runtime under test | Node **v22.18.0** (Windows) |
+| Runtime in CI and the image | Node **24.20.0** LTS, pinned by digest |
+| Browser | Chromium 153 (Playwright 1.63), desktop + Pixel 7 emulation |
+| Container | **never built** — Docker unavailable in the development environment |
+
+Server suite composition: 243 baseline, 37 integrity regression, 30 county, 26
+security, 24 roles, 20 candidates, 19 disposition, 18 AI, 17 storage, 17
+export, 14 monitoring, 11 recovery.
+
+The suite grew from **298 to 476**, plus 39 browser checks that did not exist.
+
+## 3. Stubs versus real external services
+
+**Nothing in any automated suite calls an external service.** No paid model
+call has been made at any point.
+
+| Area | How it was tested | Real service used |
+|---|---|---|
+| AI drafting and research | Deterministic failure paths, offline; the suite runs with no API key | **no** |
+| Model IDs | Confirmed valid against the current API reference | **no** — account entitlement unverified |
+| Outbound site fetching | Synthetic HTML; loopback, link-local, RFC1918, `file://`, `gopher://` all refused | **no** |
+| Off-volume backup | Local temp directory as the second failure domain | **no** — no cloud destination |
+| Alert delivery | Local webhook receiver; raise, deduplicate, clear proven end to end | **no** |
+| Fonts | Downloaded once at vendoring time; served first-party thereafter | n/a |
+
+## 4. Recovery, monitoring, rollback
+
+**Restore:** the full path is exercised automatically on every run —
+snapshot → copy off-volume → restore into an empty environment → verify the
+search, committee seats and accounts, candidate answers *with their original
+questions*, scores, history and brochure image, and that old sessions do not
+come back. Measured at **36ms against synthetic data**.
+
+That figure proves the mechanism and nothing about real recovery. **No manual
+drill against real infrastructure has been run**, so there is no measured
+recovery time, no measured recoverable snapshot age, and no evidence an
+operator can do it under pressure. `docs/operations.md` §5 has the drill with
+blanks for both figures.
+
+**Backup configuration:** hourly in-process snapshots, verified before
+publication. Off-volume copies are implemented (`SLATE_BACKUP_MIRROR` or
+`SLATE_BACKUP_COMMAND`, optional AES-256-GCM) but **no destination is
+configured**, so `/api/ready` reports `offVolumeCopy: "NOT CONFIGURED"`.
+
+**Monitoring owner: none.** Alerts on `backup-overdue`, `storage-unwritable`
+and `error-rate` work and are deduplicated, but no destination and no recipient
+are configured. An alert with no named recipient is not monitoring.
+
+**Rollback:** the path is defined and partly enforced — the store carries a
+schema version, and a store written by a newer release is refused rather than
+downgraded, which is the case where rollback turns into data loss. **It has
+never been executed.** Rolling back the application and its matching snapshot
+together is documented, not demonstrated.
+
+## 5. What was found and fixed
+
+Beyond the planned work, testing found defects that source reading had not:
+
+- **The CSP shipped in DEP-03 was blocking the application's own styling.** It
+  was verified by asserting on the response header; a real browser refused all
+  37 inline style attributes. Found in DEP-12, four tickets later.
+- **The candidate support contact was never rendered.** DEP-06 added it to the
+  API and nothing displayed it, so a candidate needing an accommodation still
+  had nowhere to go. Same for the submission receipt from DEP-08.
+- **Questionnaire fields had no accessible names** — critical, on the one page
+  used by members of the public.
+- **A committed submission whose response was lost returned 409**, which reads
+  as failure and invites a duplicate, conflicting submission.
+- **Media replacement deleted the committed photo before saving the record**, so
+  a failed save rolled back over an image that no longer existed.
+- **Fetched web pages were interpolated raw into the research prompt.**
+- **A closed search still accepted new candidates** — the freeze was wired to
+  one route rather than to the request path.
+
+## 6. Why no gate is reached
+
+Gate 1, *technical staging ready*, requires: a supported container, all
+relevant automated checks passing, security and storage controls implemented,
+and synthetic browser and recovery evidence complete.
+
+Three of those four hold. The container does not: **no image has ever been
+built, on any machine.** Docker is unavailable in the development environment,
+CI has never been observed to run, and the `container` job — including the
+`docker stop` SIGTERM check — has not executed. Until a build is observed,
+"supported container" is an assumption.
+
+Additional evidence gaps that block the later gates:
+
+| Missing | Blocks |
+|---|---|
+| Any observed CI run | Gate 1 |
+| Manual restore drill on real infrastructure | Gate 3 (the plan: "no off-volume restore evidence means no live pilot") |
+| One authorised real draft and research run, with measured latency and cost | Gate 3 |
+| Safari/WebKit, a real phone, screen-reader testing, print output | Gate 1 |
+| Load test against the pilot envelope | Gate 1 |
+| Named operator, backup operator, alert recipient | Gate 3 |
+| Staffed candidate support contact | Gate 2 |
+| Every decision in `docs/pilot-decisions.md` | Gate 2 |
+
+## 7. Residual limitations
+
+- **Three tickets have no user interface.** Outcomes and closeout (DEP-09),
+  county fact verification (DEP-07), and document and communication logging
+  (DEP-08) are reachable only through the API. A consultant cannot do any of it
+  in the app today.
+- **Automated accessibility scanning finds roughly a third of real problems.**
+  Zero violations is a floor, not a conformance claim.
+- **The decision history is recoverable history, not a tamper-evident audit
+  log.** Anyone with write access to the store could alter it. Every export
+  says so.
+- **Rate limits and the AI ledger are per process and in memory.** Consistent
+  with the single-writer model; not a defence against a distributed source, and
+  they reset on restart.
+- **The write lock is advisory and pid-based.** It protects one host, not two
+  hosts sharing a network volume.
+- **Bearer links remain bearer links.** `no-store` and `no-referrer` reduce how
+  long and how widely a URL survives; they do not make it a session.
+- **AI cost figures are estimates** against a published price table, not a bill.
+
+## 8. Decisions that remain with the owner and the county
+
+Registered in full in `docs/pilot-decisions.md`, none decided. The ones that
+block live use regardless of code:
+
+- Records custodian, classification, retention, legal hold, disclosure position
+- County approval of AI processing, and a spending cap
+- Off-volume backup destination, and who can restore if the hosting account is unavailable
+- A staffed candidate support and accommodation contact
+- Named primary and backup operator, and an alert recipient
+
+The plan's rule stands: **do not enter real candidate information while a P0
+control is unverified.**
+
+## 9. Migration implications of this release
+
+The store gains `schemaVersion` (0 → 1) on first boot, taking a pre-migration
+snapshot first and failing closed if the migration errors. All other additions
+are additive: `verification`, `dispositions`, `lifecycle`, `documents`,
+`communications`, `drafts`, and actor ids on new activity. Existing JSON keys
+are unchanged.
+
+Brochure photos move to content-addressed filenames. Legacy `slot.jpg` files
+are still served, so existing brochures keep rendering.
+
+**A store written by this release cannot be read by an earlier one.** Rolling
+back requires restoring the snapshot that matches the release.
+
+## 10. Recommended next steps, in order
+
+1. **Read a CI run.** Everything reported here is local verification. The
+   container job has never executed.
+2. **Run `npm run preflight`** against the real account to confirm model
+   entitlement. Costs nothing; consumes no tokens.
+3. **Configure an off-volume backup destination and run the manual restore
+   drill** (`docs/operations.md` §5). Record elapsed time and snapshot age.
+4. **Name an operator, a backup, and an alert recipient.** Configure the
+   destination and trigger a test alert.
+5. **Build the missing user interfaces** for outcomes, closeout, and fact
+   verification, or accept that those steps are API-only for the pilot.
+6. **Authorise one staging AI run** against synthetic records to measure
+   latency and cost.
+7. **Start the county conversations** in `docs/pilot-decisions.md`. Several
+   have lead times measured in weeks and none depend on further code.

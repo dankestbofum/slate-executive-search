@@ -206,6 +206,23 @@ it at startup and on `/api/health`:
 Use it to confirm which commit is actually serving before and after a deploy or
 rollback. Building by hand without the build argument reports `dev`.
 
+## Deployment status
+
+**No release gate is reached.** The twelve DEP tickets from
+`CLAUDE_DEPLOYMENT_HANDOFF.md` are implemented and tested, but several
+acceptance criteria need evidence only real infrastructure or a person can
+produce — a built container, a manual restore drill, one authorised AI run,
+real-device browser testing, and the county decisions.
+
+- **[docs/handoff.md](docs/handoff.md)** — what was built, what was verified,
+  what was not, and why no gate is reached
+- **[docs/release-checklist.md](docs/release-checklist.md)** — the gates, box by box
+- **[docs/pilot-decisions.md](docs/pilot-decisions.md)** — decisions that cannot be answered in code
+- **[docs/operations.md](docs/operations.md)** — recovery, monitoring, incidents
+- **[docs/test-evidence.md](docs/test-evidence.md)** — what the suites do and do not prove
+
+Do not enter real candidate information while a P0 control is unverified.
+
 ## AI drafting: limits and human review
 
 Drafting and research are **advisory**. A consultant reviews sources, corrects
