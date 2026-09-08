@@ -623,7 +623,7 @@ async function researchCity({ city, website, position, state, jurisdictionType='
   const anthropic = client();
   const model = pickModel(premium);
   let site = { canonical: website, pages: [] };
-  try { site = await fetchCitySite(website); }
+  try { site = await fetchCitySite(website, jurisdictions.typeOf(jurisdictionType)); }
   catch (err) {
     if (err.code === 'BAD_URL') throw err;
   }

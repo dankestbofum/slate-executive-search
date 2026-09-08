@@ -21,6 +21,7 @@
 
 const path = require('path');
 const media = require('./media');
+const jurisdictions = require('./jurisdictions');
 
 const FORMAT_VERSION = 1;
 
@@ -157,6 +158,11 @@ function build(search, { viewer, users, dataDir, release }) {
       createdBy: attribute({ by: search.createdBy }, lookupUser)
     },
 
+    // Which authority facts a person confirmed, with the source and the date
+    // that source was current. This is the evidence for every material public
+    // claim in the recruiting material.
+    factVerification: jurisdictions.factStatus(search),
+
     // Where factual claims came from, so a reviewer can check them.
     sources: {
       website: search.website || null,
@@ -275,7 +281,8 @@ function build(search, { viewer, users, dataDir, release }) {
         'External documents held outside Slate (see documents.external).',
         'Communications with candidates, until the manual contact log in DEP-08 exists.',
         'Candidate disposition beyond stage, until DEP-09 defines outcomes.'
-      ].filter(Boolean)
+      ].filter(Boolean),
+      unconfirmedFacts: jurisdictions.factStatus(search).outstanding
     }
   };
 

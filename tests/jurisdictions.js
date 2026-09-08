@@ -105,5 +105,123 @@ async function request(url, method='GET', body) {
   controls.jurisdictionType.value = 'municipality';
   vm.runInContext('updateJurisdictionFields(form)',ui);
   check('switching back preserves custom facts', () => { assert.equal(controls.fog.value,'Custom government'); assert.equal(controls.position.placeholder,'City Manager'); });
+
+  /* ---------------- DEP-07: county site discovery ---------------- */
+
+  const site = require('../server/site');
+  const countyHtml = [
+    '<a href="/news">News</a>',
+    '<a href="/city-manager">City Manager</a>',
+    '<a href="/board-of-supervisors">Board of Supervisors</a>',
+    '<a href="/elected-officials">Elected Officials</a>',
+    '<a href="/organizational-chart">Org Chart</a>',
+    '<a href="/adopted-budget">Adopted Budget</a>',
+    '<a href="/strategic-plan">Strategic Plan</a>',
+    '<a href="/departments">Departments</a>'
+  ].join('');
+
+  // Synthetic HTML only. CI must never depend on a live county website.
+  const countyPaths = site.extractLinks(countyHtml, 'https://example.gov/', 'county')
+    .map(u => new URL(u).pathname);
+  check('county discovery finds board, elected offices and org chart', () => {
+    for (const wanted of ['/board-of-supervisors', '/elected-officials', '/organizational-chart']) {
+      assert.ok(countyPaths.includes(wanted), 'county discovery missed ' + wanted);
+    }
+  });
+  check('county discovery ranks county pages ahead of municipal ones', () => {
+    assert.ok(countyPaths.indexOf('/board-of-supervisors') < countyPaths.indexOf('/city-manager'),
+      'a city-manager page outranked the board of supervisors on a county search');
+  });
+
+  const municipalPaths = site.extractLinks(countyHtml, 'https://example.gov/', 'municipality')
+    .map(u => new URL(u).pathname);
+  check('municipal discovery is unchanged and still prefers the city manager', () => {
+    assert.equal(municipalPaths[0], '/city-manager');
+  });
+
+  check('boilerplate paths differ by jurisdiction', () => {
+    const county = site.extraPaths('county');
+    const municipal = site.extraPaths('municipality');
+    assert.ok(county.includes('/board-of-supervisors'));
+    assert.ok(county.includes('/county-administrator'));
+    assert.ok(municipal.includes('/city-manager'));
+    assert.ok(!municipal.includes('/board-of-supervisors'), 'a municipal search would fetch county pages');
+  });
+
+  check('discovery survives a relative redirect target', () => {
+    const relative = site.extractLinks('<a href="board-of-supervisors/members">M</a>', 'https://example.gov/government/', 'county');
+    assert.equal(new URL(relative[0]).pathname, '/government/board-of-supervisors/members');
+  });
+
+  /* ---------------- DEP-07: fact verification ---------------- */
+
+  check('county authority facts start unconfirmed', () => {
+    const status = jurisdictions.factStatus({ jurisdictionType:'county' });
+    assert.equal(status.applies, true);
+    assert.equal(status.confirmedCount, 0);
+    assert.equal(status.readyToPublish, false, 'an empty search reported itself ready to publish');
+    assert.ok(status.outstanding.includes('Separately elected offices'));
+  });
+
+  check('a material fact needs a source, a date and a confirmer', () => {
+    const asserted = jurisdictions.factStatus({
+      jurisdictionType:'county',
+      verification: { governingBody: { value:'Board of Supervisors' } }
+    });
+    const field = asserted.fields.find(f => f.key === 'governingBody');
+    assert.equal(field.state, 'unverified', 'a bare assertion counted as confirmed');
+    assert.deepEqual(field.needs, ['source', 'date the source was current', 'who confirmed it']);
+  });
+
+  check('a fully evidenced fact is confirmed', () => {
+    const status = jurisdictions.factStatus({
+      jurisdictionType:'county',
+      verification: { governingBody: {
+        value:'Board of Supervisors', source:'https://example.gov/board', asOf:'2026-09-01', confirmedBy:'County HR Director'
+      } }
+    });
+    assert.equal(status.fields.find(f => f.key === 'governingBody').state, 'confirmed');
+    assert.equal(status.confirmedCount, 1);
+  });
+
+  const verifyUrl = url + '/verification';
+  async function putVerification(body) {
+    const revision = String((await request(url)).body.revision);
+    const response = await fetch(process.env.SLATE_URL + verifyUrl, {
+      method: 'PUT',
+      headers: { 'content-type':'application/json', cookie, 'if-match': revision },
+      body: JSON.stringify(body)
+    });
+    return { status: response.status, body: await response.json() };
+  }
+  const recorded = await putVerification({
+    governingBody: { value:'Board of Supervisors', source:'https://example.gov/board', asOf:'2026-09-01', confirmedBy:'County HR Director' },
+    separatelyElected: { value:'Sheriff, Assessor, Recorder, Treasurer, County Attorney' }
+  });
+  check('recorded facts persist and are reported on the search', () => {
+    assert.equal(recorded.status, 200);
+    const status = recorded.body.factStatus;
+    assert.equal(status.fields.find(f => f.key === 'governingBody').state, 'confirmed');
+    assert.equal(status.fields.find(f => f.key === 'separatelyElected').state, 'unverified');
+  });
+
+  check('the server stamps who confirmed a fact, not the client', () => {
+    const field = recorded.body.factStatus.fields.find(f => f.key === 'governingBody');
+    assert.ok(field.confirmedAt, 'no confirmation timestamp was recorded');
+    assert.ok(Date.parse(field.confirmedAt) > 0, 'the confirmation timestamp is not a real date');
+  });
+
+  const badField = await putVerification({ notARealFact: { value:'x' } });
+  const badProp = await putVerification({ governingBody: { sneaky:'x' } });
+  check('the verification endpoint validates its input', () => {
+    assert.equal(badField.status, 400);
+    assert.equal(badProp.status, 400);
+  });
+
+  check('a municipal search does not carry county fact requirements', () => {
+    const status = jurisdictions.factStatus({ jurisdictionType:'municipality' });
+    assert.equal(status.applies, false);
+  });
+
   console.log(checks + ' county checks passed');
 })().catch(error=>{ console.error(error); process.exitCode=1; });

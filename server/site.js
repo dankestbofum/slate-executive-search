@@ -41,7 +41,7 @@ function blockedUrlError(){
 function publicUrl(raw){
   const trimmed = String(raw || '').trim();
   if (!trimmed) {
-    const err = new Error('Enter the official city website.');
+    const err = new Error('Enter the official jurisdiction website.');
     err.code = 'BAD_URL';
     throw err;
   }
@@ -143,26 +143,60 @@ function htmlToText(html){
     .trim();
 }
 
-function extractLinks(html, base){
+// Pages worth reading on any local-government site.
+const SHARED_LINKS = 'budget|finance|about|government|community|department|census';
+
+// A county site does not have a city manager or a council, and the pages that
+// carry its authority structure are named differently. Looking only for
+// municipal words on a county site finds the generic pages and misses the ones
+// that say who the administrator reports to and which offices are separately
+// elected.
+const COUNTY_LINKS = 'county-administrator|countyadministrator|county-manager|countymanager'
+  + '|board-of-supervisors|boardofsupervisors|supervisor|elected-official|electedofficials'
+  + '|organizational-chart|org-chart|strategic-plan|adopted-budget|county-government|our-county';
+
+const MUNICIPAL_LINKS = 'city-manager|citymanager|town-manager|council|our-city|city-government';
+
+function linkPattern(jurisdictionType){
+  // Both sets are always allowed. A county site that still uses "council"
+  // somewhere should not have that page skipped, and the municipal regression
+  // fixture must keep behaving exactly as before.
+  const order = jurisdictionType === 'county'
+    ? [COUNTY_LINKS, SHARED_LINKS, MUNICIPAL_LINKS]
+    : [MUNICIPAL_LINKS, SHARED_LINKS, COUNTY_LINKS];
+  return new RegExp(order.join('|'));
+}
+
+function extractLinks(html, base, jurisdictionType){
   const out = [];
   const seen = new Set();
+  const wanted = linkPattern(jurisdictionType);
+  const preferred = jurisdictionType === 'county' ? new RegExp(COUNTY_LINKS) : new RegExp(MUNICIPAL_LINKS);
+  const ranked = [];
   const re = /href\s*=\s*["']([^"'#]+)["']/gi;
   let m;
   while ((m = re.exec(String(html||'')))) {
     let u;
     try { u = new URL(m[1], base); } catch { continue; }
     const hay = (u.pathname + ' ' + decodeURIComponent(u.pathname)).toLowerCase();
-    if (!/budget|finance|about|government|city-manager|citymanager|council|community|department|census|our-city/.test(hay)) continue;
+    if (!wanted.test(hay)) continue;
     const key = u.origin + u.pathname.replace(/\/$/, '');
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push(u.toString());
+    // Pages matching this jurisdiction's own vocabulary come first, so the
+    // fetch budget is spent on them rather than on generic pages that happen
+    // to appear earlier in the markup.
+    ranked.push({ url: u.toString(), score: preferred.test(hay) ? 0 : 1 });
+  }
+  ranked.sort((a, b) => a.score - b.score);
+  for (const item of ranked) {
+    out.push(item.url);
     if (out.length >= 8) break;
   }
   return out;
 }
 
-async function fetchOnce(url, hops){
+async function fetchOnce(url, hops, jurisdictionType){
   if (hops > 5) return null;
   await assertPublicHost(url);
   const res = await fetch(url.toString(), {
@@ -177,7 +211,7 @@ async function fetchOnce(url, hops){
   if ([301, 302, 303, 307, 308].includes(res.status)) {
     const loc = res.headers.get('location');
     if (!loc) return null;
-    return fetchOnce(new URL(loc, url), hops + 1);
+    return fetchOnce(new URL(loc, url), hops + 1, jurisdictionType);
   }
   if (!res.ok) return null;
   const ct = (res.headers.get('content-type') || '').toLowerCase();
@@ -187,32 +221,47 @@ async function fetchOnce(url, hops){
   const html = buf.toString('utf8');
   const text = htmlToText(html).slice(0, 9000);
   if (!text) return null;
-  return { url: url.toString(), text, links: extractLinks(html, url) };
+  return { url: url.toString(), text, links: extractLinks(html, url, jurisdictionType) };
 }
 
-async function fetchPage(raw){
+async function fetchPage(raw, jurisdictionType){
   try {
-    return await fetchOnce(publicUrl(raw), 0);
+    return await fetchOnce(publicUrl(raw), 0, jurisdictionType);
   } catch {
     return null;
   }
 }
 
-const EXTRA_PATHS = [
-  '/government',
-  '/city-government',
-  '/city-manager',
-  '/departments',
-  '/about',
-  '/our-community',
-  '/finance',
-  '/budget'
+// Boilerplate paths to try when a home page links to nothing useful. The
+// county list names the pages that actually carry a county's authority
+// structure: who the administrator reports to, which offices are separately
+// elected, and what the board adopted.
+const SHARED_PATHS = ['/government', '/departments', '/about', '/finance', '/budget'];
+
+const MUNICIPAL_PATHS = ['/city-government', '/city-manager', '/our-community'];
+
+const COUNTY_PATHS = [
+  '/county-administrator',
+  '/county-manager',
+  '/board-of-supervisors',
+  '/supervisors',
+  '/elected-officials',
+  '/organizational-chart',
+  '/strategic-plan',
+  '/adopted-budget',
+  '/county-government'
 ];
+
+function extraPaths(jurisdictionType){
+  return jurisdictionType === 'county'
+    ? [...COUNTY_PATHS, ...SHARED_PATHS]
+    : [...MUNICIPAL_PATHS, ...SHARED_PATHS];
+}
 
 const PAGE_LIMIT = 6;
 const FETCH_CONCURRENCY = 4;
 
-async function fetchCitySite(raw){
+async function fetchCitySite(raw, jurisdictionType = 'municipality'){
   const home = publicUrl(raw);
   await assertPublicHost(home);
   const pages = [];
@@ -226,12 +275,12 @@ async function fetchCitySite(raw){
 
   const homeUrl = home.toString();
   markSeen(home);
-  const homePage = await fetchPage(homeUrl);
+  const homePage = await fetchPage(homeUrl, jurisdictionType);
   if (homePage) pages.push(homePage);
 
   const discovered = (homePage && homePage.links) || [];
   const candidates = [];
-  for (const href of [...discovered, ...EXTRA_PATHS.map(p => new URL(p, home).toString())]) {
+  for (const href of [...discovered, ...extraPaths(jurisdictionType).map(p => new URL(p, home).toString())]) {
     let u;
     try { u = publicUrl(href); } catch { continue; }
     if (markSeen(u)) candidates.push(u.toString());
@@ -244,7 +293,7 @@ async function fetchCitySite(raw){
   // page count, while still honoring the page cap and priority order.
   for (let i = 0; i < candidates.length && pages.length < PAGE_LIMIT; i += FETCH_CONCURRENCY) {
     const batch = candidates.slice(i, i + FETCH_CONCURRENCY);
-    const results = await Promise.all(batch.map(fetchPage));
+    const results = await Promise.all(batch.map(url => fetchPage(url, jurisdictionType)));
     for (const page of results) {
       if (page && pages.length < PAGE_LIMIT) pages.push(page);
     }
@@ -252,4 +301,4 @@ async function fetchCitySite(raw){
   return { canonical: homeUrl, pages };
 }
 
-module.exports = { publicUrl, fetchCitySite };
+module.exports = { publicUrl, fetchCitySite, extractLinks, extraPaths, htmlToText };

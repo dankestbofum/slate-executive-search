@@ -207,6 +207,10 @@ function consensusFor(search, user){
 function painted(req, search){
   const out = db.decorate(search, req.user);
   out.consensus = consensusFor(search, req.user);
+  // Which authority facts are confirmed and which are still assertions. Shown
+  // on every read so the gap is visible while the work is happening, not
+  // discovered when the county reads the brochure.
+  out.factStatus = jurisdictions.factStatus(search);
   return out;
 }
 
@@ -818,6 +822,39 @@ app.post('/api/archives/:id/restore', requireUser, (req, res) => {
  * ?format=text returns the readable report; the default is the machine-readable
  * bundle. Both come from one build so they cannot drift apart.
  */
+/**
+ * Record the county's authority facts and who confirmed them.
+ *
+ * Deliberately separate from the AI-drafted material. A draft can suggest what
+ * to ask; only a person can confirm who appoints the administrator or which
+ * offices are separately elected, and the record has to show which of the two
+ * happened.
+ */
+app.put('/api/searches/:id/verification', requireUser, requireSearch, requireEditor, (req, res) => {
+  const invalid = jurisdictions.validateVerification(req.body);
+  if (invalid) return res.status(400).json({ error: invalid });
+
+  const existing = req.search.verification || {};
+  const merged = { ...existing };
+  for (const [key, record] of Object.entries(req.body || {})) {
+    const previous = existing[key] || {};
+    const next = { ...previous, ...record };
+    // Confirmation is stamped by the server. A client cannot backdate who
+    // confirmed a fact or when.
+    const changed = ['value', 'source', 'asOf', 'confirmedBy'].some(f => (previous[f] || '') !== (next[f] || ''));
+    if (changed) {
+      next.confirmedAt = next.confirmedBy ? db.now() : '';
+      next.recordedBy = req.user.id;
+    }
+    merged[key] = next;
+  }
+
+  req.search.verification = merged;
+  db.touch(req.search, req.user, 'recorded county facts');
+  db.persist();
+  res.json(painted(req, req.search));
+});
+
 app.get('/api/searches/:id/export', requireUser, requireSearch, requireEditor, (req, res) => {
   const bundle = exporter.build(req.search, {
     viewer: req.user,
@@ -1164,7 +1201,7 @@ app.post('/api/searches/:id/research', requireUser, requireSearch, requireEditor
   const city = String(Object.prototype.hasOwnProperty.call(body, 'city') ? body.city : (req.search.client || '')).trim();
   const website = String(Object.prototype.hasOwnProperty.call(body, 'website') ? body.website : (req.search.website || '')).trim();
   const premium = Boolean(body.premium);
-  if (!city) return res.status(400).json({ error:'Enter the city or jurisdiction name.' });
+  if (!city) return res.status(400).json({ error: req.search.jurisdictionType === 'county' ? 'Enter the county name.' : 'Enter the city or jurisdiction name.' });
   if (!website) return res.status(400).json({ error:'Enter the official jurisdiction website.' });
   try {
     const researchStartedAt = Date.now();

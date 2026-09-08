@@ -219,6 +219,36 @@ A failing run means the commit is not eligible to be marked ready for release.
 Browser, accessibility, and print coverage are not in CI yet, so a green run is
 not evidence of those.
 
+## County searches: facts that need a person
+
+A county's authority structure cannot be inferred from a position title. Two
+counties with identically titled administrators can differ on who appoints
+them, which departments report to them, and which offices are separately
+elected. Slate records these explicitly rather than letting a draft assert them.
+
+`PUT /api/searches/:id/verification` records eight facts — governing body,
+reporting relationship, appointment and removal authority, separately elected
+offices, departments and services in scope, employment terms, how candidates
+apply, and the responsible fact reviewer at the county.
+
+A material fact counts as **confirmed** only with a value, a source, the date
+that source was current, and a named person who confirmed it. A value alone is
+an assertion, and is reported as `unverified`. Every search read carries
+`factStatus` with what is confirmed, what is outstanding, and whether the
+material facts are complete enough to publish recruiting copy against.
+
+Confirmation timestamps are stamped by the server; a client cannot backdate who
+confirmed a fact.
+
+Site research is jurisdiction-aware: a county search looks for the board of
+supervisors, elected officials, organizational chart, strategic plan and
+adopted budget, and ranks those ahead of generic pages. Municipal discovery is
+unchanged. Discovery is tested against synthetic HTML — CI never depends on a
+live county website.
+
+**Generated text is not authoritative.** Drafts suggest what to ask; the
+county-approved job description and the county's own sources settle it.
+
 ## Records export
 
 `GET /api/searches/:id/export` produces the complete record of one search:
