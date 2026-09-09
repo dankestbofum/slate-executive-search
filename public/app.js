@@ -841,13 +841,12 @@ function vLogin(){
     <h1 class="t-title">Sign in</h1>
     <form id="login" class="stack">
       ${field('Email','', `<input class="input" name="email" type="email" value="${esc(first?.email||'')}" autocomplete="username" required>`)}
-      ${field('PIN','', `<input class="input" name="pin" type="password" maxlength="256" value="${esc(first?.pin||'')}" autocomplete="current-password" required>`)}
       <button class="btn btn--primary" type="submit">Open workspace</button>
       <button class="btn btn--ghost" type="button" data-go="home">Back to packages</button>
     </form>
     ${accounts.length?`<div class="accounts">
       <div class="t-label">${accounts.length>1?'Accounts':'Account'}</div>
-      ${accounts.map((a,i) => `${esc(a.name)} <b>${esc(a.email)}</b> · ${esc(a.pin)}${i===0&&accounts.length>1?' <span class="t-small">(shared)</span>':''}`).join('<br>')}
+      ${accounts.map((a,i) => `${esc(a.name)} <b>${esc(a.email)}</b>${i===0&&accounts.length>1?' <span class="t-small">(shared)</span>':''}`).join('<br>')}
     </div>`:''}
   </div></div>`;
 }
@@ -1379,23 +1378,9 @@ function memberRow(m, mgr){
     <div class="seat__acts">
       ${manage && m.seat==='consultant' ? `<button class="btn btn--ghost btn--sm" data-act="make-manager" data-uid="${m.userId}">Hand over the account</button>` : ''}
       ${!manage && me && you().consultant ? `<button class="btn btn--secondary btn--sm" data-act="make-manager" data-uid="${m.userId}">Take the account</button>` : ''}
-      ${manage && m.role==='committee' ? `<button class="btn btn--ghost btn--sm" data-act="reset-pin" data-uid="${m.userId}" data-name="${esc(m.name)}">New PIN</button>` : ''}
       ${manage && m.userId !== mgr?.userId ? `<button class="btn btn--ghost btn--sm" data-act="unseat" data-uid="${m.userId}" data-name="${esc(m.name)}">Remove</button>` : ''}
     </div>
   </div>`;
-}
-
-// Shown once, right after a member is seated or their PIN is reissued. There is
-// no mail server here, so this card is the only place the PIN appears.
-function pinCard(){
-  const p = state.newPin;
-  if (!p) return '';
-  return `<div class="notice notice--ok pincard"><div>
-    <div class="notice__t">Sign-in for ${esc(p.name)}</div>
-    <div class="notice__b">Read these to them now. The PIN is not shown again; you can issue a new one from the roster.</div>
-    <div class="pincard__creds"><span class="mono">${esc(p.email)}</span><span class="mono pincard__pin">${esc(p.pin)}</span></div>
-    <button class="btn btn--ghost btn--sm" data-act="dismiss-pin">Got it</button>
-  </div></div>`;
 }
 
 function vTeam(){
@@ -1407,11 +1392,10 @@ function vTeam(){
   const committeeCount = list.filter(m => m.seat === 'committee').length;
   return shell(`
     ${head('Step '+stepNo('team'),'Search committee',
-      'Everyone who gets a say in this hire, and the one consultant who runs the account. Each person seated here signs in with their own email and PIN, answers Step '+stepNo('intake')+' privately, and scores candidates later.',
+      'Everyone who gets a say in this hire, and the one consultant who runs the account. Each person seated here signs in with their own email, answers Step '+stepNo('intake')+' privately, and scores candidates later.',
       manage ? `<button class="btn btn--${confirmed?'secondary':'primary'}" data-act="confirm-team">${confirmed?'Reopen the roster':'Roster is set'}</button>
        ${nextBtn('team')}` : nextBtn('team'))}
     <div class="band"><div class="wrap stack">
-      ${pinCard()}
       ${you().consultant && !you().member ? `<div class="notice notice--info"><div>
         <div class="notice__t">You are not on this search</div>
         <div class="notice__b">You can read and edit it as a consultant, but seating people and running intake belong to whoever holds the account. Join the file to take it over.
@@ -1438,7 +1422,7 @@ function vTeam(){
         <div class="spec__body">
           <form id="newmember" class="grid2">
             ${field('Name','', `<input class="input" name="name" placeholder="Dana Reyes" required>`)}
-            ${field('Email','Their sign-in. A PIN is generated when you seat them.', `<input class="input" name="email" type="email" placeholder="dreyes@example.gov" required>`)}
+            ${field('Email','They can sign in with this email once you seat them.', `<input class="input" name="email" type="email" placeholder="dreyes@example.gov" required>`)}
             ${field('Title','', `<input class="input" name="title" placeholder="Board or committee member">`)}
             ${field('Seat','', `<select class="input" name="seat">
               <option value="committee">Committee member</option>
@@ -3145,10 +3129,6 @@ document.addEventListener('click', async e => {
   }
 
   /* --- Step 1, the roster ------------------------------------------------- */
-  if (act==='dismiss-pin'){
-    state.newPin = null;
-    render(); return;
-  }
   if (act==='confirm-team'){
     const confirmed = !state.search.team?.confirmedAt;
     await withBusy(async () => {
@@ -3186,16 +3166,6 @@ document.addEventListener('click', async e => {
     }, waitSave('Removing them from the search'));
     return;
   }
-  if (act==='reset-pin'){
-    const uid = t.dataset.uid;
-    await withBusy(async () => {
-      const out = await api('/api/searches/'+state.search.id+'/members/'+uid+'/pin', { method:'POST', body:{} });
-      state.newPin = out;
-      toast('New PIN issued. Read it to them now.');
-    }, waitSave('Issuing a new PIN'));
-    return;
-  }
-
   /* --- Step 2, the intake window ------------------------------------------ */
   if (act==='intake-open' || act==='intake-close'){
     const open = act==='intake-open';
@@ -3552,10 +3522,7 @@ document.addEventListener('submit', async e => {
     await withBusy(async () => {
       const out = await api('/api/searches/'+state.search.id+'/members', { method:'POST', body });
       state.search = out.search;
-      // Only a brand new account comes back with a PIN. Seating a colleague
-      // who already signs in has nothing to hand over.
-      state.newPin = out.pin ? { pin: out.pin, email: out.email, name: body.name } : null;
-      toast(out.pin ? body.name+' is seated. Read them the sign-in below.' : body.name+' is seated.');
+      toast(body.name+' is seated. They can sign in with their email.');
     }, waitSave('Seating '+(body.name||'them')));
   }
   if (e.target.id==='newcand'){

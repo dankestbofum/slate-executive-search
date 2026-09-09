@@ -54,9 +54,6 @@ module.exports = defineConfig({
       HOST: '127.0.0.1',
       DATA_DIR: dataDir,
       ANTHROPIC_API_KEY: '',
-      SLATE_PIN_TEAM: '1234',
-      SLATE_PIN_ABE: '2468',
-      SLATE_PIN_MIKE: '1357',
       SHOW_DEMO_LOGINS: 'true',
       SLATE_SUPPORT_EMAIL: 'recruitment@example.gov',
       SLATE_SUPPORT_HOURS: 'Weekdays 8am-5pm Arizona time'

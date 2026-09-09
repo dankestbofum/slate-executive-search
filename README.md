@@ -11,8 +11,7 @@ process is a one-file change.
 **Phase 0 — seat the committee and hear them.**
 
 1. **Search committee.** Everyone who gets a say, plus one account manager.
-   Seating someone without an account creates one and returns an eight-digit PIN
-   once, for the manager to read to them.
+   Seating someone without an account creates one. They sign in with their email.
 2. **Committee input.** The manager opens a window; each seated member answers
    privately what they are looking for. Answers fold into one ranked read of the
    room, and the manager closes the window to publish it.
@@ -113,14 +112,17 @@ There is one shared firm account, `team@slate.local`, so routine work does not
 require remembering which named consultant you are. It is ensured on every
 boot, not only on first seed, so it exists on stores that predate it.
 
-| Variable | Default (local) | Notes |
-|---|---|---|
-| `SLATE_EMAIL_TEAM` | `team@slate.local` | The shared sign-in |
-| `SLATE_PIN_TEAM` | `1234` | **Required in production**, or the shared account is not created at all |
-| `SLATE_PIN_ABE` / `SLATE_PIN_MIKE` | `2468` / `1357` | The named consultant accounts |
+Sign-in uses email only, with no PIN or email verification. Anyone who knows
+an active account's email can sign in as that account. Existing account IDs,
+roles, and search memberships are preserved when upgrading.
 
-In production, leaving `SLATE_PIN_TEAM` unset means no shared account exists; an
-account already in the store is left alone rather than being locked out.
+| Variable | Default | Notes |
+|---|---|---|
+| `SLATE_EMAIL_TEAM` | `team@slate.local` | The shared sign-in, ensured on every boot |
+| `SLATE_EMAIL_ABE` | `abe@slate.local` | Initial named consultant account |
+| `SLATE_EMAIL_MIKE` | `mike@slate.local` | Initial named consultant account |
+
+`SLATE_PIN_*` variables are no longer used or required.
 
 ## Consensus
 
@@ -148,11 +150,9 @@ npm start
 environment is authoritative, so a file that slipped into an image cannot
 quietly replace deployed configuration.
 
-Open http://127.0.0.1:4173 and sign in as `team@slate.local` / `1234`. The named
-accounts still work (`abe@slate.local` / `2468`, `mike@slate.local` / `1357`).
-
-Only consultant accounts are ever listed on the sign-in page; committee PINs are
-shown once, on the roster, to the manager who seated them.
+Open http://127.0.0.1:4173 and sign in as `team@slate.local`,
+`abe@slate.local`, or `mike@slate.local`. Only local demo mode lists consultant
+emails on the sign-in page. Committee members use the email on their roster.
 
 `npm test` starts its own local server and temporary data stores. It never reads
 your `.env`, contacts Claude, or changes live searches. Failed checks exit nonzero.
@@ -168,7 +168,7 @@ External website checks are opt-in with `SLATE_NETWORK_TESTS=true`.
    - `CLAUDE_MODEL` / `CLAUDE_MODEL_PREMIUM` (optional)
    - `NODE_ENV=production` (Railway sets this)
 3. Attach a **volume** and set `DATA_DIR` to the mount path (for example `/data`). Production will not start without this.
-4. Set `SLATE_PIN_TEAM` for the shared sign-in, and on first boot of an empty volume `SLATE_PIN_ABE` and `SLATE_PIN_MIKE`. Do not turn on `SHOW_DEMO_LOGINS`.
+4. Optionally set `SLATE_EMAIL_TEAM`, `SLATE_EMAIL_ABE`, and `SLATE_EMAIL_MIKE` to customize sign-in emails. No PIN configuration is required.
 5. Keep a **single replica**. The store is one JSON file; two instances will overwrite each other.
 
 The app binds `0.0.0.0` and uses `PORT` from the platform. Session cookies are `Secure` in production.
@@ -273,7 +273,7 @@ and is not verified.
 | Job | What it proves |
 |---|---|
 | `checks` | Every first-party file parses (`npm run check`), the isolated suite passes on Node 24, and production dependencies have no advisory at moderate or above |
-| `container` | The image builds, refuses to start without storage or first-boot credentials, boots on an empty volume, runs as non-root, answers `/api/health` with the built release, and survives a restart with its store intact |
+| `container` | The image builds, refuses to start without storage, boots on an empty volume without PIN configuration, runs as non-root, answers `/api/health` with the built release, and survives a restart with its store intact |
 
 A failing run means the commit is not eligible to be marked ready for release.
 Browser, accessibility, and print coverage are not in CI yet, so a green run is
@@ -507,37 +507,22 @@ against its `DATA_DIR`:
 node scripts/accounts.js list
 node scripts/accounts.js create "Dana Ruiz" dana@firm.example "Search consultant"
 node scripts/accounts.js rename u3 "Dana Ruiz-Alvarez"
-node scripts/accounts.js reset u3        # new PIN, revokes that account's sessions
 node scripts/accounts.js disable u3      # revokes access, keeps the record
 node scripts/accounts.js enable u3
-node scripts/accounts.js audit           # flags published development PINs
 ```
 
 This is deliberately **not** an HTTP route. Account administration is the
 authority that grants every other authority, and the app has no role above
 consultant to hold it. Over HTTP, any compromised consultant session could
-mint or reset accounts; requiring shell access keeps it behind whatever
+mint accounts; requiring shell access keeps it behind whatever
 controls the hosting account has. If the county needs delegated in-app
 administration, that is a new role and a new decision, not a flag.
-
-`create` and `reset` print a PIN once. It is stored only as a scrypt hash and
-cannot be printed again — issue a new one with `reset`.
 
 **Disabling keeps the record.** History attributes decisions to accounts, and a
 search must stay readable after someone leaves, so a disabled account retains
 its identity and loses its access. Sessions are revoked immediately, and every
 request re-checks the flag, so a session restored from a backup cannot outlive
 the decision to withdraw access.
-
-**Credential strength.** New production credentials must be at least 8
-characters and must not be a published development PIN, a repeated character,
-or a simple run. The app refuses to boot in production with a credential that
-fails this. Hashing an old weak PIN does not make it strong, so
-`accounts.js audit` reports existing accounts that still authenticate with a
-published default, and production logs the same warning at startup.
-
-That audit rules out the *published* PINs. It cannot tell you whether a
-remaining PIN is otherwise guessable.
 
 **Sessions** last `SLATE_SESSION_DAYS` (default 14), capped at 30 by the
 server. Configuration cannot raise the ceiling.
@@ -683,9 +668,9 @@ write. Automatic snapshots publish only after verification.
 
 ## Sign-in and deployment changes
 
-Stored PINs migrate to salted scrypt hashes without changing existing sign-ins.
-New committee PINs have eight digits; resetting one ends that account's sessions.
-Production never exposes demo credentials, even if `SHOW_DEMO_LOGINS=true`.
+Sign-in uses only an active account email. Legacy PINs and PIN hashes are removed
+from the active store on startup. Production never lists demo accounts, even if
+`SHOW_DEMO_LOGINS=true`.
 Prefer named consultant accounts for attributable approvals; the shared firm
 account remains available for the existing team workflow. Use strong consultant
 secrets in production.

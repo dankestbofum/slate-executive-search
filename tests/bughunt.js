@@ -152,9 +152,9 @@ async function run(){
 
   // --- auth ---
   try {
-    const bad = await req('/api/login', { method:'POST', body:{ email:'abe@slate.local', pin:'0000' }, expect:401 });
-    record('Login rejects bad PIN', bad.json.error && bad.status===401);
-  } catch (err) { record('Login rejects bad PIN', false, err.message); }
+    const bad = await req('/api/login', { method:'POST', body:{ email:'unknown@slate.local' }, expect:401 });
+    record('Login rejects unknown email', bad.json.error && bad.status===401);
+  } catch (err) { record('Login rejects unknown email', false, err.message); }
 
   try {
     await req('/api/me', { expect:401 });
@@ -336,7 +336,7 @@ async function run(){
         method:'POST', cookie: abe.cookie, expect:200,
         body:{ name:'Staff Test Member', email:'staff-test-member@example.com', seat:'committee' }
       });
-      if (seated.json.pin) {
+      if (seated.json.email) {
         const member = await login('staff-test-member@example.com', seated.json.pin);
         const view = await req('/api/searches/'+sid, { cookie: member.cookie, expect:200 });
         record('Committee member does not see staff logs', view.json.staff && Object.keys(view.json.staff).length===0,
@@ -344,7 +344,7 @@ async function run(){
         const denied = await req('/api/searches/'+sid+'/staff/references/log', { method:'POST', cookie: member.cookie, body:{ text:'x' } });
         record('Committee member cannot write to a staff log', denied.status===403, 'status='+denied.status);
       } else {
-        record('Committee member does not see staff logs', false, 'no PIN returned for a fresh member');
+        record('Committee member does not see staff logs', false, 'no email returned for a fresh member');
       }
       await req('/api/searches/'+sid, { method:'DELETE', cookie: abe.cookie, expect:200 });
     } catch (err) { record('Video and reference staff steps', false, err.message); }
@@ -855,10 +855,10 @@ async function run(){
       const out = await req('/api/searches/'+cm.id+'/members', {
         method:'POST', cookie: abe.cookie, expect:200, body:{ ...who, seat:'committee' }
       });
-      seated.push({ ...who, pin: out.json.pin });
+      seated.push({ ...who, returnedEmail: out.json.email, hasPin: Object.hasOwn(out.json, "pin") });
     }
-    record('Seating a new member returns a one-time sign-in PIN',
-      seated.length===3 && seated.every(x => /^\d{8}$/.test(x.pin || '')));
+    record('Seating a new member returns their sign-in email without a PIN',
+      seated.length===3 && seated.every(x => x.returnedEmail === x.email && !x.hasPin));
 
     await req('/api/searches/'+cm.id+'/members', {
       method:'POST', cookie: abe.cookie, expect:400, body:{ name:'Bad Email', email:'not-an-email' }
@@ -1234,7 +1234,7 @@ async function run(){
 
   record('Unsigned home is the price structure', /function vGate/.test(appJs) && /What each pay level includes/.test(appJs) && /data-go="login"/.test(appJs) && /Three ways to run a search/.test(appJs));
 
-  record('Sign-in is just email and PIN', /function vLogin/.test(appJs) && /Open workspace/.test(appJs) && !/Two phases/.test(appJs) && /Back to packages/.test(appJs));
+  record('Sign-in is just email', /function vLogin/.test(appJs) && /Open workspace/.test(appJs) && !/Two phases/.test(appJs) && /Back to packages/.test(appJs) && !appJs.includes('name="pin"'));
 
   record('Home page is the workspace landing', /head\('Home'/.test(appJs) && /Welcome back/.test(appJs) && />Home</.test(appJs) && !/How a search runs/.test(appJs));
 

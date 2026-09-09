@@ -19,7 +19,6 @@ const db = require('./db');
 const ai = require('./ai');
 const committee = require('./committee');
 const integrity = require('./integrity');
-const credentials = require('./credentials');
 const jurisdictions = require('./jurisdictions');
 const http = require('./http');
 const media = require('./media');
@@ -460,37 +459,26 @@ app.get('/api/config', (_req, res) => {
     compareBands: db.COMPARE_BANDS
   };
   if (showDemoLogins) {
-    // Only the firm's own seats. Committee accounts are created per search with
-    // a generated PIN, and listing those on the sign-in page would hand anyone
-    // who opens the app a way into a live client's search.
+    // Only list the firm's own seats in local demo mode.
     body.accounts = db.db.users.filter(u => u.role === 'consultant').map(u => ({
-      email: u.email, pin: demoPin(u), name: u.name, title: u.title
+      email: u.email, name: u.name, title: u.title
     }));
   }
   res.json(body);
 });
 
-function demoPin(user) {
-  const env = { u0: ['TEAM', '1234'], u1: ['ABE', '2468'], u2: ['MIKE', '1357'] }[user.id];
-  if (!env) return undefined;
-  const pin = process.env['SLATE_PIN_' + env[0]] || env[1];
-  return credentials.verify(user, pin) ? pin : undefined;
-}
-
 app.post('/api/login', (req, res) => {
   const ip = clientIp(req);
-  const { email, pin } = req.body || {};
+  const { email } = req.body || {};
   const account = 'account:' + String(email || '').trim().toLowerCase().slice(0, 254);
   if (loginBlocked(ip) || loginBlocked(account)) {
     return res.status(429).json({ error:'Too many sign-in attempts. Wait a few minutes.' });
   }
   const u = db.findUserByEmail(email);
-  // A disabled account still verifies its credential before being refused, so
-  // the response and its timing do not reveal which accounts exist.
-  if (!credentials.verify(u, typeof pin === 'string' ? pin : '') || db.isDisabled(u)) {
+  if (!u || db.isDisabled(u)) {
     loginFail(ip);
     loginFail(account);
-    return res.status(401).json({ error:'Email or PIN is not right.' });
+    return res.status(401).json({ error:'No active account matches that email.' });
   }
   loginOk(ip);
   loginOk(account);
@@ -580,8 +568,7 @@ app.get('/api/searches/:id', requireUser, requireSearch, (req, res) => {
  * Step 1 — the roster
  *
  * A search has one account manager and any number of consultants and committee
- * members. Seating someone who has no account creates one and returns a PIN
- * once; there is no mail server here, so the manager reads it to them.
+ * members. Seating someone who has no account creates an email-only sign-in.
  * ------------------------------------------------------------------------- */
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -599,7 +586,6 @@ app.post('/api/searches/:id/members', requireUser, requireSearch, requireManager
   if (!EMAIL_RE.test(email)) return res.status(400).json({ error:'Enter a working email. It is their sign-in.' });
 
   let user = db.findUserByEmail(email);
-  let pin = null;
   if (user) {
     if (String(user.name || '').trim() !== name) {
       return res.status(409).json({
@@ -611,7 +597,6 @@ app.post('/api/searches/:id/members', requireUser, requireSearch, requireManager
     // cannot mint a colleague with run-of-the-app powers.
     const created = db.createUser({ name, email, title: b.title, role: 'committee' });
     user = created.user;
-    pin = created.pin;
   }
   if (db.memberOf(req.search, user.id)) {
     return res.status(409).json({ error: name + ' is already seated on this search.' });
@@ -625,7 +610,7 @@ app.post('/api/searches/:id/members', requireUser, requireSearch, requireManager
   req.search.team = { confirmedAt: null, confirmedBy: null };
   db.touch(req.search, req.user, 'seated ' + name + ' as ' + committee.SEAT_LABEL[seat].toLowerCase());
   db.persist();
-  res.json({ search: painted(req, req.search), ...rosterOnly(req.search), pin, email: user.email });
+  res.json({ search: painted(req, req.search), ...rosterOnly(req.search), email: user.email });
 });
 
 // Seat changes. Handing over or claiming the account is open to any consultant
@@ -698,22 +683,6 @@ app.delete('/api/searches/:id/members/:uid', requireUser, requireSearch, require
   db.pruneOrphanCommittee();
   db.persist();
   res.json({ search: painted(req, req.search), ...rosterOnly(req.search) });
-});
-
-app.post('/api/searches/:id/members/:uid/pin', requireUser, requireSearch, requireManager, (req, res) => {
-  const m = db.memberOf(req.search, req.params.uid);
-  if (!m) return res.status(404).json({ error:'That person is not on this search.' });
-  const user = db.findUserById(m.userId);
-  if (!user) return res.status(404).json({ error:'That account no longer exists.' });
-  if (user.role === 'consultant') {
-    return res.status(403).json({ error:'Consultant PINs are set from the environment, not from a search.' });
-  }
-  const pin = db.makePin();
-  credentials.set(user, pin);
-  for (const [id, session] of Object.entries(db.db.sessions)) if (session.userId === user.id) delete db.db.sessions[id];
-  db.touch(req.search, req.user, 'reset the sign-in PIN for ' + user.name);
-  db.persist();
-  res.json({ pin, email: user.email, name: user.name, revision: req.search.revision });
 });
 
 app.post('/api/searches/:id/team/confirm', requireUser, requireSearch, requireManager, (req, res) => {

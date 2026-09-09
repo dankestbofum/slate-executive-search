@@ -123,28 +123,12 @@ jobs:
           [ "$status" -ne 0 ] || { echo "FAIL: started without DATA_DIR"; exit 1; }
           echo "$output" | grep -q "persistent disk" || { echo "FAIL: unclear message"; exit 1; }
 
-      - name: Fails clearly without credentials
-        run: |
-          mkdir -p "${RUNNER_TEMP}/novolume" && chmod 777 "${RUNNER_TEMP}/novolume"
-          set +e
-          output=$(docker run --rm \
-            -e NODE_ENV=production -e DATA_DIR=/data \
-            -v "${RUNNER_TEMP}/novolume:/data" slate:ci 2>&1)
-          status=$?
-          set -e
-          echo "$output"
-          [ "$status" -ne 0 ] || { echo "FAIL: first boot seeded without PINs"; exit 1; }
-          echo "$output" | grep -q "first boot needs" || { echo "FAIL: unclear message"; exit 1; }
-
-      - name: Boots on an empty writable volume
+      - name: Boots on an empty writable volume without PIN configuration
         run: |
           mkdir -p "${RUNNER_TEMP}/data" && chmod 777 "${RUNNER_TEMP}/data"
           docker run -d --name slate-ci -p 4173:4173 \
             -e NODE_ENV=production \
             -e DATA_DIR=/data \
-            -e SLATE_PIN_ABE=91735204 \
-            -e SLATE_PIN_MIKE=44820917 \
-            -e SLATE_PIN_TEAM=70513368 \
             -v "${RUNNER_TEMP}/data:/data" \
             slate:ci
           for i in $(seq 1 30); do

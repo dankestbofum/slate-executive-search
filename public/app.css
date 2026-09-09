@@ -323,7 +323,7 @@ textarea.input{min-height:42px}
 /* ============================================================ the committee
    Step 1 seats people; Step 2 asks them what they want and rolls the answers
    into one ranked read of the room. Both lean on the existing spec/pill/pick
-   patterns; only the roster row, the consensus meter, and the one-time PIN
+   patterns; only the roster row, the consensus meter, and the intake
    card needed shapes of their own. */
 
 .seat{
@@ -359,15 +359,6 @@ textarea.input{min-height:42px}
   font-size:10.5px; font-weight:700; color:var(--ink-3);
 }
 .rosterchip--mgr .rosterchip__i{background:var(--accent); color:var(--accent-on)}
-
-/* The one moment a generated PIN is visible. Big enough to read aloud from
-   across a desk, and it disappears on the next render. */
-.pincard__creds{display:flex; flex-wrap:wrap; gap:var(--s-3); align-items:center; margin:var(--s-3) 0}
-.pincard__creds span{
-  border:1px solid var(--line-strong); border-radius:var(--r-2);
-  padding:6px 12px; background:var(--paper); font-size:14px;
-}
-.pincard__pin{font-size:1.35rem !important; font-weight:600; letter-spacing:.18em; color:var(--ink)}
 
 .intake-row{
   display:grid; grid-template-columns:minmax(0,1fr) auto auto;

@@ -197,16 +197,16 @@ async function revisionOf(id, cookie) {
       'the session outlived its logout');
   });
 
-  await check('replacing a committee PIN retires the old sessions', async () => {
-    const { pin, userId } = await seat(own, abe, 'Rotate Member', 'rotate-roles@example.com');
-    const rotating = await login('rotate-roles@example.com', pin);
-
-    const res = await api('/api/searches/' + own + '/members/' + userId + '/pin', {
-      cookie: abe, method: 'POST', revision: await revisionOf(own, abe)
+  await check('removing a committee member retires their sessions and sign-in', async () => {
+    const { userId } = await seat(own, abe, 'Remove Member', 'remove-roles@example.com');
+    const member = await login('remove-roles@example.com');
+    const res = await api('/api/searches/' + own + '/members/' + userId, {
+      cookie: abe, method: 'DELETE', revision: await revisionOf(own, abe)
     });
-    assert.strictEqual(res.status, 200, 'PIN reset returned ' + res.status);
-    assert.strictEqual((await api('/api/searches/' + own, { cookie: rotating })).status, 401,
-      'the old session survived a PIN reset');
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual((await api('/api/searches/' + own, { cookie: member })).status, 401);
+    const denied = await api('/api/login', { method: 'POST', body: { email: 'remove-roles@example.com' } });
+    assert.strictEqual(denied.status, 401);
   });
 
   /* ---------------- Attribution ---------------- */
@@ -230,20 +230,7 @@ async function revisionOf(id, cookie) {
    * scripts/accounts.js for why), so these exercise the modules directly
    * against the isolated unit data directory rather than over the wire. */
 
-  const credentials = require('../server/credentials');
   const store = require('../server/db');
-
-  await check('the strength policy rejects what rate limiting cannot save', () => {
-    for (const weak of ['1234', '2468', '1357']) {
-      assert.ok(credentials.weakness(weak), 'published dev PIN "' + weak + '" was accepted');
-    }
-    assert.ok(credentials.weakness('123'), 'a short PIN was accepted');
-    assert.ok(credentials.weakness('11111111'), 'a repeated character was accepted');
-    assert.ok(credentials.weakness('12345678'), 'an ascending run was accepted');
-    assert.ok(credentials.weakness('87654321'), 'a descending run was accepted');
-    assert.ok(credentials.weakness(''), 'an empty PIN was accepted');
-    assert.strictEqual(credentials.weakness('90416273'), null, 'a reasonable PIN was refused');
-  });
 
   await check('disabling an account revokes its sessions and blocks it', () => {
     const { user } = store.createUser({ name: 'Disabled Person', email: 'disabled@example.com', role: 'consultant' });
@@ -271,17 +258,6 @@ async function revisionOf(id, cookie) {
     assert.ok(store.SESSION_DAYS <= store.SESSION_MAX_DAYS,
       'configuration raised the session length past its ceiling');
     assert.strictEqual(store.SESSION_MS, store.SESSION_DAYS * 24 * 60 * 60 * 1000);
-  });
-
-  await check('the weak-credential audit finds published development PINs', () => {
-    const flagged = store.auditWeakCredentials({
-      users: [
-        { id: 'w1', email: 'weak@example.com', pinHash: credentials.hash('1234') },
-        { id: 's1', email: 'strong@example.com', pinHash: credentials.hash('90416273') }
-      ]
-    });
-    assert.strictEqual(flagged.length, 1, 'expected exactly one weak account');
-    assert.strictEqual(flagged[0].id, 'w1');
   });
 
   console.log(passed + ' role checks passed' + (failed ? ', ' + failed + ' failed' : '') + '.');

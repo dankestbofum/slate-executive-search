@@ -6,7 +6,6 @@ const path = require('path');
 const vm = require('vm');
 const { spawnSync } = require('child_process');
 const backup = require('../server/backup');
-const credentials = require('../server/credentials');
 const base = process.env.SLATE_URL;
 let checks = 0;
 function check(name, fn) { fn(); checks += 1; console.log('PASS  Integrity: ' + name); }
@@ -46,7 +45,7 @@ async function request(url, method = 'GET', body, cookie, revision) {
   const memberLogin = await request('/api/login', 'POST', { email:'integrity@example.test', pin:seated.body.pin });
   const member = memberLogin.cookie;
   const memberId = memberLogin.body.user.id;
-  check('new committee credentials contain eight digits', () => assert.match(seated.body.pin, /^\d{8}$/));
+  check('new committee accounts need only an email', () => { assert.equal(seated.body.email, 'integrity@example.test'); assert.equal(seated.body.pin, undefined); });
   await write('/candidates', 'POST', { name:'Synthetic Candidate' });
   let c = (await read()).candidates[0];
   const memberView = (await request(p, 'GET', undefined, member)).body;
@@ -155,16 +154,15 @@ async function request(url, method = 'GET', body, cookie, revision) {
   check('roster removal invalidates its confirmation', () => assert.ok(true));
 
   const raw = JSON.parse(fs.readFileSync(path.join(process.env.SLATE_TEST_DATA, 'slate.json'), 'utf8'));
-  check('credentials are hashed on disk and verify correctly', () => {
-    assert.ok(raw.users.every(u => !('pin' in u) && typeof u.pinHash==='string'));
-    assert.equal(credentials.verify(raw.users.find(u => u.id==='u1'), '2468'), true);
+  check('accounts store no PINs or hashes', () => {
+    assert.ok(raw.users.every(u => !('pin' in u) && !('pinHash' in u)));
   });
   const migrationDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slate-migration-'));
   fs.writeFileSync(path.join(migrationDir, 'slate.json'), JSON.stringify({ users:[{ id:'legacy', role:'consultant', email:'legacy@example.test', name:'Legacy', pin:'old-secret' }], searches:[], sessions:{}, seq:0 }));
   const migrated = spawnSync(process.execPath, ['-e', "require('./server/db')"], { cwd:path.join(__dirname, '..'), env:{ ...process.env, DATA_DIR:migrationDir }, encoding:'utf8', windowsHide:true });
   assert.equal(migrated.status, 0, migrated.stderr);
   const legacy = JSON.parse(fs.readFileSync(path.join(migrationDir, 'slate.json'))).users.find(u=>u.id==='legacy');
-  check('legacy plaintext credentials migrate without changing the sign-in', () => { assert.equal(legacy.pin, undefined); assert.equal(credentials.verify(legacy, 'old-secret'), true); });
+  check('legacy PINs are removed while account identity is preserved', () => { assert.equal(legacy.pin, undefined); assert.equal(legacy.pinHash, undefined); assert.equal(legacy.email, 'legacy@example.test'); assert.equal(legacy.id, 'legacy'); });
 
   const marker = '<b data-audit="score">unsafe</b>';
   s = await read();
@@ -186,22 +184,17 @@ async function request(url, method = 'GET', body, cookie, revision) {
 
   const archiveSeat = await write('/members', 'POST', { name:'Archive Member', email:'archive-integrity@example.test' });
   const archiveLogin = await request('/api/login', 'POST', { email:'archive-integrity@example.test', pin:archiveSeat.body.pin });
-  const reset = await write('/members/'+archiveLogin.body.user.id+'/pin', 'POST', {});
-  assert.equal((await request('/api/me', 'GET', undefined, archiveLogin.cookie)).status, 401);
-  const resetLogin = await request('/api/login', 'POST', { email:'archive-integrity@example.test', pin:reset.body.pin });
-  assert.equal(resetLogin.status, 200);
-  check('credential reset retires existing sessions', () => assert.equal(reset.body.pin.length, 8));
   const liveInvite = (await read()).candidates[0].invite;
   assert.equal((await write('', 'DELETE')).status, 200);
   assert.equal((await request(p, 'GET', undefined, auth)).status, 404);
   assert.equal((await request('/api/apply/'+liveInvite)).status, 404);
-  assert.equal((await request('/api/me', 'GET', undefined, resetLogin.cookie)).status, 401);
+  assert.equal((await request('/api/me', 'GET', undefined, archiveLogin.cookie)).status, 401);
   assert.ok((await request('/api/archives', 'GET', undefined, auth)).body.some(a=>a.id===fresh.body.id));
   const restored = await request('/api/archives/'+fresh.body.id+'/restore', 'POST', {}, auth);
   check('archived searches restore responses, history and fresh links', () => {
     assert.equal(restored.status, 200); assert.notEqual(restored.body.candidates[0].invite, liveInvite); assert.equal(restored.body.artifacts.survey1.intro, 'Original');
   });
-  assert.equal((await request('/api/login', 'POST', { email:'archive-integrity@example.test', pin:reset.body.pin })).status, 200);
+  assert.equal((await request('/api/login', 'POST', { email:'archive-integrity@example.test' })).status, 200);
   check('archive restoration recovers the committee roster and accounts', () => assert.ok(restored.body.roster.some(r=>r.email==='archive-integrity@example.test')));
 
   const backupRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'slate-backup-test-'));

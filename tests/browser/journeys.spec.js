@@ -9,7 +9,7 @@
 
 const { test, expect } = require('@playwright/test');
 
-const TEAM = { email: 'team@slate.local', pin: '1234' };
+const TEAM = { email: 'team@slate.local' };
 
 async function openSignIn(page) {
   await page.goto('/');
@@ -21,7 +21,6 @@ async function openSignIn(page) {
 async function signIn(page) {
   await openSignIn(page);
   await page.getByLabel(/email/i).fill(TEAM.email);
-  await page.getByLabel(/pin/i).fill(TEAM.pin);
   await page.getByRole('button', { name: /open workspace/i }).click();
   await expect(page.getByRole('button', { name: /open a new search/i }).first()).toBeVisible({ timeout: 10000 });
 }
@@ -44,11 +43,9 @@ test('sign-in is reachable with the keyboard alone', async ({ page }) => {
   expect(reachedField, 'tabbing from the top of the page reached nothing focusable').toBe(true);
 
   await page.getByLabel(/email/i).fill('');
-  await page.getByLabel(/pin/i).fill('');
   await page.getByLabel(/email/i).focus();
   await page.keyboard.type(TEAM.email);
   await page.keyboard.press('Tab');
-  await page.keyboard.type(TEAM.pin);
   await page.keyboard.press('Enter');
   await expect(page.getByRole('button', { name: /open a new search/i }).first()).toBeVisible({ timeout: 10000 });
 });

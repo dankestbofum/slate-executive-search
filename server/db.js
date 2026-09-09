@@ -4,7 +4,6 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const integrity = require('./integrity');
-const credentials = require('./credentials');
 const backup = require('./backup');
 const jurisdictions = require('./jurisdictions');
 
@@ -32,8 +31,7 @@ const { PHASES, STEPS, STAFF_STEPS, STAFF_STAGES, PACKAGES, PACKAGE_ORDER, DEFAU
 
 // A shared firm sign-in, so day-to-day work does not require remembering which
 // named consultant you are. It is ensured on every boot rather than only at
-// first seed, so it exists on stores that predate it. Locally the PIN defaults
-// to something obvious; in production it appears only if SLATE_PIN_TEAM is set.
+// first seed, so it exists on stores that predate it. Sign-in uses email only.
 const TEAM_ACCOUNT = {
   id: 'u0',
   name: 'Slate Team',
@@ -43,67 +41,21 @@ const TEAM_ACCOUNT = {
 };
 
 function ensureTeamAccount(store){
-  const pin = process.env.SLATE_PIN_TEAM || (isProd ? '' : '1234');
   const email = (process.env.SLATE_EMAIL_TEAM || 'team@slate.local').toLowerCase();
   const existing = store.users.find(u => u.id === TEAM_ACCOUNT.id);
-  // No PIN configured in production: leave any existing account alone rather
-  // than locking someone out mid-search, and do not conjure a new one.
-  if (!pin) return;
-  requireStrong('SLATE_PIN_TEAM', pin);
   if (existing) {
     existing.email = email;
-    if (!credentials.verify(existing, String(pin))) {
-      credentials.set(existing, String(pin));
-      for (const [id, session] of Object.entries(store.sessions || {})) if (session.userId === existing.id) delete store.sessions[id];
-    }
     existing.role = 'consultant';
     return;
   }
   // First in the list, so it is the account the sign-in page offers.
-  store.users.unshift({ ...TEAM_ACCOUNT, email, pin: String(pin) });
-}
-
-// New production credentials must clear the strength policy. Applied when a
-// value is supplied, in any environment, so the rule is exercised by the test
-// suite rather than only discovered on a production first boot.
-function requireStrong(label, secret){
-  if (!isProd) return;
-  const weak = credentials.weakness(secret);
-  if (weak) {
-    console.error('Slate: ' + label + ' is not acceptable for production. ' + weak);
-    process.exit(1);
-  }
-}
-
-/**
- * Report accounts that still authenticate with a published development PIN.
- *
- * Migration hashed whatever PIN an account already had. Hashing a weak secret
- * does not make it strong, so an operator needs to be told rather than left to
- * assume the upgrade fixed it.
- */
-function auditWeakCredentials(store){
-  const weak = (store.users || []).filter(user =>
-    [...credentials.DEV_DEFAULTS].some(guess => credentials.verify(user, guess)));
-  if (!weak.length) return [];
-  console.error('Slate: ' + weak.length + ' account(s) still use a published development PIN: '
-    + weak.map(u => u.email || u.id).join(', '));
-  console.error('Slate: reset them with `node scripts/accounts.js reset <id>` before real records are entered.');
-  return weak;
+  store.users.unshift({ ...TEAM_ACCOUNT, email });
 }
 
 function seedUsers(){
-  const abePin = process.env.SLATE_PIN_ABE || (isProd ? '' : '2468');
-  const mikePin = process.env.SLATE_PIN_MIKE || (isProd ? '' : '1357');
-  if (!abePin || !mikePin) {
-    console.error('Slate: first boot needs SLATE_PIN_ABE and SLATE_PIN_MIKE.');
-    process.exit(1);
-  }
-  requireStrong('SLATE_PIN_ABE', abePin);
-  requireStrong('SLATE_PIN_MIKE', mikePin);
   return [
-    { id:'u1', email: process.env.SLATE_EMAIL_ABE || 'abe@slate.local',  pin: String(abePin), name:'Abe Macy',     init:'AM', role:'consultant', title:'Operations' },
-    { id:'u2', email: process.env.SLATE_EMAIL_MIKE || 'mike@slate.local', pin: String(mikePin), name:'Mike Letcher', init:'ML', role:'consultant', title:'Search consultant' }
+    { id:'u1', email: process.env.SLATE_EMAIL_ABE || 'abe@slate.local', name:'Abe Macy', init:'AM', role:'consultant', title:'Operations' },
+    { id:'u2', email: process.env.SLATE_EMAIL_MIKE || 'mike@slate.local', name:'Mike Letcher', init:'ML', role:'consultant', title:'Search consultant' }
   ];
 }
 
@@ -115,13 +67,6 @@ function initials(name){
   if (!parts.length) return '??';
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-}
-
-// Committee members sign in with the same email plus PIN the consultants use.
-// The consultant generates the PIN when they seat someone and reads it to them;
-// there is no mail server in this app.
-function makePin(){
-  return String(crypto.randomInt(10000000, 100000000));
 }
 
 function blankSearch(input, user){
@@ -241,13 +186,25 @@ function releaseWriterLock(){
  * newer release is refused outright: rolling the application back onto a store
  * it does not understand is how a rollback turns into data loss.
  * ------------------------------------------------------------------ */
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
+
+function removeLegacyPins(store){
+  const users = [...(store.users || []),
+    ...(store.archivedSearches || []).flatMap(s => s.archivedUsers || [])];
+  for (const user of users) {
+    delete user.pin;
+    delete user.pinHash;
+  }
+}
 
 const MIGRATIONS = [
   // 0 -> 1: the shape that predates explicit versioning. The backfills in
   // migrate() below are idempotent and already ran on every boot, so this
   // records the version rather than changing data.
-  store => { store.archivedSearches ||= []; }
+  store => { store.archivedSearches ||= []; },
+  // 1 -> 2: email-only accounts. The version prevents older PIN-based builds
+  // from opening a store whose credentials have been removed.
+  removeLegacyPins
 ];
 
 function runMigrations(store){
@@ -306,7 +263,6 @@ function load(){
   }
   runMigrations(loaded);
   migrate(loaded);
-  if (isProd) auditWeakCredentials(loaded);
   save(loaded);
   return loaded;
 }
@@ -323,7 +279,8 @@ function migrate(store){
     if (!u.init) u.init = initials(u.name);
   }
   ensureTeamAccount(store);
-  for (const u of store.users) if (u.pin !== undefined) credentials.set(u, String(u.pin));
+  // Existing accounts keep their identity and access, but no longer use PINs.
+  removeLegacyPins(store);
   for (const s of [...(store.searches || []), ...store.archivedSearches]) {
     s.jurisdictionType = jurisdictions.typeOf(s.jurisdictionType);
     s.revision ||= 1;
@@ -451,7 +408,7 @@ function canManage(search, user){
  *
  * A committee account exists to serve one search. When that seat goes away,
  * whether the member was removed or the whole search was deleted, the account
- * would otherwise linger as a live email and PIN that opens an app with
+ * would otherwise linger as a live email sign-in that opens an app with
  * nothing in it. Consultants are never touched: their accounts belong to the
  * firm, not to a search.
  */
@@ -651,21 +608,15 @@ function nextNo(){
 }
 
 function findUserByEmail(email){
-  return db.users.find(u => u.email.toLowerCase() === String(email || '').toLowerCase());
+  if (typeof email !== 'string' || !email.trim()) return undefined;
+  return db.users.find(u => u.email.toLowerCase() === email.trim().toLowerCase());
 }
 
-/**
- * Seat someone who does not have an account yet.
- *
- * Returns the user and the plaintext PIN, which is the only time the PIN is
- * handed back. The consultant reads it to the member; only its salted hash
- * remains in the store.
- */
 /**
  * Sessions belonging to one account.
  *
  * Every path that weakens or withdraws an account's authority calls this.
- * Changing a credential or disabling an account has to take effect now, not
+ * Disabling an account has to take effect now, not
  * whenever a fourteen-day cookie happens to lapse.
  */
 function revokeSessions(userId){
@@ -704,20 +655,17 @@ function isDisabled(user){
 }
 
 function createUser({ name, email, title, role }){
-  const pin = makePin();
   const u = {
     id: nid('u'),
     email: String(email || '').trim().toLowerCase(),
-    pin,
     name: String(name || '').trim(),
     init: initials(name),
     role: role === 'consultant' ? 'consultant' : 'committee',
     title: String(title || '').trim() || 'Committee member',
     createdAt: now()
   };
-  credentials.set(u, pin);
   db.users.push(u);
-  return { user: u, pin };
+  return { user: u };
 }
 
 module.exports = {
@@ -730,7 +678,6 @@ module.exports = {
   nextNo,
   blankSearch,
   createUser,
-  auditWeakCredentials,
   SCHEMA_VERSION,
   runMigrations,
   releaseWriterLock,
@@ -739,7 +686,6 @@ module.exports = {
   setDisabled,
   isDisabled,
   initials,
-  makePin,
   ensureBackup: () => backup.ensureDaily(DATA_DIR),
   memberOf,
   accountManager,
