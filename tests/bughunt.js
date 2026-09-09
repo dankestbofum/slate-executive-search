@@ -1232,9 +1232,9 @@ async function run(){
   record('Schema examples do not model the dashes the desk rejects', schemaBlock.length > 0 && !/[\u2013\u2014]/.test(schemaBlock));
   record('Generate route returns the desk review to the client', /desk: out\.desk/.test(fs.readFileSync(path.join(__dirname, '..', 'server', 'index.js'), 'utf8')) && /function deskNote/.test(appJs) && /deskNote\(out\.desk\)/.test(appJs));
 
-  record('Unsigned home is the price structure', /function vGate/.test(appJs) && /What each pay level includes/.test(appJs) && /data-go="login"/.test(appJs) && /Three ways to run a search/.test(appJs));
+  record('Unsigned home is the price structure', /function vGate/.test(appJs) && /What each pay level includes/.test(appJs) && /data-act="start"/.test(appJs) && /Three ways to run a search/.test(appJs));
 
-  record('Sign-in is just email', /function vLogin/.test(appJs) && /Open workspace/.test(appJs) && !/Two phases/.test(appJs) && /Back to packages/.test(appJs) && !appJs.includes('name="pin"'));
+  record('Start opens the workspace without a login form', appJs.includes('data-act="start">Start') && !/function vLogin/.test(appJs) && !appJs.includes('name="pin"'));
 
   record('Home page is the workspace landing', /head\('Home'/.test(appJs) && /Welcome back/.test(appJs) && />Home</.test(appJs) && !/How a search runs/.test(appJs));
 

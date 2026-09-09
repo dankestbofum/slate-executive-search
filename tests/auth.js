@@ -40,6 +40,17 @@ const login = (base, body) => fetch(base + '/api/login', {
   try {
     let base = await start();
     assert.equal((await fetch(base + '/api/health')).status, 200);
+    const started = await fetch(base + '/api/start', { method: 'POST' });
+    assert.equal(started.status, 200);
+    assert.equal((await started.json()).user.id, 'u0');
+    const cookie = started.headers.get('set-cookie').split(';')[0];
+    assert.equal((await fetch(base + '/api/me', { headers: { cookie } })).status, 200);
+    assert.equal((await fetch(base + '/api/searches', { headers: { cookie } })).status, 200);
+    const repeated = await fetch(base + '/api/start', { method: 'POST', headers: { cookie } });
+    assert.equal(repeated.status, 200);
+    assert.equal(repeated.headers.get('set-cookie'), null, 'Start reuses an active shared session');
+    assert.equal((await fetch(base + '/api/logout', { method: 'POST', headers: { cookie } })).status, 200);
+    assert.equal((await fetch(base + '/api/me', { headers: { cookie } })).status, 401);
     for (const email of ['team@slate.local', 'abe@slate.local', 'mike@slate.local']) {
       const response = await login(base, { email });
       assert.equal(response.status, 200, email);
@@ -64,10 +75,12 @@ const login = (base, body) => fetch(base + '/api/login', {
     // Simulate a pre-upgrade store, including a disabled account and archived user.
     store.schemaVersion = 1;
     store.users.find(u => u.id === 'u1').pinHash = 'legacy-hash';
+    store.users.find(u => u.id === 'u0').disabled = true;
     Object.assign(store.users.find(u => u.id === 'u2'), { disabled: true, pin: 'old-pin' });
     store.archivedSearches = [{ id: 'archived-auth', archivedUsers: [{ id: 'old-member', pinHash: 'old-hash' }] }];
     fs.writeFileSync(file, JSON.stringify(store));
     base = await start();
+    assert.equal((await fetch(base + '/api/start', { method: 'POST' })).status, 503);
     assert.equal((await login(base, { email: 'abe@slate.local' })).status, 200);
     assert.equal((await login(base, { email: 'mike@slate.local' })).status, 401);
     await stop();
@@ -76,6 +89,6 @@ const login = (base, body) => fetch(base + '/api/login', {
     assert.ok(upgraded.users.every(u => !('pin' in u) && !('pinHash' in u)));
     assert.equal(upgraded.archivedSearches[0].archivedUsers[0].pinHash, undefined);
     assert.ok(fs.readdirSync(path.join(directory, 'backups')).some(n => n.startsWith('pre-migration-1-to-2-')));
-    console.log('PASS  Auth: production boots without PINs; email sign-in, disabled accounts, and upgrade work');
+    console.log('PASS  Auth: production Start needs no credentials; sessions, disabled accounts, email API, and upgrade work');
   } finally { await stop(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

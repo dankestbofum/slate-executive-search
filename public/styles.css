@@ -124,7 +124,7 @@ a{color:var(--accent-deep); text-underline-offset:.18em; text-decoration-thickne
 .rail__note{font-size:11.5px; line-height:1.45; color:var(--ink-3)}
 
 .themeswap{display:flex; gap:2px; padding:2px; background:var(--sunken); border:1px solid var(--line); border-radius:var(--r-2)}
-.themeswap button{flex:1; font:inherit; font-size:12px; font-weight:600; cursor:pointer; padding:4px 2px; border:0; border-radius:var(--r-1); background:transparent; color:var(--ink-3)}
+.themeswap button{flex:1; font:inherit; font-size:12px; font-weight:600; cursor:pointer; padding:4px 2px; border:0; border-radius:var(--r-1); background:transparent; color:var(--ink-2)}
 .themeswap button[aria-pressed="true"]{background:var(--paper); color:var(--ink); box-shadow:var(--shadow)}
 
 /* ============================================================ page frame */
@@ -303,16 +303,16 @@ details.toggle[open] summary::before{transform:rotate(90deg) translateX(-1px)}
   padding:6px 7px; border-radius:var(--r-2); color:var(--ink-2);
 }
 .whoami__opt:hover{background:var(--sunken)}
-.whoami__opt[aria-pressed="true"]{background:var(--accent-tint); color:var(--accent)}
+.whoami__opt--current{background:var(--accent-tint); color:var(--accent)}
 .whoami__init{
   width:24px; height:24px; flex:none; border-radius:50%; display:grid; place-items:center;
   font-family:"IBM Plex Mono",monospace; font-size:10.5px; font-weight:500;
   border:1px solid var(--line-strong); background:var(--paper); color:var(--ink-3);
 }
-.whoami__opt[aria-pressed="true"] .whoami__init{background:var(--accent); border-color:var(--accent); color:var(--accent-on)}
+.whoami__opt--current .whoami__init{background:var(--accent); border-color:var(--accent); color:var(--accent-on)}
 .whoami__nm{font-weight:600; display:block; color:var(--ink)}
-.whoami__opt[aria-pressed="true"] .whoami__nm{color:var(--accent)}
-.whoami__rl{font-size:11.5px; color:var(--ink-3); display:block}
+.whoami__opt--current .whoami__nm{color:var(--accent)}
+.whoami__rl{font-size:11.5px; color:var(--ink-2); display:block}
 
 /* summary tiles */
 .tiles{display:grid; grid-template-columns:repeat(auto-fit,minmax(168px,1fr)); gap:var(--s-3)}
@@ -683,3 +683,6 @@ details.toggle[open] summary::before{transform:rotate(90deg) translateX(-1px)}
   .rail__foot{margin-top:var(--s-3)}
   .t-display{font-size:2rem}
 }
+
+/* Keep secondary labels readable on the workspace's tinted panels. */
+.whoami__hd .t-label, .tile--hi .tile__k, .tile--hi .tile__n{color:var(--ink-2)}

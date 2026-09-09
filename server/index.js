@@ -274,7 +274,7 @@ function currentUser(req){
 
 function requireUser(req, res, next){
   const u = currentUser(req);
-  if (!u) return res.status(401).json({ error:'Sign in required.' });
+  if (!u) return res.status(401).json({ error:'Select Start to open the workspace.' });
   req.user = u;
   next();
 }
@@ -467,6 +467,24 @@ app.get('/api/config', (_req, res) => {
   res.json(body);
 });
 
+function openSession(res, user){
+  const id = sid();
+  db.db.sessions[id] = { userId: user.id, at: db.now(), exp: Date.now() + SESSION_MS };
+  db.persist();
+  res.cookie(COOKIE, id, cookieOpts());
+  res.json({ user: db.publicUser(user) });
+}
+
+// Temporary open access: Start enters the shared workspace without credentials.
+app.post('/api/start', (req, res) => {
+  const team = db.findUserById('u0');
+  if (!team || db.isDisabled(team)) {
+    return res.status(503).json({ error:'The shared workspace is unavailable.' });
+  }
+  if (currentUser(req)?.id === team.id) return res.json({ user: db.publicUser(team) });
+  openSession(res, team);
+});
+
 app.post('/api/login', (req, res) => {
   const ip = clientIp(req);
   const { email } = req.body || {};
@@ -482,11 +500,7 @@ app.post('/api/login', (req, res) => {
   }
   loginOk(ip);
   loginOk(account);
-  const id = sid();
-  db.db.sessions[id] = { userId: u.id, at: db.now(), exp: Date.now() + SESSION_MS };
-  db.persist();
-  res.cookie(COOKIE, id, cookieOpts());
-  res.json({ user: db.publicUser(u) });
+  openSession(res, u);
 });
 
 app.post('/api/logout', (req, res) => {

@@ -761,9 +761,9 @@ function shell(body){
         <span class="rail__name">Slate</span><span class="rail__ver">Live</span>
       </div>
       <div class="whoami">
-        <div class="whoami__hd"><span class="t-label">Signed in as</span></div>
+        <div class="whoami__hd"><span class="t-label">Workspace account</span></div>
         <div class="whoami__list">
-          <div class="whoami__opt" aria-pressed="true">
+          <div class="whoami__opt whoami__opt--current">
             <span class="whoami__init">${esc(u.init)}</span>
             <span><span class="whoami__nm">${esc(u.name)}</span><span class="whoami__rl">${esc(u.title)}${s && you().seat ? ' · '+esc(SEAT[you().seat]?.label||'') : ''}</span></span>
           </div>
@@ -784,7 +784,7 @@ function shell(body){
           <button type="button" data-theme="auto">Auto</button>
           <button type="button" data-theme="dark">Dark</button>
         </div>
-        <button class="btn btn--ghost btn--sm" data-act="logout">Sign out</button>
+        <button class="btn btn--ghost btn--sm" data-act="logout">Leave workspace</button>
       </div>
     </nav>
     <main class="page">
@@ -814,7 +814,7 @@ function vGate(){
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="u-accent" aria-hidden="true"><path d="M4 20h16M6 20V9l6-4 6 4v11M10 20v-5h4v5"/></svg>
         <span class="rail__name">Slate</span>
       </div>
-      <button class="btn btn--primary" data-go="login">Sign in</button>
+      <button class="btn btn--primary" data-act="start">Start</button>
     </header>
     <div class="wrap gate__hero">
       <h1 class="t-title">Three ways to run a search</h1>
@@ -824,31 +824,9 @@ function vGate(){
       <div class="spec"><div class="spec__bar">What each pay level includes</div>
         <div class="spec__body spec__body--flush">${packageMatrix()}</div>
       </div>
-      <div class="row"><button class="btn btn--primary" data-go="login">Sign in to the workspace</button></div>
+      <div class="row"><button class="btn btn--primary" data-act="start">Start</button></div>
     </div>
   </div>`;
-}
-
-function vLogin(){
-  const demo = Boolean(state.health?.demoLogins);
-  const accounts = demo ? (state.health?.accounts || []) : [];
-  const first = accounts[0];
-  return `<div class="login"><div class="login__card">
-    <div class="login__brand">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="u-accent"><path d="M4 20h16M6 20V9l6-4 6 4v11M10 20v-5h4v5"/></svg>
-      <span class="rail__name">Slate</span>
-    </div>
-    <h1 class="t-title">Sign in</h1>
-    <form id="login" class="stack">
-      ${field('Email','', `<input class="input" name="email" type="email" value="${esc(first?.email||'')}" autocomplete="username" required>`)}
-      <button class="btn btn--primary" type="submit">Open workspace</button>
-      <button class="btn btn--ghost" type="button" data-go="home">Back to packages</button>
-    </form>
-    ${accounts.length?`<div class="accounts">
-      <div class="t-label">${accounts.length>1?'Accounts':'Account'}</div>
-      ${accounts.map((a,i) => `${esc(a.name)} <b>${esc(a.email)}</b>${i===0&&accounts.length>1?' <span class="t-small">(shared)</span>':''}`).join('<br>')}
-    </div>`:''}
-  </div></div>`;
 }
 
 // A committee member's home is a to-do list, not a book of business. If a
@@ -926,7 +904,7 @@ function vHome(){
         <div class="tile"><span class="tile__k">Searches</span><span class="tile__v">${list.length}</span></div>
         <div class="tile"><span class="tile__k">In progress</span><span class="tile__v">${live}</span></div>
         <div class="tile"><span class="tile__k">Complete</span><span class="tile__v">${complete}</span></div>
-        <div class="tile tile--hi"><span class="tile__k">Signed in</span><span class="tile__v u-fs-145">${esc(u.init)}</span><span class="tile__n">${esc(u.title)}</span></div>
+        <div class="tile tile--hi"><span class="tile__k">Workspace account</span><span class="tile__v u-fs-145">${esc(u.init)}</span><span class="tile__n">${esc(u.title)}</span></div>
       </div>
       ${owed.length ? `<div class="notice notice--info"><div>
         <div class="notice__t">Committee intake is waiting on you</div>
@@ -1013,7 +991,7 @@ function nextHint(next){
     return 'Finish the earlier step first. Later documents are only as good as the profile they inherit.';
   }
   const hints = {
-    team:'Seat every governing-body or committee member who gets a say, and name the account manager. Each person you seat gets a sign-in of their own.',
+    team:'Seat every governing-body or committee member who gets a say, and name the account manager. People on the roster are included in the search.',
     intake:'Open the window and let each member answer on their own. You will see who has responded, not what they said, until you close it.',
     profile:'Build the matrix from what the committee said, then edit. Everything downstream inherits this.',
     community:'Enter the jurisdiction and its official website. Claude looks up public facts and fills the community and form-of-government profile. Check every number.',
@@ -1392,7 +1370,7 @@ function vTeam(){
   const committeeCount = list.filter(m => m.seat === 'committee').length;
   return shell(`
     ${head('Step '+stepNo('team'),'Search committee',
-      'Everyone who gets a say in this hire, and the one consultant who runs the account. Each person seated here signs in with their own email, answers Step '+stepNo('intake')+' privately, and scores candidates later.',
+      'Everyone who gets a say in this hire, and the one consultant who runs the account. The roster records who contributes to the hire. Committee input is collected in Step '+stepNo('intake')+', and candidates are scored later.',
       manage ? `<button class="btn btn--${confirmed?'secondary':'primary'}" data-act="confirm-team">${confirmed?'Reopen the roster':'Roster is set'}</button>
        ${nextBtn('team')}` : nextBtn('team'))}
     <div class="band"><div class="wrap stack">
@@ -1422,7 +1400,7 @@ function vTeam(){
         <div class="spec__body">
           <form id="newmember" class="grid2">
             ${field('Name','', `<input class="input" name="name" placeholder="Dana Reyes" required>`)}
-            ${field('Email','They can sign in with this email once you seat them.', `<input class="input" name="email" type="email" placeholder="dreyes@example.gov" required>`)}
+            ${field('Email','Their contact email for this search.', `<input class="input" name="email" type="email" placeholder="dreyes@example.gov" required>`)}
             ${field('Title','', `<input class="input" name="title" placeholder="Board or committee member">`)}
             ${field('Seat','', `<select class="input" name="seat">
               <option value="committee">Committee member</option>
@@ -2798,7 +2776,7 @@ function historyRecord(entry){
 
 function page(){
   if (location.pathname.startsWith('/apply/')) return vApply();
-  if (!state.user) return state.view === 'login' ? vLogin() : vGate();
+  if (!state.user) return vGate();
   if (state.view === 'community') return vCommunity();
   if (state.view === 'brochure') return vBrochure();
   if (STAFF[state.view]) return vStaff(state.view);
@@ -3068,8 +3046,19 @@ document.addEventListener('click', async e => {
     });
     return;
   }
+  if (act==='start'){
+    if (state.busy) return;
+    await withBusy(async () => {
+      const out = await api('/api/start', { method:'POST', body:{} });
+      state.user = out.user;
+      await loadMe();
+      await loadSearches();
+      await go('home');
+    }, waitSave('Opening workspace'));
+    return;
+  }
   if (act==='logout'){
-    showWait(waitSave('Signing out'));
+    showWait(waitSave('Leaving workspace'));
     try {
       await api('/api/logout', { method:'POST', body:{} });
       state.user = null; state.search = null; state.view = 'home';
@@ -3502,18 +3491,6 @@ document.addEventListener('click', async e => {
 
 document.addEventListener('submit', async e => {
   e.preventDefault();
-  if (e.target.id==='login'){
-    const body = Object.fromEntries(new FormData(e.target).entries());
-    showWait(waitSave('Signing in'));
-    try {
-      const out = await api('/api/login', { method:'POST', body });
-      state.user = out.user;
-      await loadMe();
-      await loadSearches();
-      go('home');
-    } catch (err) { toast(err.message); }
-    finally { hideWait(); }
-  }
   if (e.target.id==='newsearch'){
     await createSearch();
   }
@@ -3522,7 +3499,7 @@ document.addEventListener('submit', async e => {
     await withBusy(async () => {
       const out = await api('/api/searches/'+state.search.id+'/members', { method:'POST', body });
       state.search = out.search;
-      toast(body.name+' is seated. They can sign in with their email.');
+      toast(body.name+' is seated.');
     }, waitSave('Seating '+(body.name||'them')));
   }
   if (e.target.id==='newcand'){
@@ -3596,7 +3573,7 @@ if ('serviceWorker' in navigator) {
 
 // Warn before losing unsaved work, including candidate questionnaires.
 document.addEventListener('input', e => {
-  if (e.target.matches('input, textarea, select') && !e.target.closest('#login')) state.dirty = true;
+  if (e.target.matches('input, textarea, select')) state.dirty = true;
 });
 window.addEventListener('beforeunload', e => {
   if (state.dirty) { e.preventDefault(); e.returnValue = ''; }

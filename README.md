@@ -106,23 +106,19 @@ Consultant accounts come from the environment. Committee accounts are created
 per search and retired automatically, sessions included, when the last seat
 holding them goes away.
 
-### Signing in
+### Opening the workspace
 
-There is one shared firm account, `team@slate.local`, so routine work does not
-require remembering which named consultant you are. It is ensured on every
-boot, not only on first seed, so it exists on stores that predate it.
+Select **Start** on the landing page to open the workspace immediately as
+**Slate Team**. No email, PIN, or login form is required. Anyone with the site
+URL can enter with the shared account's consultant access, and work is
+attributed to Slate Team. **Leave workspace** returns to the landing page.
 
-Sign-in uses email only, with no PIN or email verification. Anyone who knows
-an active account's email can sign in as that account. Existing account IDs,
-roles, and search memberships are preserved when upgrading.
+The shared account is ensured on every boot. Existing named accounts and search
+memberships remain in the store. The email-only API remains available for
+existing integrations, but the web interface uses Start.
 
-| Variable | Default | Notes |
-|---|---|---|
-| `SLATE_EMAIL_TEAM` | `team@slate.local` | The shared sign-in, ensured on every boot |
-| `SLATE_EMAIL_ABE` | `abe@slate.local` | Initial named consultant account |
-| `SLATE_EMAIL_MIKE` | `mike@slate.local` | Initial named consultant account |
-
-`SLATE_PIN_*` variables are no longer used or required.
+Optional `SLATE_EMAIL_TEAM`, `SLATE_EMAIL_ABE`, and `SLATE_EMAIL_MIKE` variables
+customize account emails. No `SLATE_PIN_*` variables are used.
 
 ## Consensus
 
@@ -150,9 +146,7 @@ npm start
 environment is authoritative, so a file that slipped into an image cannot
 quietly replace deployed configuration.
 
-Open http://127.0.0.1:4173 and sign in as `team@slate.local`,
-`abe@slate.local`, or `mike@slate.local`. Only local demo mode lists consultant
-emails on the sign-in page. Committee members use the email on their roster.
+Open http://127.0.0.1:4173 and select **Start**.
 
 `npm test` starts its own local server and temporary data stores. It never reads
 your `.env`, contacts Claude, or changes live searches. Failed checks exit nonzero.
@@ -668,7 +662,7 @@ write. Automatic snapshots publish only after verification.
 
 ## Sign-in and deployment changes
 
-Sign-in uses only an active account email. Legacy PINs and PIN hashes are removed
+Start opens the shared workspace without credentials. Legacy PINs and PIN hashes are removed
 from the active store on startup. Production never lists demo accounts, even if
 `SHOW_DEMO_LOGINS=true`.
 Prefer named consultant accounts for attributable approvals; the shared firm

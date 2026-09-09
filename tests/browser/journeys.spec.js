@@ -3,69 +3,58 @@
 // The critical journeys, in a real browser.
 //
 // The server suites prove the API behaves. These prove a person can actually
-// reach that behaviour: that the sign-in form works with a keyboard, that a
+// reach that behaviour: that Start works with a keyboard, that a
 // county search can be opened, and that a candidate on a phone can read and
 // submit a questionnaire.
 
 const { test, expect } = require('@playwright/test');
 
-const TEAM = { email: 'team@slate.local' };
-
-async function openSignIn(page) {
+async function openStart(page) {
   await page.goto('/');
   await page.waitForLoadState('networkidle');
-  await page.getByRole('button', { name: /^sign in$/i }).first().click();
-  await expect(page.locator('#login')).toBeVisible({ timeout: 10000 });
+  await expect(page.getByRole('button', { name: 'Start', exact: true }).first()).toBeVisible();
+  await expect(page.locator('#login')).toHaveCount(0);
 }
 
-async function signIn(page) {
-  await openSignIn(page);
-  await page.getByLabel(/email/i).fill(TEAM.email);
-  await page.getByRole('button', { name: /open workspace/i }).click();
+async function startWorkspace(page) {
+  await openStart(page);
+  await page.getByRole('button', { name: 'Start', exact: true }).first().click();
   await expect(page.getByRole('button', { name: /open a new search/i }).first()).toBeVisible({ timeout: 10000 });
 }
 
-test('a consultant can sign in', async ({ page }) => {
-  await signIn(page);
+test('Start opens the workspace without credentials and survives reload', async ({ page }) => {
+  await startWorkspace(page);
+  await page.reload();
+  await expect(page.getByRole('button', { name: /open a new search/i }).first()).toBeVisible();
+  await page.getByRole('button', { name: 'Leave workspace', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Start', exact: true })).toHaveCount(2);
+  await page.getByRole('button', { name: 'Start', exact: true }).last().click();
+  await expect(page.getByRole('button', { name: /open a new search/i }).first()).toBeVisible();
 });
 
-test('sign-in is reachable with the keyboard alone', async ({ page }) => {
-  await openSignIn(page);
-
-  // Tab to the first field rather than clicking it, then fill and submit
-  // without the mouse. A committee member using a screen reader or a keyboard
-  // has to be able to get in.
+test('Start is reachable with the keyboard alone', async ({ page }) => {
+  await openStart(page);
   await page.keyboard.press('Tab');
-  const reachedField = await page.evaluate(() => {
-    const active = document.activeElement;
-    return active && ['INPUT', 'BUTTON', 'A', 'SELECT'].includes(active.tagName);
-  });
-  expect(reachedField, 'tabbing from the top of the page reached nothing focusable').toBe(true);
-
-  await page.getByLabel(/email/i).fill('');
-  await page.getByLabel(/email/i).focus();
-  await page.keyboard.type(TEAM.email);
-  await page.keyboard.press('Tab');
+  await expect(page.getByRole('button', { name: 'Start', exact: true }).first()).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(page.getByRole('button', { name: /open a new search/i }).first()).toBeVisible({ timeout: 10000 });
 });
 
 test('every focusable control shows a visible focus indicator', async ({ page }) => {
-  await openSignIn(page);
-
-  const field = page.getByLabel(/email/i);
-  await field.focus();
-  const outline = await field.evaluate(el => {
+  await openStart(page);
+  const button = page.getByRole('button', { name: 'Start', exact: true }).first();
+  await button.focus();
+  const outline = await button.evaluate(el => {
     const style = getComputedStyle(el);
     return { outlineWidth: style.outlineWidth, outlineStyle: style.outlineStyle, boxShadow: style.boxShadow };
   });
   const visible = (outline.outlineStyle !== 'none' && outline.outlineWidth !== '0px')
     || (outline.boxShadow && outline.boxShadow !== 'none');
-  expect(visible, 'a focused field showed no visible focus indicator').toBe(true);
+  expect(visible, 'a focused button showed no visible focus indicator').toBe(true);
 });
 
 test('a county search can be opened and reloads with its type intact', async ({ page }) => {
-  await signIn(page);
+  await startWorkspace(page);
 
   await page.getByRole('button', { name: /open a new search/i }).first().click();
   const form = page.locator('#newsearch');

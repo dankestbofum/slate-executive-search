@@ -39,11 +39,11 @@ test('the landing page has no WCAG 2.1 AA violations', async ({ page }) => {
   expect(violations, '\n    ' + describeViolations(violations)).toEqual([]);
 });
 
-test('the sign-in form has no WCAG 2.1 AA violations', async ({ page }) => {
+test('the workspace opened with Start has no WCAG 2.1 AA violations', async ({ page }) => {
   await page.goto('/');
   await page.waitForLoadState('networkidle');
-  await page.getByRole('button', { name: /^sign in$/i }).first().click();
-  await expect(page.locator('#login')).toBeVisible();
+  await page.getByRole('button', { name: 'Start', exact: true }).first().click();
+  await expect(page.getByRole('button', { name: /open a new search/i }).first()).toBeVisible();
 
   const violations = await scan(page);
   expect(violations, '\n    ' + describeViolations(violations)).toEqual([]);
