@@ -132,9 +132,11 @@ a{color:var(--accent-deep); text-underline-offset:.18em; text-decoration-thickne
 .rail__caret{flex:none; transition:transform .12s ease}
 .rail__toggle[aria-expanded="true"] .rail__caret{transform:rotate(90deg)}
 .rail__toggle .rail__label{flex:1; min-width:0}
+/* Phase names wrap rather than truncate: "Seat the committee and hear them"
+   ellipsised to "Seat the committe…", which named nothing. */
 .rail__label{
-  font-size:11.5px; font-weight:700; letter-spacing:.1em; text-transform:uppercase;
-  color:var(--ink-3); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  font-size:11.5px; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
+  line-height:1.35; color:var(--ink-3);
 }
 .rail__steps{display:flex; flex-direction:column; gap:1px}
 .rail__steps[hidden]{display:none}
@@ -879,9 +881,13 @@ details.toggle[open] summary::before{transform:rotate(90deg) translateX(-1px)}
 .listbar__act{display:flex; align-items:flex-end}
 .listbar__act .btn{white-space:nowrap}
 @media (max-width:900px){
-  .listbar{grid-template-columns:minmax(0,1fr)}
+  /* Search across the top, the two narrow filters side by side, so the list
+     itself is still in the first screen on a phone. */
+  .listbar{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .listbar > .field:first-child,
+  .listbar__act{grid-column:1 / -1}
 }
-.candtable th[scope="row"]{display:flex; flex-direction:column; gap:2px; color:var(--ink)}
+.candtable th[scope="row"]{display:flex; flex-direction:column; align-items:flex-start; gap:2px; text-align:left; color:var(--ink)}
 .candname{font-weight:700}
 .candmeta{font-size:12.5px; color:var(--ink-3)}
 .candacts{white-space:nowrap}

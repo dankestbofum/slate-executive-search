@@ -953,10 +953,10 @@ function emptyState(title, body, actions=''){
  * reader announced five buttons called "1" through "5" with nothing saying
  * what they applied to or which end was better (D07).
  */
-function ratingGroup(name, buttons, ends='1 = least · 5 = most'){
+function ratingGroup(name, buttons, ends=''){
   return `<div class="rating">
     <div class="rating__scale" role="group" aria-label="${esc(name)}">${buttons}</div>
-    <span class="rating__ends">${esc(ends)}</span>
+    ${ends?`<span class="rating__ends">${esc(ends)}</span>`:''}
   </div>`;
 }
 
@@ -2219,9 +2219,8 @@ function critRow(c, i){
       <input class="input" data-f="label" value="${esc(c.label)}" placeholder="Label" aria-label="Criterion ${esc(c.id||i+1)} label">
       <input class="input" data-f="note" value="${esc(c.note||'')}" placeholder="Why this matters here" aria-label="Why ${esc(name)} matters here">
     </div>
-    ${ratingGroup('Weight for '+name,
-      `<div class="wgt">${[1,2,3,4,5].map(n=>`<button type="button" data-w="${n}" aria-label="Weight ${n} of 5 for ${esc(name)}" aria-pressed="${Number(c.weight)===n}">${n}</button>`).join('')}</div>`,
-      '1 = nice to have · 5 = decisive')}
+    ${ratingGroup('Weight for '+name+' — 1, nice to have, to 5, decisive',
+      `<div class="wgt">${[1,2,3,4,5].map(n=>`<button type="button" data-w="${n}" aria-label="Weight ${n} of 5 for ${esc(name)}" aria-pressed="${Number(c.weight)===n}">${n}</button>`).join('')}</div>`)}
     <button type="button" class="btn btn--ghost btn--sm" data-del="${i}">Remove</button>
   </div>`;
 }
@@ -2297,6 +2296,7 @@ function vProfile(){
     return `<section id="prof-${k}" class="profgroup">
       ${sectionHead(KIND[k].plural, '', pill(range, n+' of 3–5'))}
       ${k==='skill' ? `<p class="t-small">Select 3 to 5 essential skills. These become the spine of the ads, surveys, and interviews.</p>` : ''}
+      ${rows.length ? `<p class="t-small">Weight each one from 1 (nice to have) to 5 (decisive).</p>` : ''}
       ${rows.map(x=>critRow(x.c,x.i)).join('') || '<p class="t-small">None selected yet.</p>'}
       <div class="row u-mt-3">
         <button type="button" class="btn btn--secondary btn--sm" data-add="${k}" ${atCap?'disabled':''}>Add another ${KIND[k].label.toLowerCase()}</button>
@@ -3375,16 +3375,19 @@ function vPerson(){
   const groups = Object.keys(KIND).map(k => {
     const rows = (s.criteria||[]).filter(cr => cr.kind===k);
     if (!rows.length) return '';
+    // The scale is explained once for the group rather than repeated beside
+    // every criterion, and each group still carries the criterion's own name
+    // for anyone who cannot see the row it sits in.
     return `${sectionHead(KIND[k].plural, rows.length+' criteria')}
+      <p class="t-small">Score each one from 1 (does not meet) to 5 (strongest).</p>
       <div>${rows.map(cr => `<div class="scorerow">
         <div>
           <b>${esc(cr.label)}</b>
           <div class="scorerow__id"><span class="mono">${esc(cr.id)}</span>${cr.weight?' · weight '+esc(cr.weight):''}</div>
           ${cr.note?`<div class="t-small">${esc(cr.note)}</div>`:''}
         </div>
-        ${ratingGroup(cr.label+' — score this candidate',
-          `<div class="wgt">${[1,2,3,4,5].map(n=>`<button type="button" data-score="${esc(cr.id)}" data-val="${n}" aria-label="${esc(cr.label)}: ${n} of 5" aria-pressed="${Number(mine[cr.id])===n}">${n}</button>`).join('')}</div>`,
-          '1 = does not meet · 5 = strongest')}
+        ${ratingGroup(cr.label+' — score from 1, does not meet, to 5, strongest',
+          `<div class="wgt">${[1,2,3,4,5].map(n=>`<button type="button" data-score="${esc(cr.id)}" data-val="${n}" aria-label="${esc(cr.label)}: ${n} of 5" aria-pressed="${Number(mine[cr.id])===n}">${n}</button>`).join('')}</div>`)}
       </div>`).join('')}</div>`;
   }).join('');
 

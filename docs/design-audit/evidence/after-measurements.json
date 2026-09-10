@@ -1,5 +1,5 @@
 {
-  "measuredAt": "2026-09-10T05:07:48.136Z",
+  "measuredAt": "2026-09-10T05:15:15.965Z",
   "viewports": {
     "1440x1000": {
       "home": {
@@ -32,8 +32,8 @@
       },
       "profile": {
         "headingTop": 153,
-        "firstActionTop": 565,
-        "pageHeight": 2579,
+        "firstActionTop": 587,
+        "pageHeight": 2666,
         "sidewaysOverflow": 0,
         "widestTable": null
       },
@@ -83,8 +83,8 @@
       },
       "profile": {
         "headingTop": 153,
-        "firstActionTop": 565,
-        "pageHeight": 2579,
+        "firstActionTop": 587,
+        "pageHeight": 2666,
         "sidewaysOverflow": 0,
         "widestTable": null
       },
@@ -120,22 +120,22 @@
       },
       "overview": {
         "headingTop": 206,
-        "firstActionTop": 364,
-        "pageHeight": 1845,
+        "firstActionTop": 957,
+        "pageHeight": 1249,
         "sidewaysOverflow": 0,
-        "widestTable": null
+        "widestTable": 0
       },
       "screening": {
         "headingTop": 206,
-        "firstActionTop": 595,
-        "pageHeight": 3893,
+        "firstActionTop": 513,
+        "pageHeight": 3811,
         "sidewaysOverflow": 0,
         "widestTable": 730
       },
       "profile": {
         "headingTop": 206,
-        "firstActionTop": 874,
-        "pageHeight": 4439,
+        "firstActionTop": 872,
+        "pageHeight": 4242,
         "sidewaysOverflow": 0,
         "widestTable": null
       },
@@ -178,15 +178,15 @@
       },
       "screening": {
         "headingTop": 237,
-        "firstActionTop": 679,
-        "pageHeight": 6382,
+        "firstActionTop": 597,
+        "pageHeight": 6301,
         "sidewaysOverflow": 0,
         "widestTable": 324
       },
       "profile": {
         "headingTop": 237,
-        "firstActionTop": 1085,
-        "pageHeight": 4727,
+        "firstActionTop": 1105,
+        "pageHeight": 4617,
         "sidewaysOverflow": 0,
         "widestTable": null
       },
@@ -229,15 +229,15 @@
       },
       "screening": {
         "headingTop": 283,
-        "firstActionTop": 811,
-        "pageHeight": 6963,
+        "firstActionTop": 729,
+        "pageHeight": 6881,
         "sidewaysOverflow": 0,
         "widestTable": 254
       },
       "profile": {
         "headingTop": 283,
-        "firstActionTop": 1237,
-        "pageHeight": 5099,
+        "firstActionTop": 1256,
+        "pageHeight": 4989,
         "sidewaysOverflow": 0,
         "widestTable": null
       },
