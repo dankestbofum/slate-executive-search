@@ -870,3 +870,52 @@ details.toggle[open] summary::before{transform:rotate(90deg) translateX(-1px)}
 .home-row--on .t-small,
 .pkgmx__fee,
 .pkg__fee{color:var(--ink-2)}
+
+/* --- candidate list -------------------------------------------------------
+   The screening table used to carry a raw invitation URL per row, which made
+   it roughly 1,350px wide inside a 326px phone viewport and pushed the
+   advancement controls out of the first screen (D04). */
+.listbar{display:grid; grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr) auto; gap:var(--s-3) var(--s-4); align-items:end}
+.listbar__act{display:flex; align-items:flex-end}
+.listbar__act .btn{white-space:nowrap}
+@media (max-width:900px){
+  .listbar{grid-template-columns:minmax(0,1fr)}
+}
+.candtable th[scope="row"]{display:flex; flex-direction:column; gap:2px; color:var(--ink)}
+.candname{font-weight:700}
+.candmeta{font-size:12.5px; color:var(--ink-3)}
+.candacts{white-space:nowrap}
+.candacts .btn{margin:2px 4px 2px 0}
+/* Below the breakpoint each candidate becomes a stacked block. Sideways
+   scrolling is kept only where comparing columns is the point. */
+@media (max-width:760px){
+  .candtable thead{position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0,0,0,0)}
+  .candtable,.candtable tbody,.candtable tr,.candtable td,.candtable th{display:block; width:auto}
+  .candtable tr{border-bottom:1px solid var(--line); padding:var(--s-3) 0}
+  .candtable tr:last-child{border-bottom:0}
+  .candtable td{border:0; padding:3px var(--s-4)}
+  .candtable th[scope="row"]{padding:var(--s-2) var(--s-4) 4px}
+  .candtable td[data-label]::before{
+    content:attr(data-label) " "; font-size:10.5px; font-weight:700;
+    letter-spacing:.11em; text-transform:uppercase; color:var(--ink-3); margin-right:6px;
+  }
+  .candacts{white-space:normal}
+  .candacts::before{display:block; margin-bottom:4px}
+  .tablewrap:has(.candtable){overflow-x:visible}
+}
+
+/* --- candidate review: evidence beside the scoring task ------------------- */
+.review2{display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:var(--s-5); align-items:start}
+@media (max-width:1000px){
+  .review2{grid-template-columns:minmax(0,1fr)}
+}
+.review2__col{min-width:0; display:flex; flex-direction:column; gap:var(--s-4)}
+.scorerow{
+  display:grid; grid-template-columns:minmax(0,1fr) auto; gap:var(--s-3);
+  align-items:start; padding:var(--s-3) 0; border-bottom:1px solid var(--line);
+}
+.scorerow:last-child{border-bottom:0}
+.scorerow__id{font-size:11.5px; color:var(--ink-3)}
+@media (max-width:560px){
+  .scorerow{grid-template-columns:minmax(0,1fr)}
+}

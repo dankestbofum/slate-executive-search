@@ -1245,9 +1245,13 @@ async function run(){
   record('New search opens on the search committee', /go\('team'\)/.test(appJs) && /Seat the committee first/.test(appJs));
 
   record('New search and Search facts offer the package picker',
-    /function packagePicker/.test(appJs) && /name="package"/.test(appJs) && /packagePicker\(state\.newPackage \|\| state\.health\?\.defaultPackage\)/.test(appJs) && /packagePicker\(s\.package\)/.test(appJs));
-  record('The package picker is the pay-level breakdown matrix',
+    /function packageChoice/.test(appJs) && /name="package"/.test(appJs) && /packageChoice\(state\.newPackage \|\| state\.health\?\.defaultPackage\)/.test(appJs) && /packageChoice\(s\.package\)/.test(appJs));
+  // The choice itself is a compact set of cards; the full pay-level matrix is
+  // still there, behind a disclosure, so it no longer runs ahead of the client
+  // and position fields (D02).
+  record('The package comparison is available without leading the form',
     /function packageMatrix/.test(appJs) && /Potential fee/.test(appJs) && /What each pay level includes/.test(appJs)
+      && /data-panel="pkgcompare"/.test(appJs) && /Compare what each level includes/.test(appJs)
       && /\.pkgmx/.test(appCss) && /pkgmx--pick:has/.test(appCss));
   record('Each pay level has a sample workspace view',
     /function vPackages/.test(appJs) && /function demoSearch/.test(appJs) && /data-go="packages"/.test(appJs)

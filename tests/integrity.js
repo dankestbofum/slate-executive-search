@@ -170,7 +170,16 @@ async function request(url, method = 'GET', body, cookie, revision) {
   const source = fs.readFileSync(path.join(__dirname, '../public/app.js'), 'utf8');
   const renderer = source.slice(source.indexOf('function vPerson(){'), source.indexOf('function pickApplySurvey('));
   const escapeSource = source.match(/^const esc = .+$/m)[0];
-  const html = vm.runInNewContext(escapeSource+'\n'+renderer+';vPerson()', { state:{ search:s, user:login.body.user, users:[], sel:c.id }, shell:v=>v, head:()=>'', field:()=>'', canEdit:()=>false, ico:()=>'', surveyRead:()=>'', location:{ origin:'http://test' } });
+  const html = vm.runInNewContext(escapeSource+'\n'+renderer+';vPerson()', {
+    state:{ search:s, user:login.body.user, users:[], sel:c.id },
+    shell:v=>v, head:()=>'', field:()=>'', canEdit:()=>false, ico:()=>'', surveyRead:()=>'',
+    // The scoring surface is assembled from the shared primitives; stub them so
+    // the assertion stays about escaping, not about layout.
+    KIND:{ skill:{ plural:'Essential skills' } },
+    sectionHead:()=>'', ratingGroup:(name, buttons)=>buttons, emptyState:()=>'',
+    actionBar:()=>'', withTip:h=>h, TIPS:{}, stagePill:()=>'', pill:(k,label)=>String(label),
+    location:{ origin:'http://test' }
+  });
   check('legacy score markup is escaped by the real renderer', () => { assert.ok(!html.includes(marker)); assert.ok(html.includes('&lt;b')); });
   const busyFunction = source.slice(source.indexOf('async function withBusy('), source.indexOf('function artHasContent('));
   let renders = 0;

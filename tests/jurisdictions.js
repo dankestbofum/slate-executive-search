@@ -76,8 +76,14 @@ async function request(url, method='GET', body) {
   check('other states do not inherit Arizona board naming', () => assert.equal(jurisdictions.governingBody({...saved,state:'CO'}),'county governing board'));
 
   const source = fs.readFileSync(path.join(__dirname,'../public/app.js'),'utf8');
-  const state = { health:config, search:saved, newJurisdiction:'county' };
-  const ui = vm.createContext({ state, esc:String, field:(label,hint,control)=>label+control, shell:x=>x, head:()=>'', packages:()=>[] });
+  const state = { health:config, search:saved, newJurisdiction:'county', open:{} };
+  const ui = vm.createContext({
+    state, esc:String, field:(label,hint,control)=>label+control, shell:x=>x, head:()=>'', packages:()=>[],
+    // Shared primitives these two screens are assembled from. Stubbed so the
+    // assertion stays about county wording, not about page furniture.
+    sectionHead:()=>'', actionBar:(a,b)=>String(a)+String(b||''), emptyState:()=>'',
+    withTip:h=>h, TIPS:{}, packageChoice:()=>'', packageLabel:k=>String(k||'')
+  });
   vm.runInContext(source.slice(source.indexOf('function jurisdictionInfo('),source.indexOf('function nextHint(')),ui);
   vm.runInContext(source.slice(source.indexOf('function vFacts('),source.indexOf('function seatPill(')),ui);
   ui.stepNo = ()=>1;

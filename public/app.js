@@ -232,7 +232,7 @@ function packageOffers(pkg, row){
  * the catalog. When `pick` is true the column headers are radios named
  * `package`, so New search and Search facts submit the chosen tier.
  */
-function packageMatrix(selected, { pick=false }={}){
+function packageMatrix(selected, { pick=false, plain=false }={}){
   const list = packages();
   const rows = compareRows();
   const bands = compareBands();
@@ -256,7 +256,9 @@ function packageMatrix(selected, { pick=false }={}){
   const head = p => {
     const inner = `<span class="pkgmx__nm">${esc(p.label)}</span><span class="pkgmx__fee">${esc(p.fee)}</span>`;
     if (pick) return `<label class="pkgmx__pick"><input type="radio" name="package" value="${esc(p.key)}" ${p.key===on?'checked':''}>${inner}</label>`;
-    if (!state.user) return `<div class="pkgmx__pick">${inner}</div>`;
+    // Inside a form the comparison is reference material only: a header that
+    // navigated to the Packages page would discard what had been typed.
+    if (plain || !state.user) return `<div class="pkgmx__pick">${inner}</div>`;
     return `<button type="button" class="pkgmx__pick" data-go="packages" data-pkg="${esc(p.key)}">${inner}</button>`;
   };
   const bandRows = (bands.length ? bands : [{ key:'', t:'' }]).map(band => {
@@ -884,8 +886,97 @@ const TIPS = {
   printPack:'Open the browser print dialog with only the printable packet on the page.',
   backTip:'Return to the screen you came from.'
 };
-function field(label, hint, control){
-  return `<label class="field field--wide"><span class="field__label">${label}</span>${hint?`<span class="field__hint">${hint}</span>`:''}${control}</label>`;
+/* ===========================================================================
+ * Shared layout primitives
+ *
+ * One page header, section heading, form field, action bar, empty state and
+ * rating group, used everywhere. Before DEP-13 each screen assembled its own
+ * from `.sub`, `.row` and bare buttons, which is why no two forms had the same
+ * geometry and every screen ended with a different arrangement of blue
+ * buttons (D06, D09).
+ * ========================================================================= */
+
+function field(label, hint, control, opts={}){
+  const req = opts.req ? '<span class="field__req" aria-hidden="true">*</span>' : '';
+  return `<label class="field field--wide${opts.span?' field--span':''}">
+    <span class="field__label">${label}${req}</span>
+    ${control}
+    ${hint?`<span class="field__hint">${hint}</span>`:''}
+  </label>`;
+}
+
+// A heading inside a page, optionally with a count and its own actions.
+function sectionHead(title, count='', actions=''){
+  return `<div class="sechead">
+    <h2 class="sechead__t">${esc(title)}</h2>
+    ${count?`<span class="sechead__n">${esc(count)}</span>`:''}
+    ${actions?`<span class="sechead__act">${actions}</span>`:''}
+  </div>`;
+}
+
+/**
+ * The one dominant action for a screen, with its save state beside it.
+ *
+ * Navigation stays secondary here: the audit found four blue buttons
+ * competing on a single roster screen (D06).
+ */
+function actionBar(primary, secondary='', stateNote='', dirtyText=''){
+  return `<div class="actionbar">
+    ${primary}
+    ${secondary}
+    ${stateNote||dirtyText?`<span class="actionbar__state"${dirtyText?` data-dirty-text="${esc(dirtyText)}"`:''}>${stateNote}</span>`:''}
+  </div>`;
+}
+
+// Say so the moment something is edited, beside the control that saves it.
+function markUnsaved(){
+  const el = $('.actionbar__state[data-dirty-text]');
+  if (!el || el.classList.contains('actionbar__state--dirty')) return;
+  el.textContent = el.dataset.dirtyText;
+  el.classList.add('actionbar__state--dirty');
+}
+
+function emptyState(title, body, actions=''){
+  return `<div class="emptystate">
+    <div class="emptystate__t">${esc(title)}</div>
+    <div class="t-small">${body}</div>
+    ${actions?`<div class="row">${actions}</div>`:''}
+  </div>`;
+}
+
+/**
+ * A 1–5 scale as a named group with its endpoints written out.
+ *
+ * A bare row of numbers is weak both visually and programmatically; a screen
+ * reader announced five buttons called "1" through "5" with nothing saying
+ * what they applied to or which end was better (D07).
+ */
+function ratingGroup(name, buttons, ends='1 = least · 5 = most'){
+  return `<div class="rating">
+    <div class="rating__scale" role="group" aria-label="${esc(name)}">${buttons}</div>
+    <span class="rating__ends">${esc(ends)}</span>
+  </div>`;
+}
+
+// A compact package choice with the full comparison behind a disclosure. The
+// matrix used to run ahead of the client and position fields (D02).
+function packageChoice(selected){
+  const list = packages();
+  if (!list.length) return '';
+  const fallback = state.health?.defaultPackage || list[list.length-1].key;
+  const on = list.some(p => p.key === selected) ? selected : fallback;
+  const open = Boolean(state.open.pkgcompare);
+  const cards = `<div class="pkgs" role="radiogroup" aria-label="Service package">${list.map(p => `
+    <label class="pkg">
+      <input type="radio" name="package" value="${esc(p.key)}" ${p.key===on?'checked':''}>
+      <span class="pkg__hd"><span class="pkg__nm">${esc(p.label)}</span><span class="pkg__fee">${esc(p.fee)}</span></span>
+      <span class="t-small">${esc(p.lede||'')}</span>
+    </label>`).join('')}</div>`;
+  return `<div class="stack stack--tight">
+    ${cards}
+    <div><button type="button" class="btn btn--ghost btn--sm" data-panel="pkgcompare" aria-expanded="${open}" aria-controls="pkgcompare" data-open-label="Compare what each level includes" data-close-label="Hide the comparison">${open?'Hide the comparison':'Compare what each level includes'}</button></div>
+    <div id="pkgcompare"${open?'':' hidden'}>${packageMatrix(on, { plain:true })}</div>
+  </div>`;
 }
 function head(eyebrow, title, lede, actions=''){
   return `<div class="hero"><div class="wrap">
@@ -1192,49 +1283,59 @@ function vHome(){
   const pickup = list.find(s => s.progress?.next);
   const first = String(u.name||'').split(' ')[0] || 'there';
   const owed = list.filter(s => s.intakeOpen && s.seat && !s.intakeMine);
+  const manage = canDelete && Boolean(state.open.homemanage);
   const rows = list.length
     ? list.map(s => {
         const n = s.progress?.next;
         const on = picked.includes(s.id);
         return `<div class="home-row${on?' home-row--on':''}">
-          ${canDelete?`<label class="home-row__pick"><input type="checkbox" data-pick-search="${s.id}" ${on?'checked':''} aria-label="Select ${esc(s.client||s.no||'this search')}"></label>`:''}
+          ${manage?`<label class="home-row__pick"><input type="checkbox" data-pick-search="${s.id}" ${on?'checked':''} aria-label="Select ${esc(s.client||s.no||'this search')}"></label>`:''}
           <button class="home-row__open" data-open="${s.id}">
-            <span><b>${esc(s.client||'Untitled')}</b><div class="t-small">${esc(s.position)} · ${esc(s.fog||'')}${s.packageLabel?' · '+esc(s.packageLabel):''}</div></span>
+            <span><b>${esc(s.client||'Untitled')}</b><div class="t-small">${esc(s.position)}${s.packageLabel?' · '+esc(s.packageLabel):''}</div></span>
             <span class="mono t-small">${esc(s.no)}</span>
             <span class="t-small">${s.accountManager?esc(s.accountManager.name):'—'}${s.seats>1?' +'+(s.seats-1):''}</span>
             <span class="t-small">${s.progress?s.progress.done+'/'+s.progress.total:''}${n?' · next: '+esc(n.t):' · complete'}</span>
           </button>
-          ${canDelete?`<button class="btn btn--danger btn--sm" data-act="delete-search" data-id="${s.id}" data-name="${esc(s.client||s.no||'this search')}">Archive</button>`:''}
+          ${manage?`<button class="btn btn--danger btn--sm" data-act="delete-search" data-id="${s.id}" data-name="${esc(s.client||s.no||'this search')}">Archive</button>`:''}
         </div>`;
       }).join('')
-    : `<div class="empty"><div class="empty__t">No searches yet</div>Open a search. It starts by seating the committee and asking each member what they are looking for. The profile is built from their answers, and everything else is generated from that.</div>`;
+    : `<div class="empty">${emptyState('No searches yet',
+        'A search starts by seating the committee and asking each member what they are looking for. The profile is built from their answers, and everything else is generated from that.',
+        u.role==='consultant' ? `<button class="btn btn--primary" data-go="new">Open a new search</button>` : '')}</div>`;
+
+  // What is actually waiting on this person, in the order they would pick it
+  // up. Home used to open on repeated identity tiles and a duplicate New
+  // search button instead (D08).
+  const waiting = [
+    ...owed.map(s => ({ id:s.id, t:'Answer committee intake', b:esc(s.client||s.no)+' · '+esc(s.position||'')
+      + (s.intakeDue ? ' · due '+esc(s.intakeDue) : ''), cta:'Answer now' })),
+    ...(pickup && !owed.some(o => o.id === pickup.id)
+      ? [{ id:pickup.id, t:'Step '+pickup.progress.next.n+'. '+esc(pickup.progress.next.t),
+           b:esc(pickup.client||'Untitled')+' · '+esc(pickup.position||''), cta:'Open this search' }]
+      : [])
+  ];
+
   return shell(`
-    ${head('Home','Welcome back, '+first,'Your book of searches. Open a file or start a new one.',
+    ${head('Home','Welcome back, '+first,
+      list.length ? esc(live)+' search'+(live===1?'':'es')+' in progress, '+esc(complete)+' complete.' : 'Open your first search.',
       u.role==='consultant' ? `<button class="btn btn--primary" data-go="new">Open a new search</button>` : '')}
     <div class="band"><div class="wrap stack">
-      <div class="tiles">
-        <div class="tile"><span class="tile__k">Searches</span><span class="tile__v">${list.length}</span></div>
-        <div class="tile"><span class="tile__k">In progress</span><span class="tile__v">${live}</span></div>
-        <div class="tile"><span class="tile__k">Complete</span><span class="tile__v">${complete}</span></div>
-        <div class="tile tile--hi"><span class="tile__k">Workspace account</span><span class="tile__v u-fs-145">${esc(u.init)}</span><span class="tile__n">${esc(u.title)}</span></div>
-      </div>
-      ${owed.length ? `<div class="notice notice--info"><div>
-        <div class="notice__t">Committee intake is waiting on you</div>
-        <div class="notice__b">Your seat counts in the tally on ${owed.map(s => `<button class="btn btn--ghost btn--sm" data-open="${s.id}">${esc(s.client||s.no)}</button>`).join(' ')}</div>
-      </div></div>` : ''}
-      ${pickup ? `<div class="next">
-        <div class="t-label">Continue</div>
-        <h2>${esc(pickup.client||'Untitled')} · ${esc(pickup.position||'')}</h2>
-        <p class="t-small">Step ${pickup.progress.next.n}. ${esc(pickup.progress.next.t)}</p>
-        <div class="row"><button class="btn btn--primary" data-open="${pickup.id}">Open this search</button>
-          ${u.role==='consultant' ? `<button class="btn btn--secondary" data-go="new">Open a new search</button>` : ''}</div>
+      ${searchesNotice()}
+      ${waiting.length ? `<div class="next">
+        <div class="t-label">Waiting on you</div>
+        ${waiting.map(w => `<div class="waitrow">
+          <div><b>${w.t}</b><div class="t-small">${w.b}</div></div>
+          <button class="btn btn--primary btn--sm" data-open="${w.id}">${esc(w.cta)}</button>
+        </div>`).join('')}
       </div>` : ''}
-      <div class="spec"><div class="spec__bar">Your searches${canDelete && list.length ? `<span class="spec__bar-act">
-          <button type="button" class="btn btn--ghost btn--sm" data-act="pick-all">${allPicked?'Clear':'Select all'}</button>
-          <button type="button" class="btn btn--danger btn--sm" data-act="delete-searches" ${picked.length?'':'disabled'}>Archive selected${picked.length?' · '+picked.length:''}</button>
+      <div class="spec"><div class="spec__bar">Your searches · ${list.length}${canDelete && list.length ? `<span class="spec__bar-act">
+          ${manage ? `<button type="button" class="btn btn--ghost btn--sm" data-act="pick-all">${allPicked?'Clear':'Select all'}</button>
+          ${withTip(`<button type="button" class="btn btn--danger btn--sm" data-act="delete-searches" ${picked.length?'':'disabled'}>Archive selected${picked.length?' · '+picked.length:''}</button>`, TIPS.archive)}` : ''}
+          <button type="button" class="btn btn--ghost btn--sm" data-act="home-manage">${manage?'Done':'More'}</button>
         </span>` : ''}</div>
         <div class="spec__body spec__body--flush">${rows}</div>
       </div>
+      ${manage ? `<div class="row"><button class="btn btn--secondary btn--sm" data-go="archives">Archived searches</button></div>` : ''}
     </div></div>`);
 }
 
@@ -1269,30 +1370,38 @@ function updateJurisdictionFields(form){
 
 function vNew(){
   const jurisdiction = jurisdictionInfo({ jurisdictionType:state.newJurisdiction || 'municipality' });
+  const moreOpen = Boolean(state.open.newmore);
   return shell(`
-    ${head('New search','Who is hiring, and for what','Open the file, then seat the search committee. The profile comes after the committee has told you what they are looking for.',
-      `<button class="btn btn--primary" type="submit" form="newsearch" data-act="create">Create search</button>
-       <button class="btn btn--secondary" data-go="home">Cancel</button>`)}
+    ${head('New search','Who is hiring, and for what','Open the file, then seat the search committee. The profile comes after the committee has told you what they are looking for.')}
     <div class="band"><div class="wrap"><form id="newsearch" class="stack">
-      ${packages().length ? `<div>
-        <div class="sub u-mt-0">Service package</div>
-        <p class="t-small u-mb-3">What the client bought, and the fee that goes with it. The column you pick sets which steps are on this file; the committee and the profile are on every one. You can change it later on Search facts.</p>
-        ${packagePicker(state.newPackage || state.health?.defaultPackage)}
-      </div>` : ''}
-      <div class="sub">The client</div>
-      ${jurisdictionPicker(jurisdiction.key)}
-      <div class="grid2">
-        ${field('Client jurisdiction','Official county, city, or town name.', `<input class="input" name="client" required placeholder="${esc(jurisdiction.clientPlaceholder)}">`)}
-        ${field(jurisdiction.key==='county'?'County website':'City or town website','Saved now. Looked up once the profile is adopted.', `<input class="input" name="website" type="url" placeholder="https://">`)}
-        ${field('Position','', `<input class="input" name="position" required placeholder="${esc(jurisdiction.positionPlaceholder)}">`)}
+      ${sectionHead('The client', 'Required')}
+      <div class="formgrid">
+        ${field('Client jurisdiction','Official county, city, or town name.', `<input class="input" name="client" required placeholder="${esc(jurisdiction.clientPlaceholder)}">`, { req:true })}
+        ${field('Position','The title being recruited.', `<input class="input" name="position" required placeholder="${esc(jurisdiction.positionPlaceholder)}">`, { req:true })}
+        ${jurisdictionPicker(jurisdiction.key)}
         ${field('State','', `<input class="input" name="state" placeholder="Colorado">`)}
-        ${field('Form of government','Use the jurisdiction’s official structure.', `<input class="input" name="fog" placeholder="${esc(jurisdiction.governmentPlaceholder)}">`)}
-        ${field('Population','', `<input class="input" name="population" placeholder="18,400">`)}
-        ${field('Operating budget','', `<input class="input" name="budget" placeholder="$34M general fund">`)}
-        ${field('Salary range','', `<input class="input" name="salary" placeholder="$165,000–$195,000">`)}
-        ${field('First review date','', `<input class="input" name="firstReview" placeholder="14 Sep 2026">`)}
       </div>
-      ${field('Notes from the governing body','Paste workshop notes. Used to draft the profile.', `<textarea class="input ed" name="notes" placeholder="Structural deficit, three director vacancies, deferred water mains…"></textarea>`)}
+      ${packages().length ? `
+        ${sectionHead('Service package', 'Changeable later on Search facts')}
+        <p class="t-small">What the client bought, and the fee that goes with it. The level you pick sets which steps are on this file; the committee and the profile are on every one.</p>
+        ${packageChoice(state.newPackage || state.health?.defaultPackage)}` : ''}
+      ${sectionHead('Research details', 'Optional', `<button type="button" class="btn btn--ghost btn--sm" data-panel="newmore" aria-expanded="${moreOpen}" aria-controls="newmore" data-open-label="Add these now" data-close-label="Hide these">${moreOpen?'Hide these':'Add these now'}</button>`)}
+      <p class="t-small">None of this is needed to open the file. Research fills most of it later from public sources.</p>
+      <div id="newmore"${moreOpen?'':' hidden'}>
+        <div class="formgrid">
+          ${field(jurisdiction.key==='county'?'County website':'City or town website','Saved now. Looked up once the profile is adopted.', `<input class="input" name="website" type="url" placeholder="https://">`)}
+          ${field('Form of government','Use the jurisdiction’s official structure.', `<input class="input" name="fog" placeholder="${esc(jurisdiction.governmentPlaceholder)}">`)}
+          ${field('Population','', `<input class="input" name="population" placeholder="18,400">`)}
+          ${field('Operating budget','', `<input class="input" name="budget" placeholder="$34M general fund">`)}
+          ${field('Salary range','', `<input class="input" name="salary" placeholder="$165,000–$195,000">`)}
+          ${field('First review date','', `<input class="input" name="firstReview" placeholder="14 Sep 2026">`)}
+          ${field('Notes from the governing body','Paste workshop notes. Used to draft the profile.', `<textarea class="input ed" name="notes" placeholder="Structural deficit, three director vacancies, deferred water mains…"></textarea>`, { span:true })}
+        </div>
+      </div>
+      ${actionBar(
+        `<button class="btn btn--primary" type="submit" form="newsearch">Create search</button>`,
+        `<button type="button" class="btn btn--secondary" data-go="home">Cancel</button>`,
+        'Opens the file and takes you to the search committee.')}
     </form></div></div>`);
 }
 
@@ -1552,6 +1661,61 @@ function nextForViewer(s){
   return (s.steps||[]).find(st => canOpenStep(st.key) && st.status!=='done' && !st.blocked) || null;
 }
 
+/**
+ * Work that is open on this search, in one place.
+ *
+ * The overview used to repeat the process already visible in the rail and put
+ * package detail ahead of anything actionable (D08). This reads the state the
+ * server already reports — intake tally, review status, stale sources — rather
+ * than inventing new metrics.
+ */
+function outstandingPanel(s){
+  const items = [];
+  const pending = s.consensus?.pending || [];
+  if (s.intake?.status === 'open' && pending.length){
+    items.push({ t: pending.length+' committee member'+(pending.length===1?' has':'s have')+' not answered intake',
+      b: pending.map(p => esc(p.name || p)).join(', '), key:'intake', cta:'Open committee input' });
+  }
+  for (const [key, warning] of Object.entries(s.staleArtifacts || {})){
+    if (!stepOf(key)) continue;
+    items.push({ t:(STEP_NAME[key]||DRAFTS[key]?.title||key)+' needs another look', b:esc(warning), key, cta:'Open it' });
+  }
+  const needsReview = (state.health?.reviewSteps || []).filter(key =>
+    stepOf(key) && s.artifacts?.[key] && (s.reviews||{})[key]?.status !== 'approved' && !s.staleArtifacts?.[key]);
+  for (const key of needsReview){
+    items.push({ t:(STEP_NAME[key]||DRAFTS[key]?.title||key)+' is drafted but not reviewed',
+      b:'A consultant marks it reviewed before it goes out.', key, cta:'Review it' });
+  }
+  const blocked = (s.steps||[]).filter(st => st.blocked && st.needsCandidates).length;
+  if (blocked && !(s.candidates||[]).length){
+    items.push({ t:blocked+' step'+(blocked===1?'':'s')+' wait until someone is on the file',
+      b:'Add candidates in Screening when applications come in.', key:'screen', cta:'Open screening' });
+  }
+  if (!items.length) return '';
+  return `<div class="spec"><div class="spec__bar">Outstanding · ${items.length}</div>
+    <div class="spec__body stack stack--tight">${items.map(i => `<div class="waitrow">
+      <div><b>${esc(i.t)}</b><div class="t-small">${i.b}</div></div>
+      ${openBtn(i.key, i.cta)}
+    </div>`).join('')}</div></div>`;
+}
+
+// Where the candidates stand, without opening the screening table.
+function candidatePanel(s){
+  if (!stepOf('screen')) return '';
+  const c = s.candidates || [];
+  const by = stage => c.filter(x => x.stage===stage).length;
+  return `<div class="spec"><div class="spec__bar">Candidates · ${c.length}</div>
+    <div class="spec__body">
+      ${c.length ? `<div class="tiles tiles--tight">
+        <div class="tile"><span class="tile__k">Applicants</span><span class="tile__v">${by('applicant')}</span></div>
+        <div class="tile"><span class="tile__k">Semifinalists</span><span class="tile__v">${by('semifinalist')}</span></div>
+        <div class="tile"><span class="tile__k">Finalists</span><span class="tile__v">${by('finalist')}</span></div>
+        <div class="tile"><span class="tile__k">Surveys in</span><span class="tile__v">${c.filter(x => x.survey1).length}</span></div>
+      </div>` : `<p class="t-small">Nobody on the file yet.</p>`}
+      <p class="t-small u-mt-3">${openBtn('screen', c.length ? 'Open screening' : 'Add the first candidate')}</p>
+    </div></div>`;
+}
+
 function overviewInner(s, { preview=false }={}){
   const next = preview ? (s.progress && s.progress.next) : nextForViewer(s);
   const view = overviewView(s);
@@ -1569,12 +1733,24 @@ function overviewInner(s, { preview=false }={}){
     ? `<div class="dash">${(view.panels||[]).map(k => DASH[k] ? DASH[k](s) : '').join('')}</div>`
     : rosterPanel(s);
   const steps = view.steps === 'strip' ? stepStrip(s) : phaseSpecs(s);
+  const processOpen = Boolean(state.open.process);
+  // The full process and the package terms are reference material. They sit
+  // behind a disclosure so the next action, the open work, and the candidates
+  // are what the page opens on.
+  const reference = `<div class="stack stack--tight">
+    <div class="row">
+      <button type="button" class="btn btn--ghost btn--sm" data-panel="process" aria-expanded="${processOpen}" aria-controls="overview-process" data-open-label="Show the full process" data-close-label="Hide the full process">${processOpen?'Hide the full process':'Show the full process'}</button>
+      <span class="t-small">${s.progress ? s.progress.done+' of '+stepTotal()+' steps done' : ''}</span>
+    </div>
+    <div id="overview-process"${processOpen?'':' hidden'}><div class="stack">${steps}${packagePanel(s)}</div></div>
+  </div>`;
   return `${overviewTiles(s, next, view)}
       ${nextCard}
+      ${preview ? '' : outstandingPanel(s)}
+      ${candidatePanel(s)}
       ${panels}
-      ${steps}
-      ${packagePanel(s)}
-      ${activityPanel(s)}`;
+      ${activityPanel(s)}
+      ${reference}`;
 }
 
 function vOverview(){
@@ -1617,31 +1793,37 @@ function vPackages(){
 
 function vFacts(){
   const s = state.search;
+  const pkgOpen = Boolean(state.open.factspkg);
   return shell(`
-    ${head('Search facts', s.client||'Client','These facts feed every generated document.',
-      `<button class="btn btn--primary" data-act="save-facts">Save facts</button>
-       <button class="btn btn--secondary" data-act="research">Research this ${jurisdictionInfo().noun}</button>
-       <button class="btn btn--secondary" data-go="profile">Next · Step ${stepNo('profile')}</button>`)}
+    ${head('Search facts', s.client||'Client','These facts feed every generated document. Check them before you draft recruiting copy.')}
     <div class="band"><div class="wrap"><form id="facts" class="stack">
-      ${packages().length ? `<div>
-        <div class="sub u-mt-0">Service package</div>
-        <p class="t-small u-mb-3">Pick the pay level the client bought. Moving down a column hides the steps that fee does not include; anything already drafted on them stays on file and comes back if you move up again.</p>
-        ${packagePicker(s.package)}
-      </div>
-      <div class="sub">The client</div>` : ''}
-      ${jurisdictionPicker(s.jurisdictionType)}
-      <div class="grid2">
-        ${field('Client','', `<input class="input" name="client" value="${esc(s.client)}">`)}
-        ${field(jurisdictionInfo().key==='county'?'County website':'City or town website','Official site used for research.', `<input class="input" name="website" value="${esc(s.website||'')}" placeholder="https://">`)}
+      ${sectionHead('The client')}
+      <div class="formgrid">
+        ${field('Client','Official county, city, or town name.', `<input class="input" name="client" value="${esc(s.client)}">`)}
         ${field('Position','', `<input class="input" name="position" value="${esc(s.position)}">`)}
+        ${jurisdictionPicker(s.jurisdictionType)}
         ${field('State','', `<input class="input" name="state" value="${esc(s.state||'')}">`)}
+        ${field(jurisdictionInfo().key==='county'?'County website':'City or town website','Official site used for research.', `<input class="input" name="website" value="${esc(s.website||'')}" placeholder="https://">`)}
         ${field('Form of government','', `<input class="input" name="fog" value="${esc(s.fog||'')}">`)}
+      </div>
+      ${sectionHead('Facts used in recruiting copy')}
+      <div class="formgrid">
         ${field('Population','', `<input class="input" name="population" value="${esc(s.population||'')}">`)}
         ${field('Budget','', `<input class="input" name="budget" value="${esc(s.budget||'')}">`)}
         ${field('Salary','', `<input class="input" name="salary" value="${esc(s.salary||'')}">`)}
         ${field('First review','', `<input class="input" name="firstReview" value="${esc(s.firstReview||'')}">`)}
+        ${field('Working notes','Not published. Used when you ask Claude to draft.', `<textarea class="input ed" name="notes">${esc(s.notes||'')}</textarea>`, { span:true })}
       </div>
-      ${field('Working notes','Not published. Used when you ask Claude to draft.', `<textarea class="input ed" name="notes">${esc(s.notes||'')}</textarea>`)}
+      ${packages().length ? `
+      ${sectionHead('Service package', packageLabel(s.package), `<button type="button" class="btn btn--ghost btn--sm" data-panel="factspkg" aria-expanded="${pkgOpen}" aria-controls="factspkg" data-open-label="Change the package" data-close-label="Hide package options">${pkgOpen?'Hide package options':'Change the package'}</button>`)}
+      <div id="factspkg"${pkgOpen?'':' hidden'}>
+        <p class="t-small u-mb-3">Moving down a level hides the steps that fee does not include. Anything already drafted on them stays on file and comes back if you move up again.</p>
+        ${packageChoice(s.package)}
+      </div>` : ''}
+      ${actionBar(
+        `<button class="btn btn--primary" data-act="save-facts">Save facts</button>`,
+        withTip(`<button type="button" class="btn btn--secondary" data-act="research">Research this ${esc(jurisdictionInfo().noun)}</button>`, TIPS.research)
+        + ` <button type="button" class="btn btn--ghost" data-go="profile">Candidate profile</button>`)}
     </form></div></div>`);
 }
 
@@ -2782,44 +2964,96 @@ function surveyRead(survey, submitted){
     </div>`).join('')}</div>`;
 }
 
+// List filters live per search, so returning from a candidate recovers the
+// list context the user left (the Back requirement in the plan).
+function listFilter(){
+  const id = state.search?.id || '';
+  if (!state.filters[id]) state.filters[id] = { q:'', stage:'', resp:'' };
+  return state.filters[id];
+}
+
+function filterCandidates(list){
+  const f = listFilter();
+  const q = f.q.trim().toLowerCase();
+  return list.filter(c => {
+    if (f.stage && c.stage !== f.stage) return false;
+    if (f.resp === 'in' && !c.survey1) return false;
+    if (f.resp === 'out' && c.survey1) return false;
+    if (!q) return true;
+    return [c.name, c.cur, c.org].some(v => String(v||'').toLowerCase().includes(q));
+  });
+}
+
+function candidateRow(c){
+  const acts = [
+    withTip(`<button type="button" class="btn btn--primary btn--sm" data-cand="${c.id}">Review</button>`,
+      'Open this candidate to read their responses and score them against the profile.'),
+    canEdit() ? withTip(`<button type="button" class="btn btn--secondary btn--sm" data-act="copy-invite" data-cid="${c.id}">Copy invite</button>`, TIPS.copyInvite) : '',
+    canEdit() ? withTip(`<a class="btn btn--ghost btn--sm" href="/apply/${esc(c.invite)}" target="_blank" rel="noopener">Open questionnaire</a>`, TIPS.openQuestionnaire) : ''
+  ].filter(Boolean).join(' ');
+  return `<tr>
+    <th scope="row"><span class="candname">${esc(c.name)}</span>
+      <span class="candmeta">${esc(c.cur||'')}${c.cur && c.org ? ' · ' : ''}${esc(c.org||'')}</span></th>
+    <td data-label="Stage">${stagePill(c.stage)}</td>
+    <td data-label="Initial survey">${c.survey1 ? pill('ok','Response in') : pill('idle','No response')}</td>
+    <td data-label="Actions" class="candacts">${acts}</td>
+  </tr>`;
+}
+
 function vScreen(){
-  const s = state.search, origin = location.origin;
-  const rows = (s.candidates||[]).map(c => `
-    <tr>
-      <td><button class="btn btn--ghost btn--sm" data-cand="${c.id}">${esc(c.name)}</button></td>
-      <td>${esc(c.cur||'')}</td>
-      <td>${esc(c.org||'')}</td>
-      <td>${stagePill(c.stage)}</td>
-      <td>${c.survey1?'In':'—'}</td>
-      <td class="mono t-small">${canEdit() ? origin+'/apply/'+c.invite : ''}</td>
-      <td>${canEdit() && c.stage==='applicant'
-        ? `<button class="btn btn--secondary btn--sm" data-act="advance-semi" data-cid="${c.id}">Advance to semifinalist</button>`
-        : ''}</td>
-    </tr>`).join('');
+  const s = state.search;
+  const all = s.candidates || [];
+  const f = listFilter();
+  const shown = filterCandidates(all);
+  const addOpen = Boolean(state.open.addcand);
+  const rows = shown.map(candidateRow).join('');
   return shell(`
     ${head('Step '+stepNo('screen'),'Screen candidate surveys',
       canEdit()
         ? 'Review the resume and the initial survey against the adopted profile. Score each person. Advance the ones you want as semifinalists, then release scores.'
-        : 'Score each candidate against the profile the committee adopted. Your scores stay private until the account manager releases them.',
-      canEdit()
-        ? `<button class="btn btn--primary" type="submit" form="newcand">Add candidate</button>
-           <button class="btn btn--secondary" data-act="toggle-release">${s.released?'Seal scores':'Release scores'}</button>
-           ${nextBtn('screen')}`
-        : nextBtn('screen'))}
+        : 'Score each candidate against the profile the committee adopted. Your scores stay private until the account manager releases them.')}
     <div class="band"><div class="wrap stack">
       ${canEdit() && s.invitesRotatedAt ? '<div class="notice notice--info">Candidate links were replaced during the privacy update. Share the current links below; links issued before the update no longer work.</div>' : ''}
-      ${!s.candidates?.length ? `<div class="notice notice--info"><div><div class="notice__t">${canEdit()?'Phase 2 starts here':'No candidates yet'}</div><div class="notice__b">${canEdit()?'Add people when applications come in. Copy the applicant link from the table. Later steps wait until someone is on the file.':'You will be asked to score applicants here once they apply.'}</div></div></div>` : ''}
-      ${canEdit() ? `<form id="newcand" class="grid2">
-        ${field('Name','', `<input class="input" name="name" placeholder="Full name" required>`)}
-        ${field('Current title','', `<input class="input" name="cur">`)}
-        ${field('Organization','', `<input class="input" name="org">`)}
-        ${field('Email','', `<input class="input" name="email" type="email">`)}
-      </form>` : ''}
-      <div class="tablewrap" tabindex="0" role="region" aria-label="Scrollable table"><table>
-        <thead><tr><th>Candidate</th><th>Title</th><th>Organization</th><th>Stage</th><th>Survey 1</th><th>${canEdit()?'Applicant link':''}</th><th></th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="7">No candidates yet.</td></tr>`}</tbody>
+      ${!all.length ? emptyState(
+          canEdit() ? 'No candidates on the file yet' : 'No candidates yet',
+          canEdit()
+            ? 'Add people as applications come in, then copy each person’s invite link to send them the questionnaire. Later steps wait until someone is on the file.'
+            : 'You will be asked to score applicants here once they apply.',
+          canEdit() ? `<button type="button" class="btn btn--primary" data-panel="addcand" aria-expanded="${addOpen}" aria-controls="addcand" data-open-label="Add a candidate" data-close-label="Close this form">${addOpen?'Close this form':'Add a candidate'}</button>` : '')
+      : `<div class="listbar">
+          ${field('Find a candidate','', `<input class="input" id="cand-filter" data-filter="q" data-nodirty type="search" placeholder="Name, title, or organization" value="${esc(f.q)}">`)}
+          ${field('Stage','', `<select class="input" id="cand-stage" data-filter="stage" data-nodirty>
+            <option value="">All stages</option>
+            ${['applicant','semifinalist','finalist','declined'].map(v => `<option value="${v}" ${f.stage===v?'selected':''}>${v[0].toUpperCase()+v.slice(1)}</option>`).join('')}
+          </select>`)}
+          ${field('Response','', `<select class="input" id="cand-resp" data-filter="resp" data-nodirty>
+            <option value="">Any response</option>
+            <option value="in" ${f.resp==='in'?'selected':''}>Response in</option>
+            <option value="out" ${f.resp==='out'?'selected':''}>No response yet</option>
+          </select>`)}
+          ${canEdit() ? `<div class="listbar__act"><button type="button" class="btn btn--secondary" data-panel="addcand" aria-expanded="${addOpen}" aria-controls="addcand" data-open-label="Add a candidate" data-close-label="Close this form">${addOpen?'Close this form':'Add a candidate'}</button></div>` : ''}
+        </div>`}
+      ${canEdit() ? `<div id="addcand"${addOpen?'':' hidden'}>
+        <form id="newcand" class="stack stack--tight">
+          ${sectionHead('Add a candidate')}
+          <div class="formgrid">
+            ${field('Name','', `<input class="input" name="name" placeholder="Full name" required>`, { req:true })}
+            ${field('Current title','', `<input class="input" name="cur">`)}
+            ${field('Organization','', `<input class="input" name="org">`)}
+            ${field('Email','Not used to send anything. Kept on the file.', `<input class="input" name="email" type="email">`)}
+          </div>
+          <div class="row"><button class="btn btn--primary" type="submit">Add to the file</button></div>
+        </form>
+      </div>` : ''}
+      ${all.length ? `<div class="tablewrap"><table class="candtable">
+        <thead><tr><th scope="col">Candidate</th><th scope="col">Stage</th><th scope="col">Initial survey</th><th scope="col">Actions</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="4">No candidate matches these filters. <button type="button" class="btn btn--ghost btn--sm" data-act="clear-filters">Clear filters</button></td></tr>`}</tbody>
       </table></div>
-      ${stepFooter('screen')}
+      <p class="t-small">${shown.length} of ${all.length} candidate${all.length===1?'':'s'} shown.</p>` : ''}
+      ${actionBar(
+        nextBtn('screen') || `<button class="btn btn--primary" data-go="overview">Back to this search</button>`,
+        canEdit() ? withTip(`<button type="button" class="btn btn--secondary" data-act="toggle-release">${s.released?'Seal scores':'Release scores'}</button>`, s.released ? TIPS.seal : TIPS.release) : '',
+        canEdit() ? (s.released ? 'Panel scores are visible to the committee.' : 'Each person sees only their own scores.') : '')}
     </div></div>`);
 }
 
@@ -2828,26 +3062,37 @@ function vSend2(){
   const list = (s.candidates||[]).filter(c => c.stage==='semifinalist' || c.stage==='finalist');
   const rows = list.map(c => `
     <tr>
-      <td>${esc(c.name)}</td>
-      <td>${stagePill(c.stage)}</td>
-      <td>${c.survey2SentAt ? 'Opened '+(c.survey2SentAt||'').slice(0,10) : 'Not opened'}</td>
-      <td>${esc(c.survey2Deadline||'—')}</td>
-      <td>${c.survey2?'In':'Waiting'}</td>
-      <td>${canEdit() && !c.survey2
-        ? `<button class="btn btn--secondary btn--sm" data-act="send2-one" data-cid="${c.id}">${c.survey2SentAt?'Already open':'Open questionnaire'}</button>`
-        : ''}</td>
+      <th scope="row"><span class="candname">${esc(c.name)}</span>
+        <span class="candmeta">${c.survey2SentAt ? 'Opened '+esc((c.survey2SentAt||'').slice(0,10)) : 'Not opened'}${c.survey2Deadline?' · due '+esc(c.survey2Deadline):''}</span></th>
+      <td data-label="Stage">${stagePill(c.stage)}</td>
+      <td data-label="Response">${c.survey2 ? pill('ok','Response in') : pill('idle','Waiting')}</td>
+      <td data-label="Actions" class="candacts">
+        ${canEdit() && !c.survey2 && !c.survey2SentAt
+          ? withTip(`<button type="button" class="btn btn--primary btn--sm" data-act="send2-one" data-cid="${c.id}">Open questionnaire</button>`,
+              'Make the semifinalist questionnaire available on this candidate’s existing invite link.')
+          : ''}
+        ${canEdit() ? withTip(`<button type="button" class="btn btn--secondary btn--sm" data-act="copy-invite" data-cid="${c.id}">Copy invite</button>`, TIPS.copyInvite) : ''}
+        ${withTip(`<button type="button" class="btn btn--ghost btn--sm" data-cand="${c.id}">Review</button>`, 'Open this candidate to read their responses and scores.')}
+      </td>
     </tr>`).join('');
   return shell(`
-    ${head('Step '+stepNo('send2'),'Open semifinalist questionnaire','Open the questionnaire after naming semifinalists. Then contact each candidate yourself and share their existing applicant link. Opening it does not send an email.',
-      (canEdit() ? `<button class="btn btn--primary" data-act="send2-all">Open for all semifinalists</button>` : '')+' '+nextBtn('send2'))}
+    ${head('Step '+stepNo('send2'),'Open semifinalist questionnaire','Open the questionnaire after naming semifinalists. Then contact each candidate yourself and share their existing applicant link. Opening it does not send an email.')}
     <div class="band"><div class="wrap stack">
       ${!s.artifacts?.survey2 ? `<div class="notice notice--info"><div><div class="notice__t">Survey not drafted yet</div><div class="notice__b">Finish the semifinalist survey (Step ${stepNo('survey2')}), then send it from this page.</div></div></div>` : ''}
-      ${field('Deadline','Requested response date, shown to candidates. Late responses are accepted.', `<input class="input" id="send2-deadline" placeholder="Respond by 12 Sep 2026">`)}
-      <div class="tablewrap" tabindex="0" role="region" aria-label="Scrollable table"><table>
-        <thead><tr><th>Semifinalist</th><th>Stage</th><th>Opened</th><th>Deadline</th><th>Response</th><th></th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="6">No semifinalists yet. Advance people from Screening.</td></tr>`}</tbody>
-      </table></div>
-      ${stepFooter('send2')}
+      ${field('Deadline','Requested response date, shown to candidates. Late responses are accepted.', `<input class="input" id="send2-deadline" data-nodirty placeholder="Respond by 12 Sep 2026">`)}
+      ${list.length ? `<div class="tablewrap"><table class="candtable">
+        <thead><tr><th scope="col">Semifinalist</th><th scope="col">Stage</th><th scope="col">Response</th><th scope="col">Actions</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>` : emptyState('No semifinalists yet',
+        'Advance people from Screening, then open the questionnaire for them here.',
+        openBtn('screen','Open screening', true))}
+      ${actionBar(
+        nextBtn('send2'),
+        canEdit() && list.length
+          ? withTip(`<button type="button" class="btn btn--secondary" data-act="send2-all">Open for all semifinalists</button>`,
+              'Make the semifinalist questionnaire available to every semifinalist at once.')
+          : '',
+        'Opening a questionnaire does not send an email.')}
     </div></div>`);
 }
 
@@ -2857,21 +3102,24 @@ function vFinalists(){
   const survey = s.artifacts?.survey2;
   const cards = list.map(c => `
     <div class="spec">
-      <div class="spec__bar">${esc(c.name)} · ${esc(c.stage)}${c.survey2?' · survey in':''}</div>
+      <div class="spec__bar">${esc(c.name)} · ${esc(c.stage)}${c.survey2?' · response in':''}</div>
       <div class="spec__body stack">
         ${surveyRead(survey, c.survey2)}
-        ${canEdit() && c.stage==='semifinalist'
-          ? `<div class="row"><button class="btn btn--primary" data-act="advance-final" data-cid="${c.id}">Advance to finalist</button></div>`
-          : ''}
+        <div class="row">
+          ${withTip(`<button type="button" class="btn btn--ghost btn--sm" data-cand="${c.id}">Review and score</button>`, 'Open this candidate to read every response and score them.')}
+          ${canEdit() && c.stage==='semifinalist'
+            ? withTip(`<button type="button" class="btn btn--secondary btn--sm" data-act="advance-final" data-cid="${c.id}">Advance to finalist</button>`, TIPS.advanceFinal)
+            : ''}
+        </div>
       </div>
     </div>`).join('');
   return shell(`
-    ${head('Step '+stepNo('finalists'),'Select finalists','Read the semifinalist responses against the adopted profile. Do not introduce new criteria here.',
-      `<button class="btn btn--secondary" data-go="screen">Back to screening</button>
-       ${nextBtn('finalists')}`)}
+    ${head('Step '+stepNo('finalists'),'Select finalists','Read the semifinalist responses against the adopted profile. Do not introduce new criteria here.')}
     <div class="band"><div class="wrap stack">
-      ${cards || `<div class="empty"><div class="empty__t">No semifinalists yet</div>Screen and advance people, then send the second survey.</div>`}
-      ${stepFooter('finalists')}
+      ${cards || emptyState('No semifinalists yet',
+        'Screen and advance people, then open the semifinalist questionnaire for them.',
+        openBtn('screen','Open screening', true))}
+      ${actionBar(nextBtn('finalists'), `<button type="button" class="btn btn--secondary" data-go="screen">Back to screening</button>`)}
     </div></div>`);
 }
 
@@ -2891,23 +3139,62 @@ function vPerson(){
     .filter(row => Object.keys(row.scores).length);
   const nextStage = c.stage==='applicant' ? 'semifinalist' : c.stage==='semifinalist' ? 'finalist' : '';
   const nextLabel = nextStage==='semifinalist' ? 'Advance to semifinalist' : nextStage==='finalist' ? 'Advance to finalist' : '';
+  const scoredCount = (s.criteria||[]).filter(cr => mine[cr.id]).length;
+
+  // Scoring, grouped by what the committee adopted. Each scale is a named
+  // group with its endpoints written out rather than a bare row of numbers.
+  const groups = Object.keys(KIND).map(k => {
+    const rows = (s.criteria||[]).filter(cr => cr.kind===k);
+    if (!rows.length) return '';
+    return `${sectionHead(KIND[k].plural, rows.length+' criteria')}
+      <div>${rows.map(cr => `<div class="scorerow">
+        <div>
+          <b>${esc(cr.label)}</b>
+          <div class="scorerow__id"><span class="mono">${esc(cr.id)}</span>${cr.weight?' · weight '+esc(cr.weight):''}</div>
+          ${cr.note?`<div class="t-small">${esc(cr.note)}</div>`:''}
+        </div>
+        ${ratingGroup(cr.label+' — score this candidate',
+          `<div class="wgt">${[1,2,3,4,5].map(n=>`<button type="button" data-score="${esc(cr.id)}" data-val="${n}" aria-label="${esc(cr.label)}: ${n} of 5" aria-pressed="${Number(mine[cr.id])===n}">${n}</button>`).join('')}</div>`,
+          '1 = does not meet · 5 = strongest')}
+      </div>`).join('')}</div>`;
+  }).join('');
+
+  // What the candidate actually said, beside the scoring rather than below it.
+  const evidence = `
+    ${c.survey1 ? `${sectionHead('Initial survey response')}${surveyRead(s.artifacts?.survey1, c.survey1)}` : ''}
+    ${c.survey2 ? `${sectionHead('Semifinalist response')}${surveyRead(s.artifacts?.survey2, c.survey2)}` : ''}
+    ${!c.survey1 && !c.survey2 ? emptyState('No questionnaire response yet',
+        'Share this candidate’s invite link from Screening. Their answers appear here once they submit.') : ''}
+    ${!sealed && others.length ? `<div class="spec"><div class="spec__bar">Released panel scores</div><div class="spec__body">${others.map(row => `<div class="t-small"><b>${esc(row.name)}</b> — ${Object.entries(row.scores).map(([id,n])=>esc(id)+': '+esc(n)).join(', ')}</div>`).join('')}</div></div>`:''}`;
+
   return shell(`
-    ${head(c.id, c.name, `${esc(c.cur||'')}, ${esc(c.org||'')}`,
-      `<button class="btn btn--secondary" data-go="screen">Back to screening</button>
-       ${canEdit() && nextStage ? `<button class="btn btn--primary" data-act="advance" data-stage="${nextStage}">${nextLabel}</button>` : ''}`)}
+    ${head('Candidate · '+c.stage, c.name, `${esc(c.cur||'')}${c.cur && c.org ? ', ' : ''}${esc(c.org||'')} ${stagePill(c.stage)}`)}
     <div class="band"><div class="wrap stack">
-      ${sealed?`<div class="seal">${ico('lock')}<div><div class="empty__t">Other scores are sealed</div><div class="t-small">Enter your scores. You will see the rest of the panel after scores are released.</div></div></div>`:''}
-      ${(s.criteria||[]).map(cr => `
-        <div class="crit-row u-cols-score">
-          <span class="mono t-small">${esc(cr.id)}</span>
-          <div><b>${esc(cr.label)}</b><div class="t-small">${esc(cr.note||'')}</div></div>
-          <div class="wgt">${[1,2,3,4,5].map(n=>`<button type="button" data-score="${esc(cr.id)}" data-val="${n}" aria-pressed="${Number(mine[cr.id])===n}">${n}</button>`).join('')}</div>
-        </div>`).join('')}
-      ${!sealed && others.length ? `<div class="spec"><div class="spec__bar">Released panel scores</div><div class="spec__body">${others.map(row => `<div class="t-small"><b>${esc(row.name)}</b> — ${Object.entries(row.scores).map(([id,n])=>esc(id)+': '+esc(n)).join(', ')}</div>`).join('')}</div></div>`:''}
-      ${field('Note to the file','', `<textarea class="input ed" id="cnote">${esc(note)}</textarea>`)}
-      <button class="btn btn--primary" data-act="save-score">Save my scores</button>
-      ${canEdit() ? `<div class="row"><button class="btn btn--secondary" data-act="replace-invite" data-cid="${c.id}">Replace candidate link</button>${['survey1','survey2'].filter(k=>c[k]).map(k=>`<button class="btn btn--secondary" data-act="reopen-survey" data-cid="${c.id}" data-which="${k}">Reopen ${k==='survey1'?'initial':'semifinalist'} questionnaire</button>`).join('')}</div><p class="t-small">Current candidate link: ${esc(location.origin+'/apply/'+c.invite)}</p>` : ''}
-      ${c.survey1 ? `<div class="sub">Initial survey</div>${surveyRead(s.artifacts?.survey1, c.survey1)}` : ''}
+      ${sealed?`<div class="seal">${ico('lock')}<div><div class="empty__t">Other scores are sealed</div><div class="t-small">Enter your scores. You will see the rest of the panel after the account manager releases scores.</div></div></div>`:''}
+      <div class="review2">
+        <div class="review2__col">${evidence}</div>
+        <div class="review2__col">
+          ${(s.criteria||[]).length ? groups : emptyState('No profile adopted yet',
+            'Scoring is against the criteria the committee adopted in the candidate profile.')}
+          ${field('Note to the file','Only you and the search team see this.', `<textarea class="input ed" id="cnote">${esc(note)}</textarea>`)}
+        </div>
+      </div>
+      ${actionBar(
+        withTip(`<button type="button" class="btn btn--primary" data-act="save-score">Save my scores</button>`, TIPS.saveScores),
+        canEdit() && nextStage
+          ? withTip(`<button type="button" class="btn btn--secondary" data-act="advance" data-stage="${nextStage}">${esc(nextLabel)}</button>`,
+              nextStage==='semifinalist' ? TIPS.advanceSemi : TIPS.advanceFinal)
+          : '',
+        scoredCount+' of '+((s.criteria||[]).length)+' criteria scored',
+        'Unsaved scores')}
+      ${canEdit() ? `<div class="spec"><div class="spec__bar">Candidate link and corrections</div><div class="spec__body stack stack--tight">
+        <p class="t-small">Current invite link: <span class="mono">${esc(location.origin+'/apply/'+c.invite)}</span></p>
+        <div class="row">
+          ${withTip(`<button type="button" class="btn btn--secondary btn--sm" data-act="copy-invite" data-cid="${c.id}">Copy invite</button>`, TIPS.copyInvite)}
+          ${withTip(`<button type="button" class="btn btn--secondary btn--sm" data-act="replace-invite" data-cid="${c.id}">Replace candidate link</button>`, TIPS.replaceInvite)}
+          ${['survey1','survey2'].filter(k=>c[k]).map(k=>withTip(`<button type="button" class="btn btn--secondary btn--sm" data-act="reopen-survey" data-cid="${c.id}" data-which="${k}">Reopen ${k==='survey1'?'initial':'semifinalist'} questionnaire</button>`, TIPS.reopenSurvey)).join('')}
+        </div>
+      </div></div>` : ''}
     </div></div>`);
 }
 
@@ -3140,9 +3427,26 @@ function focusKey(el){
   return null;
 }
 
+/**
+ * Guard against a render started from inside a render.
+ *
+ * Replacing the page detaches whatever had focus, and the browser fires a
+ * `change` event for a modified field as it goes. That handler used to call
+ * render again from inside the first one, so the outer pass then restored
+ * focus to an element the inner pass had already thrown away — which is how
+ * the caret ended up on <body> while someone was typing in a filter.
+ */
+let rendering = false;
+
 function render(){
   const root = $('#app');
-  if (!root) return;
+  if (!root || rendering) return;
+  rendering = true;
+  try { paint(root); }
+  finally { rendering = false; }
+}
+
+function paint(root){
   const active = document.activeElement;
   const key = focusKey(active);
   const caret = key && 'selectionStart' in active ? [active.selectionStart, active.selectionEnd] : null;
@@ -3328,7 +3632,17 @@ async function persistProfile(moveOn){
   return true;
 }
 
+// Narrow a list without a server round trip. At this scale the records are
+// already loaded, so filtering is local and the choice is remembered per
+// search rather than reset on every visit.
+function applyListFilter(el){
+  const f = listFilter();
+  f[el.dataset.filter] = el.value;
+  render();
+}
+
 document.addEventListener('change', e => {
+  if (e.target.dataset.filter){ applyListFilter(e.target); return; }
   if (e.target.matches('[data-jurisdiction]')) { updateJurisdictionFields(e.target.form); return; }
   if (e.target.dataset.pickSearch){
     const id = e.target.dataset.pickSearch;
@@ -3371,12 +3685,19 @@ document.addEventListener('click', async e => {
     return;
   }
   if (t.dataset.panel){
+    // Toggled against the live DOM, not through a re-render, so a form the
+    // user is part-way through keeps every value and the caret.
     const key = t.dataset.panel;
     const next = !(t.getAttribute('aria-expanded') === 'true');
     state.open[key] = next;
     t.setAttribute('aria-expanded', String(next));
     const panel = document.getElementById(t.getAttribute('aria-controls'));
     if (panel) panel.hidden = !next;
+    const label = next ? t.dataset.closeLabel : t.dataset.openLabel;
+    if (label){
+      const slot = t.querySelector('[data-panel-label]') || t;
+      slot.textContent = label;
+    }
     return;
   }
   if (t.dataset.mode){
@@ -3453,6 +3774,7 @@ document.addEventListener('click', async e => {
     state.dirty = true;
     t.parentElement.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed','false'));
     t.setAttribute('aria-pressed','true');
+    markUnsaved();
     return;
   }
 
@@ -3565,6 +3887,31 @@ document.addEventListener('click', async e => {
       state.user = null; state.search = null; state.view = 'home';
     } catch (err) { toast(err.message); }
     finally { hideWait(); render(); }
+    return;
+  }
+  if (act==='clear-filters'){
+    state.filters[state.search?.id || ''] = { q:'', stage:'', resp:'' };
+    render();
+    return;
+  }
+  if (act==='copy-invite'){
+    const c = (state.search?.candidates||[]).find(x => x.id === t.dataset.cid);
+    if (!c) return;
+    const link = location.origin + '/apply/' + c.invite;
+    try {
+      await navigator.clipboard.writeText(link);
+      toast('Invite link copied for '+(c.name||'this candidate')+'.');
+    } catch {
+      // Clipboard access can be refused. Show the link so it can still be
+      // selected and copied by hand rather than failing silently.
+      window.prompt('Copy this candidate’s invite link:', link);
+    }
+    return;
+  }
+  if (act==='home-manage'){
+    state.open.homemanage = !state.open.homemanage;
+    if (!state.open.homemanage) state.picked = [];
+    render();
     return;
   }
   if (act==='pick-all'){
@@ -3869,6 +4216,12 @@ document.addEventListener('click', async e => {
     return;
   }
   if (act==='toggle-release'){
+    // Releasing changes who can see other people's private scores, so it is
+    // confirmed rather than being one click away from Next.
+    const releasing = !state.search.released;
+    if (!confirm(releasing
+      ? 'Make every panel member’s scores visible to the search committee?'
+      : 'Hide panel scores again? Each person will see only their own.')) return;
     await withBusy(async () => {
       state.search = await api('/api/searches/'+state.search.id, { method:'PATCH', body:{ released: !state.search.released } });
       toast(state.search.released ? 'Scores released.' : 'Scores sealed.');
@@ -3877,6 +4230,9 @@ document.addEventListener('click', async e => {
   }
   if (act==='advance'){
     const stage = t.dataset.stage || 'finalist';
+    // Unsaved scores must not disappear into a stage change.
+    if (state.dirty && !(await saveScores())) return;
+    if (!confirm('Advance this candidate to '+stage+'?')) return;
     await withBusy(async () => {
       state.search = await api('/api/searches/'+state.search.id+'/candidates/'+state.sel, { method:'PATCH', body:{ stage } });
       toast(stage==='semifinalist' ? 'Advanced to semifinalist.' : 'Advanced to finalist.');
@@ -3886,6 +4242,8 @@ document.addEventListener('click', async e => {
   if (act==='advance-semi' || act==='advance-final'){
     const cid = t.dataset.cid;
     const stage = act==='advance-semi' ? 'semifinalist' : 'finalist';
+    const who = (state.search?.candidates||[]).find(x => x.id===cid)?.name || 'this candidate';
+    if (!confirm('Advance '+who+' to '+stage+'?')) return;
     await withBusy(async () => {
       state.search = await api('/api/searches/'+state.search.id+'/candidates/'+cid, { method:'PATCH', body:{ stage } });
       toast(stage==='semifinalist' ? 'Advanced to semifinalist.' : 'Advanced to finalist.');
@@ -3980,15 +4338,28 @@ document.addEventListener('click', async e => {
     return;
   }
   if (act==='save-score'){
-    const scores = {};
-    $$('[data-score][aria-pressed="true"]').forEach(b => { scores[b.dataset.score] = Number(b.dataset.val); });
-    const note = $('#cnote')?.value || '';
-    await withBusy(async () => {
-      state.search = await api('/api/searches/'+state.search.id+'/scores/'+state.sel, { method:'PUT', body:{ scores, note } });
-      toast('Your scores are on the file.');
-    });
+    await saveScores();
   }
 });
+
+/**
+ * Put this reviewer's scores and note on the file.
+ *
+ * Returns whether the save actually landed, so advancing a candidate can
+ * refuse to proceed on a failed save rather than discarding the ratings.
+ */
+async function saveScores(){
+  const scores = {};
+  $$('[data-score][aria-pressed="true"]').forEach(b => { scores[b.dataset.score] = Number(b.dataset.val); });
+  const note = $('#cnote')?.value || '';
+  let saved = false;
+  await withBusy(async () => {
+    state.search = await api('/api/searches/'+state.search.id+'/scores/'+state.sel, { method:'PUT', body:{ scores, note } });
+    saved = true;
+    toast('Your scores are on the file.');
+  });
+  return saved;
+}
 
 document.addEventListener('submit', async e => {
   e.preventDefault();
@@ -4093,7 +4464,14 @@ window.addEventListener('popstate', async event => {
 
 // Warn before losing unsaved work, including candidate questionnaires.
 document.addEventListener('input', e => {
-  if (e.target.matches('input, textarea, select')) state.dirty = true;
+  // Filter controls change what is listed, not what is saved. Treating them as
+  // unsaved work would ask the user to confirm leaving a page they only
+  // searched in.
+  if (e.target.dataset.filter){ applyListFilter(e.target); return; }
+  if (e.target.matches('input, textarea, select') && !e.target.hasAttribute('data-nodirty')){
+    state.dirty = true;
+    markUnsaved();
+  }
 });
 window.addEventListener('beforeunload', e => {
   if (state.dirty) { e.preventDefault(); e.returnValue = ''; }

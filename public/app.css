@@ -432,3 +432,13 @@ button.strip__s:hover{background:var(--sunken)}
 /* Candidate help block: support contact, correction route, privacy notice. */
 .apply-help { border-top: 1px solid var(--line); padding-top: var(--s-4); }
 .apply-help p { margin: var(--s-2) 0 0; }
+
+/* A single row of work waiting on this person: what it is, which search, and
+   the one control that picks it up. */
+.waitrow{
+  display:flex; align-items:center; gap:var(--s-4); flex-wrap:wrap;
+  padding:var(--s-3) 0; border-bottom:1px solid color-mix(in srgb,var(--accent) 22%,transparent);
+}
+.waitrow:last-child{border-bottom:0; padding-bottom:0}
+.waitrow > div{flex:1 1 240px; min-width:0}
+.waitrow b{font-size:15px}
