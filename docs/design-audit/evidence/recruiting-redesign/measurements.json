@@ -1,0 +1,1326 @@
+{
+  "measuredAt": "2026-09-10T20:23:46.522Z",
+  "quick": false,
+  "viewports": {
+    "1440x1000": {
+      "home": {
+        "headingTop": 84,
+        "pageHeight": 1000,
+        "sidewaysOverflow": 0,
+        "railWidth": 240,
+        "rowsAboveFold": 3,
+        "firstPanelTop": 205,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": true
+      },
+      "overview": {
+        "headingTop": 132,
+        "pageHeight": 1211,
+        "sidewaysOverflow": 0,
+        "railWidth": 240,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 256,
+        "stageBarTop": 499,
+        "stageBarInFirstViewport": true,
+        "listHeaderVisible": null
+      },
+      "candidates": {
+        "headingTop": 132,
+        "pageHeight": 1836,
+        "sidewaysOverflow": 0,
+        "railWidth": 240,
+        "rowsAboveFold": 8,
+        "firstPanelTop": 277,
+        "stageBarTop": 277,
+        "stageBarInFirstViewport": true,
+        "listHeaderVisible": true
+      },
+      "candidate": {
+        "headingTop": 132,
+        "pageHeight": 3049,
+        "sidewaysOverflow": 0,
+        "railWidth": 240,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 0,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "interviews": {
+        "headingTop": 132,
+        "pageHeight": 1000,
+        "sidewaysOverflow": 0,
+        "railWidth": 240,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 277,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "committee": {
+        "headingTop": 132,
+        "pageHeight": 1000,
+        "sidewaysOverflow": 0,
+        "railWidth": 240,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 253,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "documents": {
+        "headingTop": 132,
+        "pageHeight": 1000,
+        "sidewaysOverflow": 0,
+        "railWidth": 240,
+        "rowsAboveFold": 11,
+        "firstPanelTop": null,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": true
+      },
+      "activity": {
+        "headingTop": 132,
+        "pageHeight": 2685,
+        "sidewaysOverflow": 0,
+        "railWidth": 240,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 253,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "process": {
+        "headingTop": 132,
+        "pageHeight": 2876,
+        "sidewaysOverflow": 0,
+        "railWidth": 240,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 253,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "profile": {
+        "headingTop": 132,
+        "pageHeight": 2689,
+        "sidewaysOverflow": 0,
+        "railWidth": 240,
+        "rowsAboveFold": 0,
+        "firstPanelTop": null,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "facts": {
+        "headingTop": 132,
+        "pageHeight": 1328,
+        "sidewaysOverflow": 0,
+        "railWidth": 240,
+        "rowsAboveFold": 0,
+        "firstPanelTop": null,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "new search": {
+        "headingTop": 132,
+        "pageHeight": 1000,
+        "sidewaysOverflow": 0,
+        "railWidth": 240,
+        "rowsAboveFold": 0,
+        "firstPanelTop": null,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "roster": {
+        "headingTop": 132,
+        "pageHeight": 1539,
+        "sidewaysOverflow": 0,
+        "railWidth": 240,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 302,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "intake": {
+        "headingTop": 132,
+        "pageHeight": 1317,
+        "sidewaysOverflow": 0,
+        "railWidth": 240,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 277,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "ad plan": {
+        "headingTop": 132,
+        "pageHeight": 1000,
+        "sidewaysOverflow": 0,
+        "railWidth": 240,
+        "rowsAboveFold": 0,
+        "firstPanelTop": null,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "sourcing": {
+        "headingTop": 132,
+        "pageHeight": 1317,
+        "sidewaysOverflow": 0,
+        "railWidth": 240,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 309,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "semifinalists": {
+        "headingTop": 132,
+        "pageHeight": 1261,
+        "sidewaysOverflow": 0,
+        "railWidth": 240,
+        "rowsAboveFold": 8,
+        "firstPanelTop": null,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": true
+      },
+      "finalists": {
+        "headingTop": 132,
+        "pageHeight": 2060,
+        "sidewaysOverflow": 0,
+        "railWidth": 240,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 253,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "packages": {
+        "headingTop": 132,
+        "pageHeight": 4606,
+        "sidewaysOverflow": 0,
+        "railWidth": 240,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 426,
+        "stageBarTop": 1796,
+        "stageBarInFirstViewport": false,
+        "listHeaderVisible": null
+      },
+      "archives": {
+        "headingTop": 132,
+        "pageHeight": 1000,
+        "sidewaysOverflow": 0,
+        "railWidth": 240,
+        "rowsAboveFold": 0,
+        "firstPanelTop": null,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "history": {
+        "headingTop": 132,
+        "pageHeight": 1000,
+        "sidewaysOverflow": 0,
+        "railWidth": 240,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 277,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      }
+    },
+    "1280x720": {
+      "home": {
+        "headingTop": 84,
+        "pageHeight": 793,
+        "sidewaysOverflow": 0,
+        "railWidth": 240,
+        "rowsAboveFold": 3,
+        "firstPanelTop": 205,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": true
+      },
+      "overview": {
+        "headingTop": 132,
+        "pageHeight": 1211,
+        "sidewaysOverflow": 0,
+        "railWidth": 240,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 256,
+        "stageBarTop": 499,
+        "stageBarInFirstViewport": true,
+        "listHeaderVisible": null
+      },
+      "candidates": {
+        "headingTop": 132,
+        "pageHeight": 1984,
+        "sidewaysOverflow": 0,
+        "railWidth": 240,
+        "rowsAboveFold": 3,
+        "firstPanelTop": 277,
+        "stageBarTop": 277,
+        "stageBarInFirstViewport": true,
+        "listHeaderVisible": true
+      },
+      "candidate": {
+        "headingTop": 132,
+        "pageHeight": 3049,
+        "sidewaysOverflow": 0,
+        "railWidth": 240,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 0,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "interviews": {
+        "headingTop": 132,
+        "pageHeight": 980,
+        "sidewaysOverflow": 0,
+        "railWidth": 240,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 277,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "committee": {
+        "headingTop": 132,
+        "pageHeight": 784,
+        "sidewaysOverflow": 0,
+        "railWidth": 240,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 253,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "documents": {
+        "headingTop": 132,
+        "pageHeight": 997,
+        "sidewaysOverflow": 0,
+        "railWidth": 240,
+        "rowsAboveFold": 6,
+        "firstPanelTop": null,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": true
+      },
+      "activity": {
+        "headingTop": 132,
+        "pageHeight": 2685,
+        "sidewaysOverflow": 0,
+        "railWidth": 240,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 253,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "process": {
+        "headingTop": 132,
+        "pageHeight": 2876,
+        "sidewaysOverflow": 0,
+        "railWidth": 240,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 253,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "profile": {
+        "headingTop": 132,
+        "pageHeight": 2689,
+        "sidewaysOverflow": 0,
+        "railWidth": 240,
+        "rowsAboveFold": 0,
+        "firstPanelTop": null,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "facts": {
+        "headingTop": 132,
+        "pageHeight": 1328,
+        "sidewaysOverflow": 0,
+        "railWidth": 240,
+        "rowsAboveFold": 0,
+        "firstPanelTop": null,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "new search": {
+        "headingTop": 132,
+        "pageHeight": 822,
+        "sidewaysOverflow": 0,
+        "railWidth": 240,
+        "rowsAboveFold": 0,
+        "firstPanelTop": null,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "roster": {
+        "headingTop": 132,
+        "pageHeight": 1561,
+        "sidewaysOverflow": 0,
+        "railWidth": 240,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 302,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "intake": {
+        "headingTop": 132,
+        "pageHeight": 1317,
+        "sidewaysOverflow": 0,
+        "railWidth": 240,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 277,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "ad plan": {
+        "headingTop": 132,
+        "pageHeight": 892,
+        "sidewaysOverflow": 0,
+        "railWidth": 240,
+        "rowsAboveFold": 0,
+        "firstPanelTop": null,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "sourcing": {
+        "headingTop": 132,
+        "pageHeight": 1317,
+        "sidewaysOverflow": 0,
+        "railWidth": 240,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 309,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "semifinalists": {
+        "headingTop": 132,
+        "pageHeight": 1261,
+        "sidewaysOverflow": 0,
+        "railWidth": 240,
+        "rowsAboveFold": 3,
+        "firstPanelTop": null,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": true
+      },
+      "finalists": {
+        "headingTop": 132,
+        "pageHeight": 2060,
+        "sidewaysOverflow": 0,
+        "railWidth": 240,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 253,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "packages": {
+        "headingTop": 132,
+        "pageHeight": 4606,
+        "sidewaysOverflow": 0,
+        "railWidth": 240,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 426,
+        "stageBarTop": 1796,
+        "stageBarInFirstViewport": false,
+        "listHeaderVisible": null
+      },
+      "archives": {
+        "headingTop": 132,
+        "pageHeight": 720,
+        "sidewaysOverflow": 0,
+        "railWidth": 240,
+        "rowsAboveFold": 0,
+        "firstPanelTop": null,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "history": {
+        "headingTop": 132,
+        "pageHeight": 720,
+        "sidewaysOverflow": 0,
+        "railWidth": 240,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 277,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      }
+    },
+    "768x1024": {
+      "home": {
+        "headingTop": 158,
+        "pageHeight": 1024,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 3,
+        "firstPanelTop": 325,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": true
+      },
+      "overview": {
+        "headingTop": 177,
+        "pageHeight": 1324,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 347,
+        "stageBarTop": 612,
+        "stageBarInFirstViewport": true,
+        "listHeaderVisible": null
+      },
+      "candidates": {
+        "headingTop": 177,
+        "pageHeight": 2584,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 3,
+        "firstPanelTop": 369,
+        "stageBarTop": 369,
+        "stageBarInFirstViewport": true,
+        "listHeaderVisible": true
+      },
+      "candidate": {
+        "headingTop": 208,
+        "pageHeight": 3086,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 0,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "interviews": {
+        "headingTop": 177,
+        "pageHeight": 1058,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 313,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "committee": {
+        "headingTop": 240,
+        "pageHeight": 1024,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 407,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "documents": {
+        "headingTop": 177,
+        "pageHeight": 1033,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 11,
+        "firstPanelTop": null,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": true
+      },
+      "activity": {
+        "headingTop": 177,
+        "pageHeight": 2742,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 288,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "process": {
+        "headingTop": 177,
+        "pageHeight": 2911,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 288,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "profile": {
+        "headingTop": 177,
+        "pageHeight": 4259,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": null,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "facts": {
+        "headingTop": 177,
+        "pageHeight": 1363,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": null,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "new search": {
+        "headingTop": 260,
+        "pageHeight": 1024,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": null,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "roster": {
+        "headingTop": 177,
+        "pageHeight": 1974,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 337,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "intake": {
+        "headingTop": 177,
+        "pageHeight": 1530,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 369,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "ad plan": {
+        "headingTop": 214,
+        "pageHeight": 1024,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": null,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "sourcing": {
+        "headingTop": 177,
+        "pageHeight": 1425,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 344,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "semifinalists": {
+        "headingTop": 208,
+        "pageHeight": 1467,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 6,
+        "firstPanelTop": null,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": true
+      },
+      "finalists": {
+        "headingTop": 177,
+        "pageHeight": 2095,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 288,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "packages": {
+        "headingTop": 177,
+        "pageHeight": 4895,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 518,
+        "stageBarTop": 2064,
+        "stageBarInFirstViewport": false,
+        "listHeaderVisible": null
+      },
+      "archives": {
+        "headingTop": 429,
+        "pageHeight": 1024,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": null,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "history": {
+        "headingTop": 475,
+        "pageHeight": 1024,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 610,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      }
+    },
+    "390x844": {
+      "home": {
+        "headingTop": 129,
+        "pageHeight": 1383,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 296,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": true
+      },
+      "overview": {
+        "headingTop": 208,
+        "pageHeight": 1904,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 402,
+        "stageBarTop": 751,
+        "stageBarInFirstViewport": false,
+        "listHeaderVisible": null
+      },
+      "candidates": {
+        "headingTop": 208,
+        "pageHeight": 5697,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 424,
+        "stageBarTop": 424,
+        "stageBarInFirstViewport": true,
+        "listHeaderVisible": true
+      },
+      "candidate": {
+        "headingTop": 235,
+        "pageHeight": 4593,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 0,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "interviews": {
+        "headingTop": 208,
+        "pageHeight": 1583,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 368,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "committee": {
+        "headingTop": 208,
+        "pageHeight": 1306,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 399,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "documents": {
+        "headingTop": 208,
+        "pageHeight": 2417,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 2,
+        "firstPanelTop": null,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": true
+      },
+      "activity": {
+        "headingTop": 208,
+        "pageHeight": 3869,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 368,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "process": {
+        "headingTop": 208,
+        "pageHeight": 3544,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 343,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "profile": {
+        "headingTop": 235,
+        "pageHeight": 4565,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": null,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "facts": {
+        "headingTop": 208,
+        "pageHeight": 1999,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": null,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "new search": {
+        "headingTop": 208,
+        "pageHeight": 1189,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": null,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "roster": {
+        "headingTop": 235,
+        "pageHeight": 2458,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 445,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "intake": {
+        "headingTop": 235,
+        "pageHeight": 2150,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 524,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "ad plan": {
+        "headingTop": 208,
+        "pageHeight": 1130,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": null,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "sourcing": {
+        "headingTop": 235,
+        "pageHeight": 1640,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 477,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "semifinalists": {
+        "headingTop": 235,
+        "pageHeight": 3423,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": null,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": true
+      },
+      "finalists": {
+        "headingTop": 235,
+        "pageHeight": 2254,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 395,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "packages": {
+        "headingTop": 208,
+        "pageHeight": 6913,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 862,
+        "stageBarTop": 3194,
+        "stageBarInFirstViewport": false,
+        "listHeaderVisible": null
+      },
+      "archives": {
+        "headingTop": 331,
+        "pageHeight": 844,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": null,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "history": {
+        "headingTop": 379,
+        "pageHeight": 844,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 540,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      }
+    },
+    "320x720": {
+      "home": {
+        "headingTop": 129,
+        "pageHeight": 1447,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 296,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": true
+      },
+      "overview": {
+        "headingTop": 208,
+        "pageHeight": 2166,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 442,
+        "stageBarTop": 813,
+        "stageBarInFirstViewport": false,
+        "listHeaderVisible": null
+      },
+      "candidates": {
+        "headingTop": 208,
+        "pageHeight": 6234,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 449,
+        "stageBarTop": 449,
+        "stageBarInFirstViewport": true,
+        "listHeaderVisible": false
+      },
+      "candidate": {
+        "headingTop": 235,
+        "pageHeight": 4804,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 0,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "interviews": {
+        "headingTop": 208,
+        "pageHeight": 1630,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 393,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "committee": {
+        "headingTop": 208,
+        "pageHeight": 1412,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 424,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "documents": {
+        "headingTop": 208,
+        "pageHeight": 2503,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 1,
+        "firstPanelTop": null,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": true
+      },
+      "activity": {
+        "headingTop": 208,
+        "pageHeight": 5648,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 368,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "process": {
+        "headingTop": 208,
+        "pageHeight": 3967,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 368,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "profile": {
+        "headingTop": 235,
+        "pageHeight": 4963,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": null,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "facts": {
+        "headingTop": 208,
+        "pageHeight": 2060,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": null,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "new search": {
+        "headingTop": 208,
+        "pageHeight": 1324,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": null,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "roster": {
+        "headingTop": 235,
+        "pageHeight": 2673,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 470,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "intake": {
+        "headingTop": 235,
+        "pageHeight": 2291,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 549,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "ad plan": {
+        "headingTop": 235,
+        "pageHeight": 1287,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": null,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "sourcing": {
+        "headingTop": 235,
+        "pageHeight": 1818,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 502,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "semifinalists": {
+        "headingTop": 235,
+        "pageHeight": 3469,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": null,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": false
+      },
+      "finalists": {
+        "headingTop": 235,
+        "pageHeight": 2559,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 395,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "packages": {
+        "headingTop": 208,
+        "pageHeight": 7611,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 984,
+        "stageBarTop": 3338,
+        "stageBarInFirstViewport": false,
+        "listHeaderVisible": null
+      },
+      "archives": {
+        "headingTop": 259,
+        "pageHeight": 720,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": null,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      },
+      "history": {
+        "headingTop": 318,
+        "pageHeight": 720,
+        "sidewaysOverflow": 0,
+        "railWidth": null,
+        "rowsAboveFold": 0,
+        "firstPanelTop": 504,
+        "stageBarTop": null,
+        "stageBarInFirstViewport": null,
+        "listHeaderVisible": null
+      }
+    }
+  },
+  "roles": {
+    "committee-home": {
+      "heading": "Your assignments",
+      "rail": [],
+      "address": "#/home"
+    },
+    "committee-overview": {
+      "heading": "City Manager",
+      "rail": [
+        "Overview",
+        "Candidates",
+        "Committee",
+        "Activity",
+        "Process checklist"
+      ],
+      "address": "#/s/sr-e914a870"
+    },
+    "committee-intake": {
+      "heading": "What are you looking for?",
+      "rail": [
+        "Overview",
+        "Candidates",
+        "Committee",
+        "Activity",
+        "Process checklist"
+      ],
+      "address": "#/s/sr-e914a870/intake"
+    },
+    "committee-candidates": {
+      "heading": "Candidates",
+      "rail": [
+        "Overview",
+        "Candidates",
+        "Committee",
+        "Activity",
+        "Process checklist"
+      ],
+      "address": "#/s/sr-e914a870/screen"
+    },
+    "committee-denied-plan": {
+      "heading": "City Manager",
+      "rail": [
+        "Overview",
+        "Candidates",
+        "Committee",
+        "Activity",
+        "Process checklist"
+      ],
+      "address": "#/s/sr-e914a870"
+    },
+    "basic-excluded-brochure": {
+      "heading": "Town Manager",
+      "rail": [
+        "Overview",
+        "Candidates",
+        "Committee",
+        "Documents",
+        "Activity",
+        "Process checklist"
+      ],
+      "address": "#/s/sr-d688d3f4"
+    },
+    "questionnaire-mobile": {
+      "heading": "Initial candidate survey"
+    },
+    "receipt-mobile": {
+      "heading": "Received"
+    }
+  },
+  "accessibility": {
+    "home": {
+      "light": [],
+      "dark": []
+    },
+    "overview": {
+      "light": [],
+      "dark": []
+    },
+    "candidates": {
+      "light": [],
+      "dark": []
+    },
+    "candidate": {
+      "light": [],
+      "dark": []
+    },
+    "interviews": {
+      "light": [],
+      "dark": []
+    },
+    "committee": {
+      "light": [],
+      "dark": []
+    },
+    "documents": {
+      "light": [],
+      "dark": []
+    },
+    "activity": {
+      "light": [],
+      "dark": []
+    },
+    "process": {
+      "light": [],
+      "dark": []
+    },
+    "profile": {
+      "light": [],
+      "dark": []
+    },
+    "facts": {
+      "light": [],
+      "dark": []
+    },
+    "new search": {
+      "light": [],
+      "dark": []
+    },
+    "roster": {
+      "light": [],
+      "dark": []
+    },
+    "intake": {
+      "light": [],
+      "dark": []
+    },
+    "ad plan": {
+      "light": [],
+      "dark": []
+    },
+    "sourcing": {
+      "light": [],
+      "dark": []
+    },
+    "semifinalists": {
+      "light": [],
+      "dark": []
+    },
+    "finalists": {
+      "light": [],
+      "dark": []
+    },
+    "packages": {
+      "light": [],
+      "dark": []
+    },
+    "archives": {
+      "light": [],
+      "dark": []
+    },
+    "history": {
+      "light": [],
+      "dark": []
+    }
+  }
+}
