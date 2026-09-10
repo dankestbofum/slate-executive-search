@@ -1866,9 +1866,7 @@ function vTeam(){
   const committeeCount = list.filter(m => m.seat === 'committee').length;
   return shell(`
     ${head('Step '+stepNo('team'),'Search committee',
-      'Everyone who gets a say in this hire, and the one consultant who runs the account. The roster records who contributes to the hire. Committee input is collected in Step '+stepNo('intake')+', and candidates are scored later.',
-      manage ? `<button class="btn btn--${confirmed?'secondary':'primary'}" data-act="confirm-team">${confirmed?'Reopen the roster':'Roster is set'}</button>
-       ${nextBtn('team')}` : nextBtn('team'))}
+      'Everyone who gets a say in this hire, and the one consultant who runs the account. The roster records who contributes to the hire. Committee input is collected in Step '+stepNo('intake')+', and candidates are scored later.')}
     <div class="band"><div class="wrap stack">
       ${you().consultant && !you().member ? `<div class="notice notice--info"><div>
         <div class="notice__t">You are not on this search</div>
@@ -1894,7 +1892,7 @@ function vTeam(){
 
       ${manage ? `<div class="spec"><div class="spec__bar">Seat someone</div>
         <div class="spec__body">
-          <form id="newmember" class="grid2">
+          <form id="newmember" class="formgrid">
             ${field('Name','', `<input class="input" name="name" placeholder="Dana Reyes" required>`)}
             ${field('Email','Their contact email for this search.', `<input class="input" name="email" type="email" placeholder="dreyes@example.gov" required>`)}
             ${field('Title','', `<input class="input" name="title" placeholder="Board or committee member">`)}
@@ -1913,7 +1911,18 @@ function vTeam(){
           ? 'Step '+stepNo('intake')+' can open. Seating anyone new reopens this step, because a person added later would miss the window.'
           : 'Everyone who should get a say needs a seat first. Once you confirm, you can open the intake window.'}</div>
       </div></div>
-      ${stepFooter('team')}
+      ${manage
+        ? actionBar(
+            confirmed
+              ? nextBtn('team')
+              : withTip(`<button type="button" class="btn btn--primary" data-act="confirm-team">Roster is set</button>`,
+                  'Lock the roster so committee input can open. Seating anyone new reopens it.'),
+            confirmed
+              ? withTip(`<button type="button" class="btn btn--secondary" data-act="confirm-team">Reopen the roster</button>`,
+                  'Unlock the roster to seat or remove someone.')
+              : nextBtn('team').replace('btn--primary','btn--secondary'),
+            confirmed ? 'Roster confirmed.' : committeeCount+' committee seat'+(committeeCount===1?'':'s')+' so far.')
+        : actionBar(nextBtn('team'))}
     </div></div>`);
 }
 
@@ -2125,7 +2134,7 @@ function vIntakeManage(){
       </div>
 
       ${canManage() ? `<div class="spec"><div class="spec__bar">Window</div>
-        <div class="spec__body"><form id="intakewindow" class="grid2">
+        <div class="spec__body"><form id="intakewindow" class="formgrid">
           ${field('Due date','Shown to every member.', `<input class="input" name="dueBy" value="${esc(intake.dueBy||'')}" placeholder="Respond by 12 Sep 2026">`)}
           ${field('Note to the committee','Optional. Appears above their form.', `<input class="input" name="prompt" value="${esc(intake.prompt||'')}" placeholder="Answer for yourself, not for the group.">`)}
         </form>
@@ -2581,7 +2590,7 @@ function artifactEditor(kind, a){
   }
   if (kind==='ads'){
     return editorWrap(kind, `
-      <div class="grid2">
+      <div class="formgrid formgrid--three">
         ${editArea('openingDate','Opens', a.openingDate,'',1)}
         ${editArea('firstReview','First review', a.firstReview,'',1)}
         ${editArea('closing','Closes', a.closing,'',1)}
@@ -3705,6 +3714,31 @@ function focusKey(el){
  */
 let rendering = false;
 
+/**
+ * Make a table that actually scrolls reachable from the keyboard, and only
+ * then.
+ *
+ * The markup used to declare every table wrapper a focusable region whether or
+ * not it scrolled, which left tab stops on things that did not move. Measuring
+ * after the layout settles gets both halves right, and it follows the
+ * breakpoint where candidate rows stop being a table at all.
+ */
+function markScrollableRegions(root){
+  for (const el of root.querySelectorAll('.tablewrap')){
+    if (el.scrollWidth > el.clientWidth + 1){
+      el.setAttribute('tabindex', '0');
+      if (!el.hasAttribute('role')) el.setAttribute('role', 'region');
+      if (!el.hasAttribute('aria-label')) el.setAttribute('aria-label', 'Scrollable table');
+    } else {
+      el.removeAttribute('tabindex');
+      if (el.getAttribute('aria-label') === 'Scrollable table'){
+        el.removeAttribute('role');
+        el.removeAttribute('aria-label');
+      }
+    }
+  }
+}
+
 function render(){
   const root = $('#app');
   if (!root || rendering) return;
@@ -3722,6 +3756,7 @@ function paint(root){
   hideTip();
   root.innerHTML = page();
   applyDynamicStyles(root);
+  markScrollableRegions(root);
   crumbs();
   paintTheme();
   if (key){

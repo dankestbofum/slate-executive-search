@@ -1,0 +1,337 @@
+{
+  "measuredAt": "2026-09-10T05:07:48.136Z",
+  "viewports": {
+    "1440x1000": {
+      "home": {
+        "headingTop": 105,
+        "firstActionTop": 192,
+        "pageHeight": 1000,
+        "sidewaysOverflow": 0,
+        "widestTable": null
+      },
+      "new search": {
+        "headingTop": 153,
+        "firstActionTop": 873,
+        "pageHeight": 1164,
+        "sidewaysOverflow": 0,
+        "widestTable": 0
+      },
+      "overview": {
+        "headingTop": 153,
+        "firstActionTop": 323,
+        "pageHeight": 1673,
+        "sidewaysOverflow": 0,
+        "widestTable": null
+      },
+      "screening": {
+        "headingTop": 153,
+        "firstActionTop": 338,
+        "pageHeight": 1945,
+        "sidewaysOverflow": 0,
+        "widestTable": 1054
+      },
+      "profile": {
+        "headingTop": 153,
+        "firstActionTop": 565,
+        "pageHeight": 2579,
+        "sidewaysOverflow": 0,
+        "widestTable": null
+      },
+      "search facts": {
+        "headingTop": 153,
+        "firstActionTop": 1175,
+        "pageHeight": 1349,
+        "sidewaysOverflow": 0,
+        "widestTable": 0
+      },
+      "initial survey": {
+        "headingTop": 153,
+        "firstActionTop": 706,
+        "pageHeight": 1586,
+        "sidewaysOverflow": 0,
+        "widestTable": null
+      }
+    },
+    "1280x720": {
+      "home": {
+        "headingTop": 105,
+        "firstActionTop": 192,
+        "pageHeight": 720,
+        "sidewaysOverflow": 0,
+        "widestTable": null
+      },
+      "new search": {
+        "headingTop": 153,
+        "firstActionTop": 894,
+        "pageHeight": 1186,
+        "sidewaysOverflow": 0,
+        "widestTable": 0
+      },
+      "overview": {
+        "headingTop": 153,
+        "firstActionTop": 323,
+        "pageHeight": 1673,
+        "sidewaysOverflow": 0,
+        "widestTable": null
+      },
+      "screening": {
+        "headingTop": 153,
+        "firstActionTop": 338,
+        "pageHeight": 1945,
+        "sidewaysOverflow": 0,
+        "widestTable": 964
+      },
+      "profile": {
+        "headingTop": 153,
+        "firstActionTop": 565,
+        "pageHeight": 2579,
+        "sidewaysOverflow": 0,
+        "widestTable": null
+      },
+      "search facts": {
+        "headingTop": 153,
+        "firstActionTop": 1175,
+        "pageHeight": 1349,
+        "sidewaysOverflow": 0,
+        "widestTable": 0
+      },
+      "initial survey": {
+        "headingTop": 153,
+        "firstActionTop": 706,
+        "pageHeight": 1619,
+        "sidewaysOverflow": 0,
+        "widestTable": null
+      }
+    },
+    "768x1024": {
+      "home": {
+        "headingTop": 289,
+        "firstActionTop": 364,
+        "pageHeight": 1024,
+        "sidewaysOverflow": 0,
+        "widestTable": null
+      },
+      "new search": {
+        "headingTop": 206,
+        "firstActionTop": 957,
+        "pageHeight": 1249,
+        "sidewaysOverflow": 0,
+        "widestTable": 0
+      },
+      "overview": {
+        "headingTop": 206,
+        "firstActionTop": 364,
+        "pageHeight": 1845,
+        "sidewaysOverflow": 0,
+        "widestTable": null
+      },
+      "screening": {
+        "headingTop": 206,
+        "firstActionTop": 595,
+        "pageHeight": 3893,
+        "sidewaysOverflow": 0,
+        "widestTable": 730
+      },
+      "profile": {
+        "headingTop": 206,
+        "firstActionTop": 874,
+        "pageHeight": 4439,
+        "sidewaysOverflow": 0,
+        "widestTable": null
+      },
+      "search facts": {
+        "headingTop": 206,
+        "firstActionTop": 1216,
+        "pageHeight": 1390,
+        "sidewaysOverflow": 0,
+        "widestTable": 0
+      },
+      "initial survey": {
+        "headingTop": 206,
+        "firstActionTop": 747,
+        "pageHeight": 1683,
+        "sidewaysOverflow": 0,
+        "widestTable": null
+      }
+    },
+    "390x844": {
+      "home": {
+        "headingTop": 175,
+        "firstActionTop": 250,
+        "pageHeight": 844,
+        "sidewaysOverflow": 0,
+        "widestTable": null
+      },
+      "new search": {
+        "headingTop": 206,
+        "firstActionTop": 1574,
+        "pageHeight": 1942,
+        "sidewaysOverflow": 0,
+        "widestTable": 0
+      },
+      "overview": {
+        "headingTop": 237,
+        "firstActionTop": 475,
+        "pageHeight": 2454,
+        "sidewaysOverflow": 0,
+        "widestTable": null
+      },
+      "screening": {
+        "headingTop": 237,
+        "firstActionTop": 679,
+        "pageHeight": 6382,
+        "sidewaysOverflow": 0,
+        "widestTable": 324
+      },
+      "profile": {
+        "headingTop": 237,
+        "firstActionTop": 1085,
+        "pageHeight": 4727,
+        "sidewaysOverflow": 0,
+        "widestTable": null
+      },
+      "search facts": {
+        "headingTop": 237,
+        "firstActionTop": 1741,
+        "pageHeight": 2019,
+        "sidewaysOverflow": 0,
+        "widestTable": 0
+      },
+      "initial survey": {
+        "headingTop": 237,
+        "firstActionTop": 841,
+        "pageHeight": 1867,
+        "sidewaysOverflow": 0,
+        "widestTable": null
+      }
+    },
+    "320x720": {
+      "home": {
+        "headingTop": 158,
+        "firstActionTop": 233,
+        "pageHeight": 860,
+        "sidewaysOverflow": 0,
+        "widestTable": null
+      },
+      "new search": {
+        "headingTop": 206,
+        "firstActionTop": 1738,
+        "pageHeight": 2164,
+        "sidewaysOverflow": 0,
+        "widestTable": 0
+      },
+      "overview": {
+        "headingTop": 255,
+        "firstActionTop": 548,
+        "pageHeight": 3133,
+        "sidewaysOverflow": 0,
+        "widestTable": null
+      },
+      "screening": {
+        "headingTop": 283,
+        "firstActionTop": 811,
+        "pageHeight": 6963,
+        "sidewaysOverflow": 0,
+        "widestTable": 254
+      },
+      "profile": {
+        "headingTop": 283,
+        "firstActionTop": 1237,
+        "pageHeight": 5099,
+        "sidewaysOverflow": 0,
+        "widestTable": null
+      },
+      "search facts": {
+        "headingTop": 255,
+        "firstActionTop": 1823,
+        "pageHeight": 2101,
+        "sidewaysOverflow": 0,
+        "widestTable": 0
+      },
+      "initial survey": {
+        "headingTop": 283,
+        "firstActionTop": 1013,
+        "pageHeight": 2113,
+        "sidewaysOverflow": 0,
+        "widestTable": null
+      }
+    }
+  },
+  "newSearch": {
+    "clientFieldTop": 388,
+    "formHeight": 825,
+    "formColumns": 2
+  },
+  "accessibility": {
+    "home": {
+      "light": {
+        "violations": [],
+        "strayAriaPressedOnHtml": null
+      },
+      "dark": {
+        "violations": [],
+        "strayAriaPressedOnHtml": null
+      }
+    },
+    "new search": {
+      "light": {
+        "violations": [],
+        "strayAriaPressedOnHtml": null
+      },
+      "dark": {
+        "violations": [],
+        "strayAriaPressedOnHtml": null
+      }
+    },
+    "overview": {
+      "light": {
+        "violations": [],
+        "strayAriaPressedOnHtml": null
+      },
+      "dark": {
+        "violations": [],
+        "strayAriaPressedOnHtml": null
+      }
+    },
+    "screening": {
+      "light": {
+        "violations": [],
+        "strayAriaPressedOnHtml": null
+      },
+      "dark": {
+        "violations": [],
+        "strayAriaPressedOnHtml": null
+      }
+    },
+    "profile": {
+      "light": {
+        "violations": [],
+        "strayAriaPressedOnHtml": null
+      },
+      "dark": {
+        "violations": [],
+        "strayAriaPressedOnHtml": null
+      }
+    },
+    "search facts": {
+      "light": {
+        "violations": [],
+        "strayAriaPressedOnHtml": null
+      },
+      "dark": {
+        "violations": [],
+        "strayAriaPressedOnHtml": null
+      }
+    },
+    "initial survey": {
+      "light": {
+        "violations": [],
+        "strayAriaPressedOnHtml": null
+      },
+      "dark": {
+        "violations": [],
+        "strayAriaPressedOnHtml": null
+      }
+    }
+  }
+}

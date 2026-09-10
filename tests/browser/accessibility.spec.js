@@ -33,12 +33,17 @@ async function scan(page) {
 }
 
 // Theme controls live in the rail, which is a drawer below the breakpoint.
+//
+// Buttons animate their background over 120ms, so a scan started immediately
+// after the switch measures a colour that is on its way from one palette to
+// the other and reports contrast that never actually settles on screen.
 async function setTheme(page, theme) {
   const menu = page.getByRole('button', { name: 'Menu', exact: true });
   const inDrawer = await menu.isVisible().catch(() => false);
   if (inDrawer) await menu.click();
   await page.locator('button[data-theme="' + theme + '"]').click();
   if (inDrawer) await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
 }
 
 test('the landing page has no WCAG 2.1 AA violations', async ({ page }) => {

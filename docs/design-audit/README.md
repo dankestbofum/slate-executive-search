@@ -2,6 +2,9 @@
 
 - [Audit and screenshot evidence](AUDIT.md)
 - [Implementation plan](IMPLEMENTATION_PLAN.md)
+- [Implementation status](IMPLEMENTATION_STATUS.md) — what was built, the measurements after, and what is still open
+
+The screenshots and `metrics.json` describe the interface **as audited**, before the plan was implemented. `evidence/after-measurements.json` describes it afterwards; regenerate it with `node docs/design-audit/measure.cjs`, which starts its own server on a throwaway store and needs no separate terminal.
 
 The `evidence/` directory contains screenshots of synthetic local data, baseline scans (`metrics.json`), the later package/candidate/committee scans (`followup-metrics.json`), and focused layout/theme measurements (`verified-measurements.json`). Screenshots are captured at different stages of fixture setup; an empty screen and a populated screen are deliberately different states.
 
