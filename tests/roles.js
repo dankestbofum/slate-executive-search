@@ -93,6 +93,52 @@ async function revisionOf(id, cookie) {
     assert.strictEqual(res.status, 404, 'expected 404, got ' + res.status);
   });
 
+  /* ---------------- The portfolio summary ---------------- */
+
+  // Home renders candidate counts from the search index. The counts have to be
+  // real, and they must not become a side channel: no names, no organisations,
+  // no invitation tokens, and nothing at all about a search the reader cannot
+  // already open.
+  await check('the search index carries candidate counts and no candidate detail', async () => {
+    for (const person of ['Amita Rosewood-Fenn', 'Bo Nakagawa']) {
+      const res = await api('/api/searches/' + own + '/candidates', {
+        cookie: abe, method: 'POST', revision: await revisionOf(own, abe),
+        body: { name: person, cur: 'Deputy Administrator', org: 'A Neighbouring County', email: person.split(' ')[0].toLowerCase() + '@example.com' }
+      });
+      assert.strictEqual(res.status, 200, 'could not add ' + person);
+    }
+    const loaded = await (await api('/api/searches/' + own, { cookie: abe })).json();
+    const bo = loaded.candidates.find(c => c.name === 'Bo Nakagawa');
+    await api('/api/searches/' + own + '/candidates/' + bo.id, {
+      cookie: abe, method: 'PATCH', revision: await revisionOf(own, abe), body: { stage: 'semifinalist' }
+    });
+
+    const index = await (await api('/api/searches', { cookie: abe })).json();
+    const row = index.find(s => s.id === own);
+    assert.ok(row, 'the search was missing from the index');
+    assert.deepStrictEqual(row.candidateCounts,
+      { total: 2, applicant: 1, semifinalist: 1, finalist: 0, declined: 0, responses: 0 });
+
+    const serialised = JSON.stringify(row);
+    for (const leak of ['Amita', 'Nakagawa', 'Deputy Administrator', 'Neighbouring', '@example.com', bo.invite]) {
+      assert.ok(!serialised.includes(leak), 'the summary leaked candidate detail: ' + leak);
+    }
+    assert.ok(!('candidates' in row), 'the summary carried the candidate list itself');
+  });
+
+  await check('the index never summarises a search the reader cannot open', async () => {
+    const index = await (await api('/api/searches', { cookie: outsider })).json();
+    assert.ok(Array.isArray(index));
+    assert.ok(!index.some(s => s.id === own), 'an unrelated search appeared in the index');
+    const seen = await (await api('/api/searches', { cookie: member })).json();
+    const mine = seen.find(s => s.id === own);
+    assert.ok(mine, 'a seated member could not see their own search');
+    // A seated member takes part in screening, so the count is theirs to see;
+    // what they must not receive is the roll of names behind it.
+    assert.strictEqual(mine.candidateCounts.total, 2);
+    assert.ok(!JSON.stringify(mine).includes('Amita'), 'a committee summary leaked a candidate name');
+  });
+
   /* ---------------- Writing ---------------- */
 
   await check('a committee member cannot edit search facts', async () => {

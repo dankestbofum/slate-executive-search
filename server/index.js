@@ -545,6 +545,11 @@ app.get('/api/searches', requireUser, (req, res) => {
       package: d.package, packageLabel: d.packageInfo.label,
       fog:s.fog, opened:s.opened, updatedAt:s.updatedAt,
       progress: d.progress,
+      // Counts, so the portfolio can say how many people are on each file
+      // without Home fetching every search in full. Nothing identifying is in
+      // here; null means the package leaves screening off this file, which is
+      // a different statement from nobody having applied.
+      candidateCounts: db.candidateCounts(s),
       accountManager: d.accountManager ? { name: d.accountManager.name, init: d.accountManager.init } : null,
       seats: (s.members || []).length,
       seat: seat ? seat.seat : null,

@@ -602,6 +602,31 @@ function decorate(search, viewer){
   return out;
 }
 
+/**
+ * Counts only, for the portfolio list.
+ *
+ * Home needs to say how many people are on each file without loading every
+ * search in full. Nothing identifying leaves this function: no names, no
+ * organisations, no invitation tokens, no scores — only how many candidates
+ * are at each stage the product actually stores, and how many have answered
+ * the initial questionnaire. Returns null when the package leaves screening
+ * off the file, so Home shows an absent count rather than a zero that would
+ * read as "nobody applied".
+ */
+function candidateCounts(search){
+  if (!stepsOf(search).some(s => s.key === 'screen')) return null;
+  const list = search.candidates || [];
+  const by = stage => list.filter(c => c.stage === stage).length;
+  return {
+    total: list.length,
+    applicant: by('applicant'),
+    semifinalist: by('semifinalist'),
+    finalist: by('finalist'),
+    declined: by('declined'),
+    responses: list.filter(c => c.survey1).length
+  };
+}
+
 function nextNo(){
   db.seq = (db.seq||0) + 1;
   return 'SR-' + new Date().getFullYear() + '-' + String(db.seq).padStart(3,'0');
@@ -675,6 +700,7 @@ module.exports = {
   get db(){ return db; },
   publicUser,
   decorate,
+  candidateCounts,
   nextNo,
   blankSearch,
   createUser,
