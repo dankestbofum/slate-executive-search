@@ -1213,11 +1213,23 @@ async function run(){
 
   record('Apply UI handles survey1 and survey2', /function pickApplySurvey/.test(appJs) && /survey2/.test(appJs));
 
-  record('Rail splits screening, questionnaire, and finalists', /function railPhaseGroups/.test(appJs) && /screen:'Screening'/.test(appJs) && /send2:'Semifinalist questionnaire'/.test(appJs) && /finalists:'Finalists'/.test(appJs));
+  // The numbered run moved out of the rail and onto the process checklist,
+  // where it keeps every included step, its phase grouping and its own names.
+  record('The process checklist splits screening, questionnaire, and finalists',
+    /function railPhaseGroups/.test(appJs) && /function vProcess/.test(appJs)
+      && /screen:'Screening'/.test(appJs) && /send2:'Semifinalist questionnaire'/.test(appJs)
+      && /finalists:'Finalists'/.test(appJs));
 
   record('Search runs in three phases', /Seat the committee and hear them/.test(appJs) && /Prepare and post/.test(appJs) && /Once there are candidates/.test(appJs) && /needsCandidates/.test(fs.readFileSync(path.join(__dirname, '..', 'server', 'db.js'), 'utf8')));
 
-  record('Signed-in card does not shrink in a short rail', /\.rail > \* \{ flex-shrink: 0; \}/.test(stylesCss) && /\.whoami\{[^}]*overflow:hidden/.test(stylesCss));
+  // The signed-in card became a one-row account chip in the rail footer. What
+  // still has to hold is that a short rail does not squeeze it: the rail's own
+  // children never shrink and the footer is pinned below the destinations.
+  record('The account chip does not shrink in a short rail',
+    stylesCss.includes('.rail > * { flex-shrink: 0; }')
+      && stylesCss.includes('.rail__foot{margin-top:auto')
+      && /function railAccount/.test(appJs)
+      && !/whoami/.test(appJs));
 
   record('Ad plan preview includes who and status', /Who<\/th>/.test(appJs) && /Status<\/th>/.test(appJs));
 
@@ -1232,11 +1244,20 @@ async function run(){
   record('Schema examples do not model the dashes the desk rejects', schemaBlock.length > 0 && !/[\u2013\u2014]/.test(schemaBlock));
   record('Generate route returns the desk review to the client', /desk: out\.desk/.test(fs.readFileSync(path.join(__dirname, '..', 'server', 'index.js'), 'utf8')) && /function deskNote/.test(appJs) && /deskNote\(out\.desk\)/.test(appJs));
 
-  record('Unsigned home is the price structure', /function vGate/.test(appJs) && /What each pay level includes/.test(appJs) && /data-act="start"/.test(appJs) && /Three ways to run a search/.test(appJs));
+  // The landing page says what the product does and offers Start. Fees are not
+  // on it; the pay-level breakdown lives in the Packages view, which is where
+  // it is shown to a client deliberately.
+  record('Unsigned home explains the product and opens the workspace',
+    /function vGate/.test(appJs) && /data-act="start"/.test(appJs) && /A guided executive search/.test(appJs)
+      && !/function vGate[\s\S]*?packageMatrix\(\)[\s\S]*?\n\}/.test(appJs));
 
   record('Start opens the workspace without a login form', appJs.includes('data-act="start">Start') && !/function vLogin/.test(appJs) && !appJs.includes('name="pin"'));
 
-  record('Home page is the workspace landing', /head\('Home'/.test(appJs) && /Welcome back/.test(appJs) && />Home</.test(appJs) && !/How a search runs/.test(appJs));
+  // Home is the portfolio, not a greeting: the page names the book of business
+  // and the rail still returns to it from anywhere.
+  record('Home page is the recruiting portfolio',
+    appJs.includes("head('Workspace','Your searches'") && />Home</.test(appJs)
+      && /function summaryPhase/.test(appJs) && !/How a search runs/.test(appJs));
 
   record('Home can delete more than one search at once',
     /data-act="delete-searches"/.test(appJs) && /data-act="pick-all"/.test(appJs) && /data-pick-search/.test(appJs)
@@ -1244,8 +1265,15 @@ async function run(){
 
   record('New search opens on the search committee', /go\('team'\)/.test(appJs) && /Seat the committee first/.test(appJs));
 
-  record('New search and Search facts offer the package picker',
-    /function packageChoice/.test(appJs) && /name="package"/.test(appJs) && /packageChoice\(state\.newPackage \|\| state\.health\?\.defaultPackage\)/.test(appJs) && /packageChoice\(s\.package\)/.test(appJs));
+  // Opening a file no longer asks which package was bought. It opens at the
+  // default level and the package is set on Search facts. A search started
+  // from a package sample still carries that choice through.
+  record('The package is chosen on Search facts, not when the file is opened',
+    /function packageChoice/.test(appJs) && /name="package"/.test(appJs)
+      && /packageChoice\(s\.package\)/.test(appJs)
+      && !/packageChoice\(state\.newPackage/.test(appJs)
+      && /<input type="hidden" name="package" value="\$\{esc\(state\.newPackage\)\}">/.test(appJs)
+      && /act==='new-from-pkg'/.test(appJs));
   // The choice itself is a compact set of cards; the full pay-level matrix is
   // still there, behind a disclosure, so it no longer runs ahead of the client
   // and position fields (D02).

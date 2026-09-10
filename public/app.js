@@ -38,10 +38,67 @@ const SUGGEST = {
   opp:   ['Economic development','Organizational innovation','New partnerships','Technology improvements','Community development','Strategic growth','Regional collaboration','Improved employee engagement']
 };
 
-const NAV = [
-  ['overview','This search'],
-  ['facts','Search facts']
+/* ===========================================================================
+ * Destinations
+ *
+ * The rail used to be the nineteen-step production run, one numbered task per
+ * line. A consultant works in recruiting terms — who is in the pipeline, what
+ * is drafted, who still owes an answer — so a search now navigates by
+ * destination and the numbered process keeps its own screen.
+ *
+ * One mapping drives rail selection, the breadcrumb, and the document title.
+ * Every existing view keeps its own route; these only say where a view lives.
+ * ========================================================================= */
+
+const DESTS = [
+  { key:'overview',   label:'Overview',   icon:'gauge' },
+  { key:'candidates', label:'Candidates', icon:'people' },
+  { key:'interviews', label:'Interviews', icon:'screen' },
+  { key:'committee',  label:'Committee',  icon:'seats' },
+  { key:'documents',  label:'Documents',  icon:'docs' },
+  { key:'activity',   label:'Activity',   icon:'clock' }
 ];
+
+// Which destination each view belongs to. Views absent from this map (Home,
+// New search, Packages, Archived searches, Search facts, History) sit outside
+// a search's destinations and highlight nothing.
+const VIEW_DEST = {
+  overview:'overview',
+  screen:'candidates', people:'candidates', person:'candidates',
+  send2:'candidates', finalists:'candidates', sourcing:'candidates', references:'candidates',
+  interviews:'interviews', video:'interviews', guide:'interviews', schedule:'interviews',
+  committee:'committee', team:'committee', intake:'committee', 'intake-mine':'committee', profile:'committee',
+  documents:'documents', community:'documents', survey1:'documents', survey2:'documents',
+  plan:'documents', brochure:'documents', ads:'documents', contract:'documents', bar:'documents',
+  activity:'activity'
+};
+
+// Where a destination opens. Candidates opens the list; the rest are hubs over
+// work that already exists.
+const DEST_HOME = {
+  overview:'overview', candidates:'screen', interviews:'interviews',
+  committee:'committee', documents:'documents', activity:'activity'
+};
+
+// The steps each destination is built out of, used to decide whether it has
+// any content this viewer and this package are entitled to see.
+const DEST_STEPS = {
+  candidates:['screen','send2','finalists','sourcing','references'],
+  interviews:['video','guide','schedule'],
+  committee:['team','intake','profile'],
+  // The adopted profile is indexed with the documents but it is the
+  // committee's product, so it does not by itself put a Documents destination
+  // in front of a committee member who has no drafting work.
+  documents:['community','survey1','survey2','guide','plan','brochure','ads','schedule','contract','bar']
+};
+
+// The order the Documents index lists artifacts in: the profile everything
+// inherits from, then the research, then what goes out, then what closes.
+const DOC_KEYS = ['profile','community','plan','brochure','ads','survey1','survey2','guide','schedule','contract','bar'];
+
+// The new hubs and the process checklist. Every other view is either a step,
+// a workspace screen, or the candidate detail.
+const HUB_VIEWS = ['interviews','committee','documents','activity','process'];
 
 const SEAT = {
   manager:   { label:'Account manager', hint:'Runs the search. Seats the committee, opens and closes intake, adopts the profile.' },
@@ -104,7 +161,13 @@ const state = {
   // source JSON, package comparison).
   open:{},
   // Which editor mode a document surface is in: 'edit' or 'preview'.
-  mode:{}
+  mode:{},
+  // The selected section of a screen that has them, keyed by tab group, and
+  // which column of the candidate review a small screen is showing.
+  tab:{},
+  reviewCol:'both',
+  // Home's local text filter over the searches already loaded.
+  homeQ:''
 };
 
 function toast(msg, ms=3400){
@@ -289,10 +352,6 @@ function packageMatrix(selected, { pick=false, plain=false }={}){
       </tr></tfoot>
     </table>
   </div>`;
-}
-
-function packagePicker(selected){
-  return packageMatrix(selected, { pick:true });
 }
 
 function packagePill(key){
@@ -593,6 +652,39 @@ function offPackage(view){
   return !s.steps.some(st => st.key === key);
 }
 
+/* --- destination helpers -------------------------------------------------- */
+
+// The destination the current view sits in, so the rail marks one item and the
+// breadcrumb names the same place the rail does.
+function destOf(view = state.view){
+  return VIEW_DEST[view] || null;
+}
+
+function destLabel(key){
+  return (DESTS.find(d => d.key === key) || {}).label || '';
+}
+
+// Does this viewer have anything to open in this destination? A destination
+// with no authorised content is not drawn at all, rather than opening on an
+// explanation of why it is empty. Overview and Activity always exist.
+function destAvailable(key){
+  if (!state.search) return false;
+  if (key === 'overview' || key === 'activity') return true;
+  return (DEST_STEPS[key] || []).some(canOpenStep);
+}
+
+function availableDests(){
+  return DESTS.filter(d => destAvailable(d.key));
+}
+
+// Every view this build can render. A deep link to anything else lands on the
+// search overview rather than silently painting Home under a stale address.
+function knownView(view){
+  if (['home','new','archives','packages','overview','facts','history','person','people','intake-mine'].includes(view)) return true;
+  if (HUB_VIEWS.includes(view)) return true;
+  return STEP_FLOW.includes(view);
+}
+
 /* ===========================================================================
  * Routing
  *
@@ -655,7 +747,7 @@ function pushRoute(replace){
 // a deep link opened in a fresh tab. Never leaves the app.
 function backFallback(){
   const v = state.view;
-  if (v === 'person') return { view:'screen', label:'Back to screening' };
+  if (v === 'person') return { view:'screen', label:'Back to candidates' };
   if (v === 'home' || v === 'new' || v === 'archives' || v === 'packages') return { view:'home', label:'Back to Home' };
   if (v === 'overview') return { view:'home', label:'Back to Home' };
   if (state.search) return { view:'overview', label:'Back to '+(state.search.client || 'this search') };
@@ -694,7 +786,7 @@ async function applyRoute(route, { push=false }={}){
     try { await loadSearch(route.searchId); }
     catch { toast('That search is not on your book, or is no longer available.'); await go('home', {}, { replace:true }); return; }
   }
-  if (!route.searchId && ['overview','facts','person','history'].includes(route.view)) route = { view:'home' };
+  if (!route.searchId && !['home','new','archives','packages'].includes(route.view)) route = { view:'home' };
   if (route.pkg) state.showcasePkg = route.pkg;
   const extra = route.sel ? { sel:route.sel } : {};
   await go(route.view, extra, { push, replace:!push, fromHistory:true });
@@ -721,6 +813,18 @@ async function go(view, extra={}, opts={}){
     view = 'overview';
   }
   if (view === 'archives' && isCommittee()) view = 'home';
+  // An address this build cannot render is not painted as Home under someone
+  // else's URL; it lands on the search, or the book, and says so.
+  if (!knownView(view)){
+    toast('That address is not part of the workspace.');
+    view = state.search ? 'overview' : 'home';
+  }
+  // The new hubs are windows onto existing work, so they take the same access
+  // decision as the work behind them: nothing to show, nothing to open.
+  if (state.search && DEST_STEPS[view] && !destAvailable(view)){
+    toast(destLabel(view)+' has nothing on this search.');
+    view = 'overview';
+  }
   // Every other screen belongs to an open search. A link to one without a
   // loaded file lands on Home rather than rendering an empty workspace.
   if (!state.search && !['home','new','archives','packages'].includes(view)) view = 'home';
@@ -827,12 +931,22 @@ function peopleView(key){
   return key;
 }
 
-function ico(name){
+function ico(name, size=15){
   const p = {
     lock:'<path d="M5 8V6a3 3 0 0 1 6 0v2M4 8h8v6H4z"/>',
-    check:'<path d="M3 8.5 6.2 12 13 4.5"/>'
+    check:'<path d="M3 8.5 6.2 12 13 4.5"/>',
+    // Destination marks. Labels carry the meaning; these only help the eye
+    // find the same row again.
+    gauge:'<path d="M2.5 11a5.5 5.5 0 1 1 11 0"/><path d="M8 11 10.6 7"/>',
+    people:'<path d="M6 8a2.2 2.2 0 1 0 0-4.4A2.2 2.2 0 0 0 6 8Z"/><path d="M1.9 13.2c0-2 1.8-3.2 4.1-3.2s4.1 1.2 4.1 3.2"/><path d="M11 4.2a2 2 0 0 1 0 3.9"/><path d="M12.1 10.3c1.3.4 2.1 1.3 2.1 2.6"/>',
+    screen:'<path d="M2 3.5h12v8H2z"/><path d="M6.6 6.2 9.6 7.7 6.6 9.2z"/><path d="M5.5 13.8h5"/>',
+    seats:'<path d="M8 7.4a2.1 2.1 0 1 0 0-4.2 2.1 2.1 0 0 0 0 4.2Z"/><path d="M3.6 13.4c0-2.3 2-3.6 4.4-3.6s4.4 1.3 4.4 3.6"/>',
+    docs:'<path d="M4.2 2.2h4.4L11.8 5v8.8H4.2z"/><path d="M8.4 2.4V5h3.2"/><path d="M6 8.4h4M6 10.7h4"/>',
+    clock:'<path d="M8 14A6 6 0 1 0 8 2a6 6 0 0 0 0 12Z"/><path d="M8 4.9V8l2.2 1.4"/>',
+    list:'<path d="M3 4.3h10M3 8h10M3 11.7h10"/>',
+    more:'<path d="M8 3.4v.01M8 8v.01M8 12.6v.01"/>'
   }[name] || '';
-  return `<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">${p}</svg>`;
+  return `<svg width="${size}" height="${size}" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`;
 }
 function pill(k, label){ return `<span class="pill pill--${k}">${esc(label)}</span>`; }
 
@@ -930,6 +1044,36 @@ function actionBar(primary, secondary='', stateNote='', dirtyText=''){
   </div>`;
 }
 
+/**
+ * Sections within a screen.
+ *
+ * Real tabs: one stop in the tab order, arrows between the sections, and each
+ * panel labelled by its own tab. Switching is done against the live DOM rather
+ * than through a re-render, which is what keeps unsaved scores, a half-written
+ * note, and the caret exactly where they were.
+ */
+function secTabs(group, items){
+  const sel = (state.tab && state.tab[group]) || items[0].key;
+  return `<div class="sectabs" role="tablist" aria-label="Sections">${items.map(i => {
+    const on = i.key === sel;
+    return `<button type="button" class="sectab" role="tab" id="tab-${esc(group)}-${esc(i.key)}"
+      data-tab="${esc(group)}:${esc(i.key)}" aria-selected="${on}" aria-controls="panel-${esc(group)}-${esc(i.key)}"
+      tabindex="${on?0:-1}">${esc(i.label)}</button>`;
+  }).join('')}</div>`;
+}
+
+function setTab(group, key, { focus=true }={}){
+  state.tab = { ...(state.tab||{}), [group]: key };
+  const mark = group + ':' + key;
+  $$('[data-tab^="'+group+':"]').forEach(b => {
+    const on = b.dataset.tab === mark;
+    b.setAttribute('aria-selected', String(on));
+    b.tabIndex = on ? 0 : -1;
+  });
+  $$('[data-tabpanel^="'+group+':"]').forEach(p => { p.hidden = p.dataset.tabpanel !== mark; });
+  if (focus) $('[data-tab="'+mark+'"]')?.focus();
+}
+
 // Say so the moment something is edited, beside the control that saves it.
 function markUnsaved(){
   const el = $('.actionbar__state[data-dirty-text]');
@@ -980,14 +1124,44 @@ function packageChoice(selected){
     <div id="pkgcompare"${open?'':' hidden'}>${packageMatrix(on, { plain:true })}</div>
   </div>`;
 }
+/**
+ * The workspace page header.
+ *
+ * Compact and horizontal: the eyebrow, the title, and the screen's dominant
+ * action on one line, with the explanation under it. The serif display face is
+ * kept for the wordmark and for generated documents, which is why the title
+ * here is a workspace type class rather than `.t-display`.
+ */
 function head(eyebrow, title, lede, actions=''){
-  return `<div class="hero"><div class="wrap">
+  return `<div class="pagehead"><div class="wrap">
     ${backControl()}
-    <div class="eyebrow">${esc(eyebrow)}</div>
-    <h1 class="t-display">${esc(title)}</h1>
+    <div class="pagehead__row">
+      <div class="pagehead__id">
+        <div class="eyebrow">${esc(eyebrow)}</div>
+        <h1 class="pagehead__title">${esc(title)}</h1>
+      </div>
+      ${actions?`<div class="pagehead__act">${actions}</div>`:''}
+    </div>
     ${lede?`<p class="lede">${lede}</p>`:''}
-    ${actions?`<div class="row u-mt-4">${actions}</div>`:''}
   </div></div>`;
+}
+
+/**
+ * A menu of infrequent actions.
+ *
+ * Corrections, archiving, and search settings do not belong beside the task
+ * the screen is for, and they are not worth a row of competing buttons. They
+ * collapse into one labelled control that opens a list.
+ */
+function menu(key, label, items){
+  const list = items.filter(Boolean);
+  if (!list.length) return '';
+  const open = Boolean(state.open[key]);
+  const id = 'menu-'+key;
+  return `<span class="menu">
+    <button type="button" class="btn btn--secondary btn--sm menu__btn" data-panel="${esc(key)}" aria-expanded="${open}" aria-controls="${id}">${esc(label)}${ico('more', 14)}</button>
+    <span class="menu__list" id="${id}"${open?'':' hidden'}>${list.join('')}</span>
+  </span>`;
 }
 function modelToggle(){
   const h = state.health || {};
@@ -1091,21 +1265,42 @@ function railPhaseGroups(search){
 }
 
 // What the compact mobile bar says you are looking at, so the current search
-// and step stay visible with the drawer closed.
+// and destination stay visible with the drawer closed.
 function shellContext(s){
   if (state.view === 'packages') return 'Sample · '+packageLabel(showcasePkg());
   if (!s) return state.view === 'new' ? 'New search' : state.view === 'archives' ? 'Archived searches' : 'Home';
-  const st = (s.steps||[]).find(x => isCurrentStep(x.key));
-  return (s.client || 'Search') + (st ? ' · Step '+st.n+' · '+(STEP_NAME[st.key]||st.t) : '');
+  const dest = destOf();
+  return (s.client || 'Search') + (dest ? ' · '+destLabel(dest) : '');
+}
+
+// One destination row: a mark, a label, and — where the destination is a
+// pipeline — how much is in it. The selected row is the one the browser will
+// announce as current.
+function railDest(d){
+  const on = destOf() === d.key;
+  const tail = d.key === 'candidates' ? (state.search?.candidates||[]).length : '';
+  return `<button class="rail__link rail__link--dest" data-go="${DEST_HOME[d.key]}" ${on?'aria-current="page"':''}>
+    <span class="rail__ico">${ico(d.icon, 15)}</span>
+    <span class="rail__label rail__label--dest">${esc(d.label)}</span>
+    ${tail!=='' ? `<span class="rail__tail">${esc(String(tail))}</span>` : ''}
+  </button>`;
+}
+
+// The account and theme controls, kept to the height of a row so the rail's
+// working area is destinations rather than identity.
+function railAccount(u, s){
+  const seat = s && you().seat ? SEAT[you().seat]?.label || '' : '';
+  return `<div class="acct">
+    <span class="acct__init">${esc(u.init)}</span>
+    <span class="acct__id"><span class="acct__nm">${esc(u.name)}</span><span class="acct__rl">${esc(u.title)}${seat?' · '+esc(seat):''}</span></span>
+  </div>`;
 }
 
 function shell(body){
   const warning = state.search?.staleArtifacts?.[state.view];
   if (warning) body = `<div class="notice notice--info" role="status">${esc(warning)}</div>` + body;
-  const u = state.user, s = state.view==='packages' ? null : state.search, next = s?.progress?.next;
-  // Search facts are an editing surface; a committee member gets the overview.
-  const nav = isCommittee() ? NAV.filter(([v]) => v !== 'facts') : NAV;
-  const workspace = nav.map(([v,l]) => `<button class="rail__link" data-go="${v}" ${state.view===v?'aria-current="page"':''}>${l}</button>`).join('');
+  const u = state.user, s = state.view==='packages' ? null : state.search;
+  const settingsOpen = Boolean(state.open.railmore);
   return `<div class="shell${state.busy?' busy':''}${state.navOpen?' shell--navopen':''}">
     <a class="skip" href="#main" data-act="skip">Skip to content</a>
     <header class="appbar">
@@ -1126,25 +1321,34 @@ function shell(body){
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>
       </button>
       </div>
-      <div class="whoami">
-        <div class="whoami__hd"><span class="t-label">Workspace account</span></div>
-        <div class="whoami__list">
-          <div class="whoami__opt whoami__opt--current">
-            <span class="whoami__init">${esc(u.init)}</span>
-            <span><span class="whoami__nm">${esc(u.name)}</span><span class="whoami__rl">${esc(u.title)}${s && you().seat ? ' · '+esc(SEAT[you().seat]?.label||'') : ''}</span></span>
-          </div>
-        </div>
-      </div>
       <div class="rail__group"><div class="rail__label">Workspace</div>
         <button class="rail__link" data-go="home" ${!s && state.view==='home'?'aria-current="page"':''}>Home</button>
-        ${!isCommittee() ? '<button class="rail__link" data-go="archives">Archived searches</button>' : ''}
-        ${s && canEdit() ? '<button class="rail__link" data-go="history">History and recovery</button><button class="rail__link" data-act="reload-search">Reload search</button>' : ''}
+        ${!isCommittee() ? '<button class="rail__link" data-go="archives" '+(state.view==='archives'?'aria-current="page"':'')+'>Archived searches</button>' : ''}
         ${!isCommittee() && packages().length ? `<button class="rail__link" data-go="packages" ${state.view==='packages'?'aria-current="page"':''}>Packages</button>` : ''}
-        ${s?workspace:''}
       </div>
-      ${s?railPhaseGroups(s):''}
+      ${s?`<div class="rail__group rail__group--dests">
+        <div class="rail__here" title="${esc(s.client||'Search')}">
+          <span class="rail__here-nm">${esc(s.client||'Search')}</span>
+          <span class="rail__here-sub">${esc(s.position||'')}</span>
+        </div>
+        ${availableDests().map(railDest).join('')}
+        <button class="rail__link rail__link--dest" data-go="process" ${state.view==='process'?'aria-current="page"':''}>
+          <span class="rail__ico">${ico('list', 15)}</span>
+          <span class="rail__label rail__label--dest">Process checklist</span>
+          <span class="rail__tail">${s.progress ? s.progress.done+'/'+s.progress.total : ''}</span>
+        </button>
+        ${canEdit() ? `<button type="button" class="rail__link rail__more" data-panel="railmore" aria-expanded="${settingsOpen}" aria-controls="railmore" data-open-label="Search settings" data-close-label="Search settings">
+          <span class="rail__ico">${ico('more', 15)}</span>
+          <span class="rail__label rail__label--dest">Search settings</span>
+        </button>
+        <div class="rail__steps" id="railmore"${settingsOpen?'':' hidden'}>
+          <button class="rail__link rail__link--sub" data-go="facts" ${state.view==='facts'?'aria-current="page"':''}>Search facts</button>
+          <button class="rail__link rail__link--sub" data-go="history" ${state.view==='history'?'aria-current="page"':''}>History and recovery</button>
+          <button class="rail__link rail__link--sub" data-act="reload-search">Reload search</button>
+        </div>` : ''}
+      </div>`:''}
       <div class="rail__foot">
-        ${next?`<div class="rail__note"><b>Up next.</b> Step ${next.n}: ${esc(next.t)}</div>`:''}
+        ${railAccount(u, s)}
         <div class="themeswap" role="group" aria-label="Theme">
           <button type="button" data-theme="light">Light</button>
           <button type="button" data-theme="auto">Auto</button>
@@ -1175,6 +1379,12 @@ function viewLabel(){
   if (v === 'history') return 'History and recovery';
   if (v === 'facts') return 'Search facts';
   if (v === 'overview') return 'Overview';
+  if (v === 'interviews') return 'Interviews';
+  if (v === 'committee') return 'Committee';
+  if (v === 'documents') return 'Documents';
+  if (v === 'activity') return 'Activity';
+  if (v === 'process') return 'Process checklist';
+  if (v === 'screen' || v === 'people') return 'Candidates';
   if (v === 'person'){
     const c = (state.search?.candidates||[]).find(x => x.id === state.sel);
     return c ? c.name : 'Candidate';
@@ -1191,10 +1401,15 @@ function crumbs(){
   if (!el) return;
   const s = state.search;
   const tail = state.view==='home' ? '' : `<span class="dot"></span><span aria-current="page"><b>${esc(viewLabel())}</b></span>`;
+  // The same destination mapping the rail marks, so a breadcrumb never names a
+  // section the navigation is not showing as current.
+  const dest = s ? destOf() : null;
+  const destCrumb = dest && dest !== 'overview' && destLabel(dest) !== viewLabel()
+    ? `<span class="dot"></span><button type="button" data-go="${DEST_HOME[dest]}">${esc(destLabel(dest))}</button>` : '';
   el.innerHTML = `<button type="button" data-go="home">Home</button>` +
     (state.view==='packages' ? `<span class="dot"></span><span>Packages</span>` :
     (s ? `<span class="dot"></span><button type="button" data-go="overview">${esc(s.client||'Search')}</button>` : '')) +
-    tail;
+    destCrumb + tail;
   document.title = state.user
     ? (state.view==='home' ? 'Home' : viewLabel()) + (s ? ' · '+(s.client||'Search') : '') + ' · Slate'
     : 'Slate — Executive Search';
@@ -1210,13 +1425,10 @@ function vGate(){
       <button class="btn btn--primary" data-act="start">Start</button>
     </header>
     <div class="wrap gate__hero">
-      <h1 class="t-title">Three ways to run a search</h1>
-      <p class="t-body">Every engagement seats the committee and builds the profile from their answers. The fee decides how much of the process runs after that.</p>
+      <h1 class="t-title">A guided executive search</h1>
+      <p class="t-body">Every engagement seats the search committee, asks each member what they are looking for, and builds the candidate profile from their answers. Recruiting, screening, and interviews all run against that profile.</p>
     </div>
     <div class="wrap gate__table stack">
-      <div class="spec"><div class="spec__bar">What each pay level includes</div>
-        <div class="spec__body spec__body--flush">${packageMatrix()}</div>
-      </div>
       <div class="row"><button class="btn btn--primary" data-act="start">Start</button></div>
     </div>
   </div>`;
@@ -1225,32 +1437,36 @@ function vGate(){
 // A committee member's home is a to-do list, not a book of business. If a
 // window is open and they have not answered, that is the whole page.
 function vHomeCommittee(){
-  const u = state.user;
   const list = state.searches || [];
-  const first = String(u.name||'').split(' ')[0] || 'there';
   const owed = list.filter(s => s.intakeOpen && !s.intakeMine);
-  const rows = list.map(s => `<div class="home-row">
-    <button class="home-row__open home-row__open--plain" data-open="${s.id}">
-      <span><b>${esc(s.client||'Untitled')}</b><div class="t-small">${esc(s.position)}${s.accountManager?' · '+esc(s.accountManager.name):''}</div></span>
-      <span class="mono t-small">${esc(s.no)}</span>
-      <span class="t-small">${s.intakeOpen
-        ? (s.intakeMine ? 'Your answers are in' : 'Waiting on your answers')
-        : (s.intakeMine ? 'Answers on file' : 'Nothing needed right now')}</span>
-    </button>
-  </div>`).join('');
+  const rows = list.map(s => `<tr>
+    <th scope="row"><button type="button" class="candlink" data-open="${s.id}">${esc(s.client||'Untitled')}</button>
+      <span class="candmeta">${esc(s.position||'')}${s.accountManager?' · '+esc(s.accountManager.name):''} · <span class="mono">${esc(s.no)}</span></span>
+      ${summaryDeadline(s)?`<span class="candmeta">${esc(summaryDeadline(s))}</span>`:''}</th>
+    <td data-label="Your part">${s.intakeOpen
+      ? (s.intakeMine ? pill('ok','Answers in') : pill('wait','Waiting on you'))
+      : (s.intakeMine ? pill('ok','Answers on file') : pill('idle','Nothing needed'))}</td>
+    <td data-label="Open" class="candacts"><button class="btn btn--secondary btn--sm" data-open="${s.id}">Open</button></td>
+  </tr>`).join('');
   return shell(`
-    ${head('Home','Welcome, '+first,
-      'You are on '+(list.length===1?'a search':list.length+' searches')+' as a committee member. You will be asked what you are looking for in the executive, and later you will score candidates against what the committee agreed on.',
+    ${head('Workspace','Your assignments',
+      'You are on '+(list.length===1?'a search':list.length+' searches')+' as a committee member. You are asked what you are looking for in the executive, and later you score candidates against what the committee agreed on.',
       owed.length ? `<button class="btn btn--primary" data-open="${owed[0].id}">Answer for ${esc(owed[0].client)}</button>` : '')}
     <div class="band"><div class="wrap stack">
-      ${owed.map(s => `<div class="next">
-        <div class="t-label">Waiting on you</div>
-        <h2>${esc(s.client||'')} · ${esc(s.position||'')}</h2>
-        <p class="t-small">The search committee is being asked what to look for in the next ${esc(s.position||'executive')}. Answer for yourself; nobody sees your answers until the window closes.${s.intakeDue?' <b>Due '+esc(s.intakeDue)+'.</b>':''}</p>
-        <div class="row"><button class="btn btn--primary" data-open="${s.id}">Answer now</button></div>
-      </div>`).join('')}
-      <div class="spec"><div class="spec__bar">Your searches</div>
-        <div class="spec__body spec__body--flush">${rows || '<div class="empty"><div class="empty__t">Nothing yet</div>When a consultant seats you on a search, it appears here.</div>'}</div>
+      ${searchesNotice()}
+      ${owed.length ? `<div class="spec"><div class="spec__bar">Waiting on you · ${owed.length}</div>
+        <div class="spec__body stack stack--tight">${owed.map(s => `<div class="hubrow">
+          <div class="hubrow__id"><b>${esc(s.client||'')} · ${esc(s.position||'')}</b>
+            <div class="t-small">The committee is being asked what to look for in the next ${esc(s.position||'executive')}. Answer for yourself; nobody sees your answers until the window closes.${s.intakeDue?' <b>'+esc(summaryDeadline(s))+'.</b>':''}</div></div>
+          <div class="hubrow__st"></div>
+          <div class="hubrow__act"><button class="btn btn--primary btn--sm" data-open="${s.id}">Answer now</button></div>
+        </div>`).join('')}</div>
+      </div>` : ''}
+      <div class="spec"><div class="spec__bar">Your searches · ${list.length}</div>
+        <div class="spec__body spec__body--flush">${list.length ? `<div class="tablewrap"><table class="candtable hometable">
+          <thead><tr><th scope="col">Search</th><th scope="col">Your part</th><th scope="col">Open</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table></div>` : `<div class="empty">${emptyState('Nothing yet','When a consultant seats you on a search, it appears here.')}</div>`}</div>
       </div>
     </div></div>`);
 }
@@ -1272,72 +1488,116 @@ function pickedIds(){
   return (state.picked||[]).filter(id => known.has(id));
 }
 
+/**
+ * The phase a portfolio row is in.
+ *
+ * Home reads the summary the index returns, not a loaded search, so this works
+ * from `progress.next` alone and says "Complete" when there is no next step.
+ */
+function summaryPhase(s){
+  const next = s.progress?.next;
+  if (!next) return 'Complete';
+  const phase = catalogPhases().find(p => p.id === next.phase);
+  return phase ? (PHASE_SHORT[phase.key] || phase.t) : '';
+}
+
+// The only date the portfolio actually has is the committee intake deadline,
+// and only while the window is open. It is labelled by what it is, never
+// presented as a general hiring milestone and never described as overdue,
+// because nothing here stores a hiring milestone or compares the date to now.
+function summaryDeadline(s){
+  return s.intakeOpen && s.intakeDue ? 'Committee intake due ' + s.intakeDue : '';
+}
+
+function homeQuery(){
+  return String(state.homeQ || '');
+}
+
+function matchesHomeQuery(s){
+  const q = homeQuery().trim().toLowerCase();
+  if (!q) return true;
+  return [s.client, s.position, s.no, s.accountManager?.name]
+    .some(v => String(v||'').toLowerCase().includes(q));
+}
+
 function vHome(){
   if (isCommittee()) return vHomeCommittee();
   const u = state.user;
   const canDelete = u.role==='consultant';
   const list = state.searches || [];
+  const shown = list.filter(matchesHomeQuery);
   const picked = pickedIds();
   state.picked = picked;
-  const allPicked = list.length > 0 && picked.length === list.length;
+  const allPicked = shown.length > 0 && shown.every(s => picked.includes(s.id));
   const complete = list.filter(s => s.progress && s.progress.done >= s.progress.total).length;
   const live = list.length - complete;
   const pickup = list.find(s => s.progress?.next);
-  const first = String(u.name||'').split(' ')[0] || 'there';
   const owed = list.filter(s => s.intakeOpen && s.seat && !s.intakeMine);
   const manage = canDelete && Boolean(state.open.homemanage);
-  const rows = list.length
-    ? list.map(s => {
-        const n = s.progress?.next;
-        const on = picked.includes(s.id);
-        return `<div class="home-row${on?' home-row--on':''}">
-          ${manage?`<label class="home-row__pick"><input type="checkbox" data-pick-search="${s.id}" ${on?'checked':''} aria-label="Select ${esc(s.client||s.no||'this search')}"></label>`:''}
-          <button class="home-row__open" data-open="${s.id}">
-            <span><b>${esc(s.client||'Untitled')}</b><div class="t-small">${esc(s.position)}${s.packageLabel?' · '+esc(s.packageLabel):''}</div></span>
-            <span class="mono t-small">${esc(s.no)}</span>
-            <span class="t-small">${s.accountManager?esc(s.accountManager.name):'—'}${s.seats>1?' +'+(s.seats-1):''}</span>
-            <span class="t-small">${s.progress?s.progress.done+'/'+s.progress.total:''}${n?' · next: '+esc(n.t):' · complete'}</span>
-          </button>
-          ${manage?`<button class="btn btn--danger btn--sm" data-act="delete-search" data-id="${s.id}" data-name="${esc(s.client||s.no||'this search')}">Archive</button>`:''}
-        </div>`;
-      }).join('')
-    : `<div class="empty">${emptyState('No searches yet',
-        'A search starts by seating the committee and asking each member what they are looking for. The profile is built from their answers, and everything else is generated from that.',
-        u.role==='consultant' ? `<button class="btn btn--primary" data-go="new">Open a new search</button>` : '')}</div>`;
+
+  const rows = shown.map(s => {
+    const n = s.progress?.next;
+    const on = picked.includes(s.id);
+    const counts = s.candidateCounts;
+    const due = summaryDeadline(s);
+    return `<tr${on?' class="is-picked"':''}>
+      ${manage?`<td class="pickcell"><input type="checkbox" data-pick-search="${s.id}" ${on?'checked':''} aria-label="Select ${esc(s.client||s.no||'this search')}"></td>`:''}
+      <th scope="row"><button type="button" class="candlink" data-open="${s.id}">${esc(s.client||'Untitled')}</button>
+        <span class="candmeta">${esc(s.position||'')}${s.packageLabel?' · '+esc(s.packageLabel):''} · <span class="mono">${esc(s.no)}</span></span>
+        ${due?`<span class="candmeta">${esc(due)}</span>`:''}</th>
+      <td data-label="Phase">${esc(summaryPhase(s))}</td>
+      <td data-label="Candidates" class="tnum">${counts
+        ? `<b>${counts.total}</b>${counts.total?`<span class="candmeta">${counts.semifinalist+counts.finalist} advanced · ${counts.responses} answered</span>`:''}`
+        : '<span class="t-small">Not on this package</span>'}</td>
+      <td data-label="Account manager">${s.accountManager?esc(s.accountManager.name):'<span class="t-small">Unassigned</span>'}${s.seats>1?' <span class="t-small">+'+(s.seats-1)+'</span>':''}</td>
+      <td data-label="Next action">${n?esc(STEP_NAME[n.key]||n.t):'<span class="t-small">Every step complete</span>'}</td>
+      ${manage?`<td data-label="" class="candacts"><button class="btn btn--danger btn--sm" data-act="delete-search" data-id="${s.id}" data-name="${esc(s.client||s.no||'this search')}">Archive</button></td>`:''}
+    </tr>`;
+  }).join('');
 
   // What is actually waiting on this person, in the order they would pick it
   // up. Home used to open on repeated identity tiles and a duplicate New
   // search button instead (D08).
   const waiting = [
     ...owed.map(s => ({ id:s.id, t:'Answer committee intake', b:esc(s.client||s.no)+' · '+esc(s.position||'')
-      + (s.intakeDue ? ' · due '+esc(s.intakeDue) : ''), cta:'Answer now' })),
+      + (s.intakeDue ? ' · '+esc(summaryDeadline(s)) : ''), cta:'Answer now' })),
     ...(pickup && !owed.some(o => o.id === pickup.id)
-      ? [{ id:pickup.id, t:'Step '+pickup.progress.next.n+'. '+esc(pickup.progress.next.t),
+      ? [{ id:pickup.id, t:STEP_NAME[pickup.progress.next.key] || pickup.progress.next.t,
            b:esc(pickup.client||'Untitled')+' · '+esc(pickup.position||''), cta:'Open this search' }]
       : [])
   ];
 
+  const cols = 5 + (manage ? 2 : 0);
   return shell(`
-    ${head('Home','Welcome back, '+first,
-      list.length ? esc(live)+' search'+(live===1?'':'es')+' in progress, '+esc(complete)+' complete.' : 'Open your first search.',
+    ${head('Workspace','Your searches',
+      list.length ? esc(live)+' in progress, '+esc(complete)+' complete.' : 'Nothing on the book yet.',
       u.role==='consultant' ? `<button class="btn btn--primary" data-go="new">Open a new search</button>` : '')}
     <div class="band"><div class="wrap stack">
       ${searchesNotice()}
-      ${waiting.length ? `<div class="next">
-        <div class="t-label">Waiting on you</div>
-        ${waiting.map(w => `<div class="waitrow">
-          <div><b>${w.t}</b><div class="t-small">${w.b}</div></div>
-          <button class="btn btn--primary btn--sm" data-open="${w.id}">${esc(w.cta)}</button>
-        </div>`).join('')}
+      ${waiting.length ? `<div class="spec"><div class="spec__bar">Waiting on you · ${waiting.length}</div>
+        <div class="spec__body stack stack--tight">${waiting.map(w => `<div class="hubrow">
+          <div class="hubrow__id"><b>${w.t}</b><div class="t-small">${w.b}</div></div>
+          <div class="hubrow__st"></div>
+          <div class="hubrow__act"><button class="btn btn--primary btn--sm" data-open="${w.id}">${esc(w.cta)}</button></div>
+        </div>`).join('')}</div>
       </div>` : ''}
-      <div class="spec"><div class="spec__bar">Your searches · ${list.length}${canDelete && list.length ? `<span class="spec__bar-act">
+      ${list.length ? `<div class="listbar">
+        ${field('Find a search','', `<input class="input" id="home-filter" data-homefilter type="search" data-nodirty placeholder="Client, position, number, or manager" value="${esc(homeQuery())}">`)}
+        ${homeQuery() ? `<div class="listbar__act"><button type="button" class="btn btn--secondary" data-act="clear-home-filter">Clear filter</button></div>` : ''}
+      </div>` : ''}
+      <div class="spec"><div class="spec__bar">Active searches · ${shown.length}${list.length!==shown.length?' of '+list.length:''}${canDelete && list.length ? `<span class="spec__bar-act">
           ${manage ? `<button type="button" class="btn btn--ghost btn--sm" data-act="pick-all">${allPicked?'Clear':'Select all'}</button>
           ${withTip(`<button type="button" class="btn btn--danger btn--sm" data-act="delete-searches" ${picked.length?'':'disabled'}>Archive selected${picked.length?' · '+picked.length:''}</button>`, TIPS.archive)}` : ''}
           <button type="button" class="btn btn--ghost btn--sm" data-act="home-manage">${manage?'Done':'More'}</button>
         </span>` : ''}</div>
-        <div class="spec__body spec__body--flush">${rows}</div>
+        <div class="spec__body spec__body--flush">${list.length ? `<div class="tablewrap"><table class="candtable hometable">
+          <thead><tr>${manage?'<th scope="col"><span class="u-sr">Select</span></th>':''}<th scope="col">Search</th><th scope="col">Phase</th><th scope="col">Candidates</th><th scope="col">Account manager</th><th scope="col">Next action</th>${manage?'<th scope="col"><span class="u-sr">Archive</span></th>':''}</tr></thead>
+          <tbody>${rows || `<tr><td colspan="${cols}">No search matches “${esc(homeQuery())}”. <button type="button" class="btn btn--ghost btn--sm" data-act="clear-home-filter">Clear filter</button></td></tr>`}</tbody>
+        </table></div>` : `<div class="empty">${emptyState('No searches yet',
+          'A search starts by seating the committee and asking each member what they are looking for. The profile is built from their answers, and everything else is generated from that.',
+          u.role==='consultant' ? `<button class="btn btn--primary" data-go="new">Open a new search</button>` : '')}</div>`}</div>
       </div>
-      ${manage ? `<div class="row"><button class="btn btn--secondary btn--sm" data-go="archives">Archived searches</button></div>` : ''}
+      <div class="row"><button class="btn btn--secondary btn--sm" data-go="archives">Archived searches</button></div>
     </div></div>`);
 }
 
@@ -1376,6 +1636,11 @@ function vNew(){
   return shell(`
     ${head('New search','Who is hiring, and for what','Open the file, then seat the search committee. The profile comes after the committee has told you what they are looking for.')}
     <div class="band"><div class="wrap"><form id="newsearch" class="stack">
+      ${/* The service package is not asked for here. A new file opens on the
+            default level and the package is set on Search facts, except when
+            the search was started from a package sample, which carries its
+            choice through on this hidden field. */
+        state.newPackage ? `<input type="hidden" name="package" value="${esc(state.newPackage)}">` : ''}
       ${sectionHead('The client', 'Required')}
       <div class="formgrid">
         ${field('Client jurisdiction','Official county, city, or town name.', `<input class="input" name="client" required placeholder="${esc(jurisdiction.clientPlaceholder)}">`, { req:true })}
@@ -1383,10 +1648,6 @@ function vNew(){
         ${jurisdictionPicker(jurisdiction.key)}
         ${field('State','', `<input class="input" name="state" placeholder="Colorado">`)}
       </div>
-      ${packages().length ? `
-        ${sectionHead('Service package', 'Changeable later on Search facts')}
-        <p class="t-small">What the client bought, and the fee that goes with it. The level you pick sets which steps are on this file; the committee and the profile are on every one.</p>
-        ${packageChoice(state.newPackage || state.health?.defaultPackage)}` : ''}
       ${sectionHead('Research details', 'Optional', `<button type="button" class="btn btn--ghost btn--sm" data-panel="newmore" aria-expanded="${moreOpen}" aria-controls="newmore" data-open-label="Add these now" data-close-label="Hide these">${moreOpen?'Hide these':'Add these now'}</button>`)}
       <p class="t-small">None of this is needed to open the file. Research fills most of it later from public sources.</p>
       <div id="newmore"${moreOpen?'':' hidden'}>
@@ -1403,7 +1664,9 @@ function vNew(){
       ${actionBar(
         `<button class="btn btn--primary" type="submit" form="newsearch">Create search</button>`,
         `<button type="button" class="btn btn--secondary" data-go="home">Cancel</button>`,
-        'Opens the file and takes you to the search committee.')}
+        packages().length
+          ? 'Opens at the '+esc(packageLabel(state.newPackage || state.health?.defaultPackage))+' level. Change that on Search facts.'
+          : 'Opens the file and takes you to the search committee.')}
     </form></div></div>`);
 }
 
@@ -1438,15 +1701,35 @@ function stepWaitCopy(st, search){
   return 'Waiting on an earlier step';
 }
 
+// Which included step is holding this one up, named rather than described as
+// "an earlier step". Only steps this viewer may open are offered as a link.
+function blockingStep(st, search){
+  if (!st.blocked) return null;
+  if (st.needsCandidates && !((search.candidates||[]).length)) return { key:'screen', name:STEP_NAME.screen };
+  const pending = (st.needs||[]).map(k => (search.steps||[]).find(x => x.key===k))
+    .find(x => x && x.status !== 'done');
+  return pending ? { key:pending.key, name:STEP_NAME[pending.key] || pending.t } : null;
+}
+
 function stepsList(steps, search){
-  return `<div class="steps">${(steps||[]).map(st => `
+  return `<div class="steps">${(steps||[]).map(st => {
+    const block = blockingStep(st, search);
+    const why = block
+      ? `Waiting on ${esc(block.name)}.` + (canOpenStep(block.key) ? ' ' : '')
+      : esc(stepWaitCopy(st, search));
+    return `
     <div class="step ${st.status==='done'?'step--done':st.status==='now'?'step--now':''}">
       <div class="step__n">${String(st.n).padStart(2,'0')}</div>
       <div>
         <div class="step__t">${esc(st.t)}${st.opt?' '+pill('idle','Optional'):''}${st.kind==='staff'?' '+pill('info','Staff work'):''}</div>
-        <div class="t-small">${stepWaitCopy(st, search)}</div>
+        <div class="t-small">${why}</div>
+        <div class="step__foot">
+          ${block && canOpenStep(block.key) ? openBtn(block.key, 'Open '+block.name) : ''}
+          ${!block ? openBtn(st.key, st.status==='done' ? 'Open' : 'Open this step', st.status==='now') : ''}
+        </div>
       </div>
-    </div>`).join('')}
+    </div>`;
+  }).join('')}
   </div>`;
 }
 
@@ -1538,8 +1821,9 @@ function stepStrip(s){
 }
 
 function activityPanel(s){
-  return `<div class="spec"><div class="spec__bar">Activity</div>
-    <div class="spec__body"><div class="feed">${(s.activity||[]).slice(0,8).map(a=>`
+  const all = s.activity || [];
+  return `<div class="spec"><div class="spec__bar">Recent activity${state.preview?'':`<span class="spec__bar-act"><button class="btn btn--ghost btn--sm" data-go="activity">See all ${all.length}</button></span>`}</div>
+    <div class="spec__body"><div class="feed">${all.slice(0,6).map(a=>`
       <div class="feed__i"><span class="feed__w">${esc(a.who)}</span><span class="feed__x">${esc(a.x)}</span><span class="feed__t">${esc((a.at||'').slice(0,10))}</span></div>`).join('') || '<div class="t-small">Nothing yet.</div>'}
     </div></div></div>`;
 }
@@ -1695,26 +1979,57 @@ function outstandingPanel(s){
   }
   if (!items.length) return '';
   return `<div class="spec"><div class="spec__bar">Outstanding · ${items.length}</div>
-    <div class="spec__body stack stack--tight">${items.map(i => `<div class="waitrow">
-      <div><b>${esc(i.t)}</b><div class="t-small">${i.b}</div></div>
-      ${openBtn(i.key, i.cta)}
+    <div class="spec__body stack stack--tight">${items.map(i => `<div class="hubrow">
+      <div class="hubrow__id"><b>${esc(i.t)}</b><div class="t-small">${i.b}</div></div>
+      <div class="hubrow__st"></div>
+      <div class="hubrow__act">${openBtn(i.key, i.cta)}</div>
     </div>`).join('')}</div></div>`;
 }
 
-// Where the candidates stand, without opening the screening table.
+/**
+ * Where the candidates stand, as the way into the list.
+ *
+ * The four stages are the ones the product actually stores. Nothing here
+ * invents an Interview, Offer or Hired state, and declined is an outcome shown
+ * beside the pipeline rather than a stage inside it. Each count opens the list
+ * already filtered to it.
+ */
+const STAGE_LABEL = { applicant:'Applicants', semifinalist:'Semifinalists', finalist:'Finalists', declined:'Declined' };
+const STAGE_ONE = { applicant:'Applicant', semifinalist:'Semifinalist', finalist:'Finalist', declined:'Declined' };
+const STAGE_ORDER = ['applicant','semifinalist','finalist','declined'];
+
+function stageTallies(list){
+  const by = stage => list.filter(x => x.stage===stage).length;
+  return [{ key:'', label:'All', n:list.length }]
+    .concat(STAGE_ORDER.map(k => ({ key:k, label:STAGE_LABEL[k], n:by(k) })));
+}
+
+// The stage counts as a way in. `mode` is 'link' on the overview, where a
+// count opens the list, and 'filter' on the list itself, where it selects.
+function stageBar(items, selected, mode){
+  return `<div class="stagebar" role="group" aria-label="Candidate stages">${items.map(i => {
+    const on = (selected||'') === i.key;
+    const attrs = mode==='filter'
+      ? `data-act="stage-filter" data-stage="${esc(i.key)}" aria-pressed="${on}"`
+      : `data-act="stage-open" data-stage="${esc(i.key)}"`;
+    return `<button type="button" class="stagebar__i${on?' stagebar__i--on':''} stagebar__i--${i.key||'all'}" ${attrs}>
+      <span class="stagebar__n">${i.n}</span>
+      <span class="stagebar__l">${esc(i.label)}</span>
+    </button>`;
+  }).join('')}</div>`;
+}
+
 function candidatePanel(s){
   if (!stepOf('screen')) return '';
   const c = s.candidates || [];
-  const by = stage => c.filter(x => x.stage===stage).length;
-  return `<div class="spec"><div class="spec__bar">Candidates · ${c.length}</div>
+  const responses = c.filter(x => x.survey1).length;
+  return `<div class="spec"><div class="spec__bar">Candidates${state.preview?'':`<span class="spec__bar-act">${openBtn('screen', c.length ? 'Open the list' : 'Add the first candidate')}</span>`}</div>
     <div class="spec__body">
-      ${c.length ? `<div class="tiles tiles--tight">
-        <div class="tile"><span class="tile__k">Applicants</span><span class="tile__v">${by('applicant')}</span></div>
-        <div class="tile"><span class="tile__k">Semifinalists</span><span class="tile__v">${by('semifinalist')}</span></div>
-        <div class="tile"><span class="tile__k">Finalists</span><span class="tile__v">${by('finalist')}</span></div>
-        <div class="tile"><span class="tile__k">Surveys in</span><span class="tile__v">${c.filter(x => x.survey1).length}</span></div>
-      </div>` : `<p class="t-small">Nobody on the file yet.</p>`}
-      <p class="t-small u-mt-3">${openBtn('screen', c.length ? 'Open screening' : 'Add the first candidate')}</p>
+      ${c.length ? `${state.preview
+          ? stageBar(stageTallies(c), '', 'list').replace(/data-act="stage-open"/g, 'disabled')
+          : stageBar(stageTallies(c), '', 'list')}
+        <p class="t-small u-mt-3">${responses} of ${c.length} ${c.length===1?'has':'have'} answered the initial questionnaire.</p>`
+        : `<p class="t-small">Nobody on the file yet.</p>`}
     </div></div>`;
 }
 
@@ -1734,37 +2049,244 @@ function overviewInner(s, { preview=false }={}){
   const panels = view.layout === 'dashboard'
     ? `<div class="dash">${(view.panels||[]).map(k => DASH[k] ? DASH[k](s) : '').join('')}</div>`
     : rosterPanel(s);
-  const steps = view.steps === 'strip' ? stepStrip(s) : phaseSpecs(s);
-  const processOpen = Boolean(state.open.process);
-  // The full process and the package terms are reference material. They sit
-  // behind a disclosure so the next action, the open work, and the candidates
-  // are what the page opens on.
-  const reference = `<div class="stack stack--tight">
-    <div class="row">
-      <button type="button" class="btn btn--ghost btn--sm" data-panel="process" aria-expanded="${processOpen}" aria-controls="overview-process" data-open-label="Show the full process" data-close-label="Hide the full process">${processOpen?'Hide the full process':'Show the full process'}</button>
-      <span class="t-small">${s.progress ? s.progress.done+' of '+stepTotal()+' steps done' : ''}</span>
-    </div>
-    <div id="overview-process"${processOpen?'':' hidden'}><div class="stack">${steps}${packagePanel(s)}</div></div>
-  </div>`;
-  return `${overviewTiles(s, next, view)}
+  // The sample keeps its tiles and its "where this file is" card, because a
+  // client is being shown the shape of a pay level rather than working a file.
+  if (preview){
+    const steps = view.steps === 'strip' ? stepStrip(s) : phaseSpecs(s);
+    return `${overviewTiles(s, next, view)}
       ${nextCard}
-      ${preview ? '' : outstandingPanel(s)}
       ${candidatePanel(s)}
       ${panels}
       ${activityPanel(s)}
-      ${reference}`;
+      ${steps}
+      ${packagePanel(s)}`;
+  }
+  // A committee member with nothing open should be told so, rather than left
+  // to read an empty page as a fault.
+  const idle = isCommittee() && !next
+    ? `<div class="notice notice--info" role="status"><div>
+        <div class="notice__t">Nothing needed from you right now</div>
+        <div class="notice__b">The search team is working the file. You will be asked to score candidates once screening opens.</div>
+      </div></div>` : '';
+  return `${idle}
+      ${outstandingPanel(s)}
+      ${candidatePanel(s)}
+      ${panels}
+      ${activityPanel(s)}`;
+}
+
+// The phase of the process this search is in, said in two words. It is not the
+// candidate stage and it is not the step count; those are different questions
+// and they are answered elsewhere on the page. The catalog's own phase titles
+// are sentences, which do not read as a header eyebrow.
+const PHASE_SHORT = { convene:'Committee phase', recruit:'Recruiting phase', people:'Candidate phase' };
+function processPhase(s){
+  const next = s.progress?.next;
+  if (!next) return 'Search complete';
+  const phase = catalogPhases().find(p => p.id === next.phase);
+  return phase ? (PHASE_SHORT[phase.key] || phase.t) : '';
 }
 
 function vOverview(){
   const s = state.search;
   const next = nextForViewer(s);
   const view = overviewView(s);
+  const hint = next ? nextHint(next) : '';
+  // One next action, in the action area, once. It used to appear in a header
+  // button, a metric tile, a rail message and a full-width panel at the same
+  // time, which is four places to read the same sentence.
+  const primary = next
+    ? withTip(`<button class="btn btn--primary" data-go="${peopleView(next.key)}">Continue: ${esc(STEP_NAME[next.key] || next.t)}</button>`, hint)
+    : (isCommittee() ? '' : `<span class="pill pill--ok">Every included step is complete</span>`);
   return shell(`
-    ${head(s.no, s.position || 'Untitled position', `${esc(view.kicker||packageLabel(s.package)+' search')} for <b>${esc(s.client||'the client')}</b>. ${esc(s.fog||'')}. ${packagePill(s.package)}${view.lede?`<br><span class="t-small">${esc(view.lede)}</span>`:''}`,
-      `${next ? `<button class="btn btn--primary" data-go="${peopleView(next.key)}">Continue Step ${next.n}</button>` : ''}
-       ${canEdit() ? `<button class="btn btn--danger" data-act="delete-search" data-id="${s.id}" data-name="${esc(s.client||s.no||'this search')}">Archive search</button>` : ''}`)}
+    ${head(`${s.no} · ${processPhase(s)}`, s.position || 'Untitled position',
+      `${esc(s.client||'the client')}${s.fog?' · '+esc(s.fog):''} ${packagePill(s.package)}`,
+      `${primary}
+       ${menu('ovmore','More', [
+         canEdit() ? `<button class="btn btn--ghost btn--sm" data-go="facts">Search facts</button>` : '',
+         `<button class="btn btn--ghost btn--sm" data-go="process">Process checklist</button>`,
+         canEdit() ? `<button class="btn btn--ghost btn--sm btn--danger" data-act="delete-search" data-id="${s.id}" data-name="${esc(s.client||s.no||'this search')}">Archive search</button>` : ''
+       ])}`)}
     <div class="band"><div class="wrap stack">
       ${overviewInner(s)}
+    </div></div>`);
+}
+
+/* ===========================================================================
+ * Destination hubs
+ *
+ * Interviews, Committee, Documents and Activity are windows onto work that
+ * already exists. They add no capability and no data: each one reads the same
+ * server-decorated search the steps read, and every link is the existing
+ * route, gated by the existing package and role checks.
+ * ========================================================================= */
+
+// One row in a hub: what the thing is, where it stands, and the way in.
+function hubRow(title, body, status, actions){
+  return `<div class="hubrow">
+    <div class="hubrow__id"><b>${esc(title)}</b><div class="t-small">${body}</div></div>
+    <div class="hubrow__st">${status||''}</div>
+    <div class="hubrow__act">${actions||''}</div>
+  </div>`;
+}
+
+function vProcess(){
+  const s = state.search;
+  const list = (s.steps||[]).filter(st => !isCommittee() || COMMITTEE_STEPS.has(st.key));
+  const left = isCommittee() ? [] : stepsLeftOut(s.package);
+  return shell(`
+    ${head('This search','Process checklist',
+      `${s.progress.done} of ${s.progress.total} included step${s.progress.total===1?'':'s'} complete. Every step on this file is listed here with what it is waiting on.`)}
+    <div class="band"><div class="wrap stack">
+      ${catalogPhases().map(p => {
+        const phase = list.filter(st => st.phase===p.id);
+        if (!phase.length) return '';
+        return `<div class="spec"><div class="spec__bar">${esc(p.t)} · ${phase.filter(st=>st.status==='done').length}/${phase.length}</div>
+          <div class="spec__body"><p class="t-small u-mb-4">${esc(p.lede)}</p>${stepsList(phase, s)}</div></div>`;
+      }).join('')}
+      ${left.length ? `<div class="spec"><div class="spec__bar">Not on this file</div>
+        <div class="spec__body"><p class="t-small">The ${esc(packageLabel(s.package))} package does not include ${left.map(st => esc(STEP_NAME[st.key]||st.t)).join(', ')}.${canEdit()?' Change the package on Search facts if the engagement changed.':''}</p>
+        ${canEdit()?`<div class="row u-mt-3"><button class="btn btn--secondary btn--sm" data-go="facts">Open Search facts</button></div>`:''}</div></div>` : ''}
+    </div></div>`);
+}
+
+function vActivity(){
+  const s = state.search;
+  const feed = s.activity || [];
+  return shell(`
+    ${head('This search','Activity','Everything recorded on this file, most recent first. Names are the account that took the action.')}
+    <div class="band"><div class="wrap stack">
+      <div class="spec"><div class="spec__bar">Activity · ${feed.length}</div>
+        <div class="spec__body">${feed.length ? `<div class="feed">${feed.map(a => `
+          <div class="feed__i"><span class="feed__w">${esc(a.who)}</span><span class="feed__x">${esc(a.x)}</span><span class="feed__t">${esc((a.at||'').slice(0,10))}</span></div>`).join('')}</div>`
+          : emptyState('Nothing recorded yet','Actions appear here as the search is worked.')}</div></div>
+      ${canEdit() ? `<div class="spec"><div class="spec__bar">Recovery</div>
+        <div class="spec__body stack stack--tight">
+          <p class="t-small">Previous copy, evaluations, and saved document revisions are kept separately from this timeline, because restoring one changes the file.</p>
+          <div class="row"><button class="btn btn--secondary btn--sm" data-go="history">Open history and recovery</button></div>
+        </div></div>` : ''}
+    </div></div>`);
+}
+
+function vCommittee(){
+  const s = state.search;
+  const intake = stepState('intake');
+  const agg = s.consensus;
+  const roster = s.roster || [];
+  const answered = agg ? agg.submitted : Object.values(s.intake?.submissions||{}).filter(x => x && x.submitted).length;
+  const seated = Boolean(you().seat);
+  const open = s.intake?.status === 'open';
+  const mine = mySubmission();
+  const crit = (s.criteria||[]).filter(c => c.label).length;
+  const due = s.intake?.dueBy || '';
+  return shell(`
+    ${head('This search','Committee',
+      'Who is seated, what they were asked, and the profile their answers produced.',
+      seated && open && !(mine && mine.submitted) && canOpenStep('intake')
+        ? `<button class="btn btn--primary" data-go="intake-mine">Answer your questionnaire</button>` : '')}
+    <div class="band"><div class="wrap stack">
+      ${rosterPanel(s)}
+      <div class="spec"><div class="spec__bar">Committee input</div>
+        <div class="spec__body stack stack--tight">
+          ${hubRow('Intake window',
+            open ? `Open${due?' · due '+esc(due):''}. ${answered} of ${roster.length} answered.`
+                 : s.intake?.status === 'closed' ? 'Closed. Answers are visible to the search team.' : 'Not opened yet.',
+            statusPill(intake),
+            openBtn('intake', you().consultant ? 'Manage intake' : 'Open the questionnaire', open && !you().consultant))}
+          ${seated ? hubRow('Your answers',
+            mine && mine.submitted ? 'On file. You can revise them while the window is open.' : open ? 'Not submitted yet.' : 'The window is not open.',
+            mine && mine.submitted ? pill('ok','Submitted') : pill('idle','Not submitted'),
+            open && canOpenStep('intake') ? `<button class="btn btn--secondary btn--sm" data-go="intake-mine">Open your questionnaire</button>` : '') : ''}
+          ${hubRow('Adopted profile',
+            crit ? crit+' criteria adopted. Screening, surveys, and interviews all score against these.' : 'Not adopted yet. It is built from the committee’s answers.',
+            statusPill(stepState('profile')),
+            openBtn('profile', crit ? 'Read the profile' : 'Build the profile'))}
+        </div></div>
+    </div></div>`);
+}
+
+function vInterviews(){
+  const s = state.search;
+  const rec = (s.staff||{}).video || { log:[] };
+  const semis = (s.candidates||[]).filter(x => x.stage==='semifinalist' || x.stage==='finalist');
+  const seen = new Set((rec.log||[]).map(e => e.candidateId).filter(Boolean)).size;
+  const guide = s.artifacts?.guide, sched = s.artifacts?.schedule;
+  return shell(`
+    ${head('This search','Interviews','The interview log, the materials interviews run from, and the assessment schedule. Nothing here schedules or sends anything.')}
+    <div class="band"><div class="wrap stack">
+      <div class="spec"><div class="spec__bar">Interview log</div>
+        <div class="spec__body stack stack--tight">
+          ${canOpenStep('video') ? hubRow('Video interviews',
+            semis.length ? seen+' of '+semis.length+' semifinalist'+(semis.length===1?'':'s')+' seen and logged.' : 'No semifinalists named yet.',
+            statusPill(stepState('video')),
+            openBtn('video','Open the log', true)) : ''}
+          ${canOpenStep('references') ? hubRow('Reference checks',
+            'Finalists only, and only where consent is recorded.',
+            statusPill(stepState('references')),
+            openBtn('references','Open the log')) : ''}
+          ${!canOpenStep('video') && !canOpenStep('references') ? `<p class="t-small">No interview log is included on this file.</p>` : ''}
+        </div></div>
+      <div class="spec"><div class="spec__bar">Interview materials</div>
+        <div class="spec__body stack stack--tight">
+          ${canOpenStep('guide') ? hubRow('Interview guide',
+            guide ? 'ARE questions and assessment scenarios, each tagged to a profile criterion.' : 'Not drafted yet. It is written from the adopted profile.',
+            docStatus('guide', Boolean(guide)),
+            openBtn('guide', guide ? 'Open the guide' : 'Draft the guide')) : ''}
+          ${canOpenStep('survey2') ? hubRow('Semifinalist questionnaire',
+            s.artifacts?.survey2 ? 'Deeper questions asked before interviews.' : 'Optional. Drafted now, opened after semifinalists are named.',
+            docStatus('survey2', Boolean(s.artifacts?.survey2)),
+            openBtn('survey2','Open the questionnaire')) : ''}
+          ${!canOpenStep('guide') && !canOpenStep('survey2') ? `<p class="t-small">No interview materials are included on this file.</p>` : ''}
+        </div></div>
+      ${canOpenStep('schedule') ? `<div class="spec"><div class="spec__bar">Assessment schedule</div>
+        <div class="spec__body stack stack--tight">
+          ${hubRow('Finalist week',
+            sched ? 'The interview schedule and the assessment guide every finalist runs through.' : 'Not drafted yet. It needs finalists and the interview guide.',
+            docStatus('schedule', Boolean(sched)),
+            openBtn('schedule', sched ? 'Open finalist week' : 'Draft finalist week'))}
+        </div></div>` : ''}
+    </div></div>`);
+}
+
+// Who last touched a document, taken from the activity the server already
+// records. Activity text names the artifact key; where no entry names it, the
+// editor is shown as absent rather than guessed at.
+function docEditor(key){
+  // Matched on whole words rather than a substring, so "plan" is not found
+  // inside "planned" and "ads" is not found inside "adsorbed". Where no
+  // recorded action names this artifact, the answer is nothing, not a guess.
+  const hit = (state.search?.activity||[]).find(a =>
+    String(a.x||'').toLowerCase().split(/[^a-z0-9]+/).includes(key));
+  return hit ? { who:hit.who, at:(hit.at||'').slice(0,10) } : null;
+}
+
+function vDocuments(){
+  const s = state.search;
+  const keys = DOC_KEYS.filter(canOpenStep);
+  const rows = keys.map(key => {
+    const has = key === 'profile' ? (s.criteria||[]).some(c => c.label) : Boolean(s.artifacts?.[key]);
+    const meta = DRAFTS[key] || { title: STEP_NAME[key] || key };
+    const who = docEditor(key);
+    const review = (s.reviews||{})[key];
+    const stale = s.staleArtifacts?.[key];
+    const detail = stale ? esc(stale)
+      : review?.status === 'approved' ? 'Reviewed by '+esc(review.byName || 'the search team')+(review.at?' on '+esc(review.at.slice(0,10)):'')
+      : who ? 'Last change by '+esc(who.who)+' on '+esc(who.at)
+      : has ? 'On file.' : 'Not started.';
+    return `<tr>
+      <th scope="row"><span class="candname">${esc(key==='profile'?'Candidate profile':meta.title)}</span>
+        <span class="candmeta">${detail}</span></th>
+      <td data-label="State">${key==='profile' ? statusPill(stepState('profile')) : docStatus(key, has)}</td>
+      <td data-label="Open" class="candacts">${openBtn(key, has ? 'Open' : 'Start', false)}</td>
+    </tr>`;
+  }).join('');
+  return shell(`
+    ${head('This search','Documents','Every artifact on this file, what state it is in, and who last changed it. Generated documents keep their own presentation when you open them.')}
+    <div class="band"><div class="wrap stack">
+      ${keys.length ? `<div class="tablewrap"><table class="candtable">
+        <thead><tr><th scope="col">Document</th><th scope="col">State</th><th scope="col">Open</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>` : emptyState('No documents on this file','This package does not include drafted documents.')}
     </div></div>`);
 }
 
@@ -1788,7 +2310,9 @@ function vPackages(){
        <button class="btn btn--secondary" data-go="home">Back to Home</button>`)}
     <div class="band"><div class="wrap stack">
       ${tabs}
-      ${packageMatrix(pkg)}
+      <div class="spec"><div class="spec__bar">What each pay level includes</div>
+        <div class="spec__body spec__body--flush">${packageMatrix(pkg)}</div>
+      </div>
       <div class="showcase">${inner}</div>
     </div></div>`);
 }
@@ -3172,7 +3696,7 @@ function vDraft(key){
 
 function stagePill(stage){
   const k = stage==='finalist'?'ok':stage==='declined'?'stop':stage==='semifinalist'?'wait':'info';
-  return pill(k, stage);
+  return pill(k, STAGE_ONE[stage] || stage);
 }
 
 function answerOf(answers, q){
@@ -3201,31 +3725,51 @@ function listFilter(){
   return state.filters[id];
 }
 
+/**
+ * Text and response narrow the pool; a stage selects inside it.
+ *
+ * Keeping the two apart is what lets the stage counts stay stable while the
+ * user moves between stages: the numbers are calculated after the text and
+ * response filters and before the selected stage, so picking Finalists never
+ * changes what the other counts say.
+ */
+function matchesTextAndResponse(c, f){
+  if (f.resp === 'in' && !c.survey1) return false;
+  if (f.resp === 'out' && c.survey1) return false;
+  const q = f.q.trim().toLowerCase();
+  if (!q) return true;
+  return [c.name, c.cur, c.org].some(v => String(v||'').toLowerCase().includes(q));
+}
+
 function filterCandidates(list){
   const f = listFilter();
-  const q = f.q.trim().toLowerCase();
-  return list.filter(c => {
-    if (f.stage && c.stage !== f.stage) return false;
-    if (f.resp === 'in' && !c.survey1) return false;
-    if (f.resp === 'out' && c.survey1) return false;
-    if (!q) return true;
-    return [c.name, c.cur, c.org].some(v => String(v||'').toLowerCase().includes(q));
-  });
+  return list.filter(c => matchesTextAndResponse(c, f) && (!f.stage || c.stage === f.stage));
+}
+
+function stageCounts(list){
+  const f = listFilter();
+  return stageTallies(list.filter(c => matchesTextAndResponse(c, f)));
 }
 
 function candidateRow(c){
-  const acts = [
-    withTip(`<button type="button" class="btn btn--primary btn--sm" data-cand="${c.id}">Review</button>`,
-      'Open this candidate to read their responses and score them against the profile.'),
-    canEdit() ? withTip(`<button type="button" class="btn btn--secondary btn--sm" data-act="copy-invite" data-cid="${c.id}">Copy invite</button>`, TIPS.copyInvite) : '',
-    canEdit() ? withTip(`<a class="btn btn--ghost btn--sm" href="/apply/${esc(c.invite)}" target="_blank" rel="noopener">Open questionnaire</a>`, TIPS.openQuestionnaire) : ''
-  ].filter(Boolean).join(' ');
+  // Invitation links are a correction-shaped action, not list data: the raw
+  // URL is never a column, and the controls that hand it out sit in a labelled
+  // menu on the row rather than competing with Review.
+  const invite = canEdit() ? menu('cand-'+c.id, 'Invite', [
+    withTip(`<button type="button" class="btn btn--ghost btn--sm" data-act="copy-invite" data-cid="${c.id}">Copy invite link</button>`, TIPS.copyInvite),
+    withTip(`<a class="btn btn--ghost btn--sm" href="/apply/${esc(c.invite)}" target="_blank" rel="noopener">Open questionnaire</a>`, TIPS.openQuestionnaire),
+    withTip(`<button type="button" class="btn btn--ghost btn--sm" data-act="replace-invite" data-cid="${c.id}">Replace candidate link</button>`, TIPS.replaceInvite)
+  ]) : '';
   return `<tr>
-    <th scope="row"><span class="candname">${esc(c.name)}</span>
+    <th scope="row"><button type="button" class="candlink" data-cand="${c.id}">${esc(c.name)}</button>
       <span class="candmeta">${esc(c.cur||'')}${c.cur && c.org ? ' · ' : ''}${esc(c.org||'')}</span></th>
     <td data-label="Stage">${stagePill(c.stage)}</td>
-    <td data-label="Initial survey">${c.survey1 ? pill('ok','Response in') : pill('idle','No response')}</td>
-    <td data-label="Actions" class="candacts">${acts}</td>
+    <td data-label="Response">${c.survey1 ? pill('ok','Response in') : pill('idle','No response')}</td>
+    <td data-label="Actions" class="candacts">
+      ${withTip(`<button type="button" class="btn btn--secondary btn--sm" data-cand="${c.id}">Review</button>`,
+        'Open this candidate to read their responses and score them against the profile.')}
+      ${invite}
+    </td>
   </tr>`;
 }
 
@@ -3237,30 +3781,28 @@ function vScreen(){
   const addOpen = Boolean(state.open.addcand);
   const rows = shown.map(candidateRow).join('');
   return shell(`
-    ${head('Step '+stepNo('screen'),'Screen candidate surveys',
+    ${head('This search','Candidates',
       canEdit()
-        ? 'Review the resume and the initial survey against the adopted profile. Score each person. Advance the ones you want as semifinalists, then release scores.'
-        : 'Score each candidate against the profile the committee adopted. Your scores stay private until the account manager releases them.')}
+        ? 'Read each response against the adopted profile, score the person, and advance the ones you want as semifinalists.'
+        : 'Score each candidate against the profile the committee adopted. Your scores stay private until the account manager releases them.',
+      canEdit() ? `<button type="button" class="btn btn--primary" data-panel="addcand" aria-expanded="${addOpen}" aria-controls="addcand" data-open-label="Add a candidate" data-close-label="Close this form">${addOpen?'Close this form':'Add a candidate'}</button>` : '')}
     <div class="band"><div class="wrap stack">
       ${canEdit() && s.invitesRotatedAt ? '<div class="notice notice--info">Candidate links were replaced during the privacy update. Share the current links below; links issued before the update no longer work.</div>' : ''}
       ${!all.length ? emptyState(
           canEdit() ? 'No candidates on the file yet' : 'No candidates yet',
           canEdit()
-            ? 'Add people as applications come in, then copy each person’s invite link to send them the questionnaire. Later steps wait until someone is on the file.'
+            ? 'Add people as applications come in, then hand each person their invite link from the row menu. Later steps wait until someone is on the file.'
             : 'You will be asked to score applicants here once they apply.',
           canEdit() ? `<button type="button" class="btn btn--primary" data-panel="addcand" aria-expanded="${addOpen}" aria-controls="addcand" data-open-label="Add a candidate" data-close-label="Close this form">${addOpen?'Close this form':'Add a candidate'}</button>` : '')
-      : `<div class="listbar">
+      : `${stageBar(stageCounts(all), f.stage, 'filter')}
+        <div class="listbar">
           ${field('Find a candidate','', `<input class="input" id="cand-filter" data-filter="q" data-nodirty type="search" placeholder="Name, title, or organization" value="${esc(f.q)}">`)}
-          ${field('Stage','', `<select class="input" id="cand-stage" data-filter="stage" data-nodirty>
-            <option value="">All stages</option>
-            ${['applicant','semifinalist','finalist','declined'].map(v => `<option value="${v}" ${f.stage===v?'selected':''}>${v[0].toUpperCase()+v.slice(1)}</option>`).join('')}
-          </select>`)}
           ${field('Response','', `<select class="input" id="cand-resp" data-filter="resp" data-nodirty>
             <option value="">Any response</option>
             <option value="in" ${f.resp==='in'?'selected':''}>Response in</option>
             <option value="out" ${f.resp==='out'?'selected':''}>No response yet</option>
           </select>`)}
-          ${canEdit() ? `<div class="listbar__act"><button type="button" class="btn btn--secondary" data-panel="addcand" aria-expanded="${addOpen}" aria-controls="addcand" data-open-label="Add a candidate" data-close-label="Close this form">${addOpen?'Close this form':'Add a candidate'}</button></div>` : ''}
+          ${f.q || f.stage || f.resp ? `<div class="listbar__act"><button type="button" class="btn btn--secondary" data-act="clear-filters">Clear filters</button></div>` : ''}
         </div>`}
       ${canEdit() ? `<div id="addcand"${addOpen?'':' hidden'}>
         <form id="newcand" class="stack stack--tight">
@@ -3275,10 +3817,10 @@ function vScreen(){
         </form>
       </div>` : ''}
       ${all.length ? `<div class="tablewrap"><table class="candtable">
-        <thead><tr><th scope="col">Candidate</th><th scope="col">Stage</th><th scope="col">Initial survey</th><th scope="col">Actions</th></tr></thead>
+        <caption class="listcount">Showing ${shown.length} of ${all.length} candidate${all.length===1?'':'s'}${f.stage?' · '+esc(STAGE_LABEL[f.stage]||f.stage):''}</caption>
+        <thead><tr><th scope="col">Candidate</th><th scope="col">Stage</th><th scope="col">Response</th><th scope="col">Actions</th></tr></thead>
         <tbody>${rows || `<tr><td colspan="4">No candidate matches these filters. <button type="button" class="btn btn--ghost btn--sm" data-act="clear-filters">Clear filters</button></td></tr>`}</tbody>
-      </table></div>
-      <p class="t-small">${shown.length} of ${all.length} candidate${all.length===1?'':'s'} shown.</p>` : ''}
+      </table></div>` : ''}
       ${actionBar(
         nextBtn('screen') || `<button class="btn btn--primary" data-go="overview">Back to this search</button>`,
         canEdit() ? withTip(`<button type="button" class="btn btn--secondary" data-act="toggle-release">${s.released?'Seal scores':'Release scores'}</button>`, s.released ? TIPS.seal : TIPS.release) : '',
@@ -3399,34 +3941,64 @@ function vPerson(){
         'Share this candidate’s invite link from Screening. Their answers appear here once they submit.') : ''}
     ${!sealed && others.length ? `<div class="spec"><div class="spec__bar">Released panel scores</div><div class="spec__body">${others.map(row => `<div class="t-small"><b>${esc(row.name)}</b> — ${Object.entries(row.scores).map(([id,n])=>esc(id)+': '+esc(n)).join(', ')}</div>`).join('')}</div></div>`:''}`;
 
+  // What this candidate's own record actually holds. Every line is a value
+  // stored on the candidate, so nothing here is inferred from unrelated search
+  // events; there is no per-candidate event log to draw one from.
+  const record = [
+    ['Added to the file', (c.addedAt||'').slice(0,10)],
+    ['Initial questionnaire', c.survey1 ? 'Answered '+String(c.survey1.at||'').slice(0,10) : 'No response on file'],
+    ...(stepOf('send2') ? [['Semifinalist questionnaire', c.survey2 ? 'Answered '+String(c.survey2.at||'').slice(0,10)
+      : c.survey2SentAt ? 'Opened '+String(c.survey2SentAt).slice(0,10)+(c.survey2Deadline?' · due '+c.survey2Deadline:'') : 'Not opened']] : []),
+    ...(c.referenceConsentAt ? [['Reference consent', 'Recorded '+String(c.referenceConsentAt).slice(0,10)]] : []),
+    ['Email', c.email || ''],
+    ['Years in the field', c.yrs ? String(c.yrs) : '']
+  ].filter(([, v]) => v !== '');
+
   return shell(`
-    ${head('Candidate · '+c.stage, c.name, `${esc(c.cur||'')}${c.cur && c.org ? ', ' : ''}${esc(c.org||'')} ${stagePill(c.stage)}`)}
+    ${head('Candidate', c.name,
+      `${esc(c.cur||'')}${c.cur && c.org ? ', ' : ''}${esc(c.org||'')} ${stagePill(c.stage)}`,
+      canEdit() && nextStage
+        ? withTip(`<button type="button" class="btn btn--secondary" data-act="advance" data-stage="${nextStage}">${esc(nextLabel)}</button>`,
+            nextStage==='semifinalist' ? TIPS.advanceSemi : TIPS.advanceFinal)
+        : '')}
     <div class="band"><div class="wrap stack">
-      ${sealed?`<div class="seal">${ico('lock')}<div><div class="empty__t">Other scores are sealed</div><div class="t-small">Enter your scores. You will see the rest of the panel after the account manager releases scores.</div></div></div>`:''}
-      <div class="review2">
-        <div class="review2__col">${evidence}</div>
-        <div class="review2__col">
-          ${(s.criteria||[]).length ? groups : emptyState('No profile adopted yet',
-            'Scoring is against the criteria the committee adopted in the candidate profile.')}
-          ${field('Note to the file','Only you and the search team see this.', `<textarea class="input ed" id="cnote">${esc(note)}</textarea>`)}
+      ${secTabs('person', [
+        { key:'review', label:'Review' },
+        { key:'details', label:'Details' }
+      ])}
+      <div data-tabpanel="person:review" role="tabpanel" id="panel-person-review" aria-labelledby="tab-person-review" tabindex="0" class="stack"${(state.tab?.person||'review')==='review'?'':' hidden'}>
+        ${sealed?`<div class="seal">${ico('lock')}<div><div class="empty__t">Other scores are sealed</div><div class="t-small">Enter your scores. You will see the rest of the panel after the account manager releases scores.</div></div></div>`:''}
+        <div class="colswitch" role="group" aria-label="What to show">
+          <button type="button" data-col="both" aria-pressed="${(state.reviewCol||'both')==='both'}">Both</button>
+          <button type="button" data-col="evidence" aria-pressed="${state.reviewCol==='evidence'}">Evidence</button>
+          <button type="button" data-col="scorecard" aria-pressed="${state.reviewCol==='scorecard'}">Scorecard</button>
         </div>
+        <div class="review2 review2--${esc(state.reviewCol||'both')}">
+          <div class="review2__col review2__col--evidence">${evidence}</div>
+          <div class="review2__col review2__col--scorecard">
+            ${(s.criteria||[]).length ? groups : emptyState('No profile adopted yet',
+              'Scoring is against the criteria the committee adopted in the candidate profile.')}
+            ${field('Note to the file','Only you and the search team see this.', `<textarea class="input ed" id="cnote">${esc(note)}</textarea>`)}
+          </div>
+        </div>
+      </div>
+      <div data-tabpanel="person:details" role="tabpanel" id="panel-person-details" aria-labelledby="tab-person-details" tabindex="0" class="stack"${(state.tab?.person||'review')==='details'?'':' hidden'}>
+        <div class="spec"><div class="spec__bar">Record</div>
+          <div class="spec__body">${record.map(([k, v]) => kv(k, esc(v))).join('')}</div></div>
+        ${canEdit() ? `<div class="spec"><div class="spec__bar">Candidate link and corrections</div><div class="spec__body stack stack--tight">
+          <p class="t-small">Current invite link: <span class="mono">${esc(location.origin+'/apply/'+c.invite)}</span></p>
+          <div class="row">
+            ${withTip(`<button type="button" class="btn btn--secondary btn--sm" data-act="copy-invite" data-cid="${c.id}">Copy invite</button>`, TIPS.copyInvite)}
+            ${withTip(`<button type="button" class="btn btn--secondary btn--sm" data-act="replace-invite" data-cid="${c.id}">Replace candidate link</button>`, TIPS.replaceInvite)}
+            ${['survey1','survey2'].filter(k=>c[k]).map(k=>withTip(`<button type="button" class="btn btn--secondary btn--sm" data-act="reopen-survey" data-cid="${c.id}" data-which="${k}">Reopen ${k==='survey1'?'initial':'semifinalist'} questionnaire</button>`, TIPS.reopenSurvey)).join('')}
+          </div>
+        </div></div>` : ''}
       </div>
       ${actionBar(
         withTip(`<button type="button" class="btn btn--primary" data-act="save-score">Save my scores</button>`, TIPS.saveScores),
-        canEdit() && nextStage
-          ? withTip(`<button type="button" class="btn btn--secondary" data-act="advance" data-stage="${nextStage}">${esc(nextLabel)}</button>`,
-              nextStage==='semifinalist' ? TIPS.advanceSemi : TIPS.advanceFinal)
-          : '',
+        `<button type="button" class="btn btn--secondary" data-go="screen">Back to candidates</button>`,
         scoredCount+' of '+((s.criteria||[]).length)+' criteria scored',
         'Unsaved scores')}
-      ${canEdit() ? `<div class="spec"><div class="spec__bar">Candidate link and corrections</div><div class="spec__body stack stack--tight">
-        <p class="t-small">Current invite link: <span class="mono">${esc(location.origin+'/apply/'+c.invite)}</span></p>
-        <div class="row">
-          ${withTip(`<button type="button" class="btn btn--secondary btn--sm" data-act="copy-invite" data-cid="${c.id}">Copy invite</button>`, TIPS.copyInvite)}
-          ${withTip(`<button type="button" class="btn btn--secondary btn--sm" data-act="replace-invite" data-cid="${c.id}">Replace candidate link</button>`, TIPS.replaceInvite)}
-          ${['survey1','survey2'].filter(k=>c[k]).map(k=>withTip(`<button type="button" class="btn btn--secondary btn--sm" data-act="reopen-survey" data-cid="${c.id}" data-which="${k}">Reopen ${k==='survey1'?'initial':'semifinalist'} questionnaire</button>`, TIPS.reopenSurvey)).join('')}
-        </div>
-      </div></div>` : ''}
     </div></div>`);
 }
 
@@ -3595,10 +4167,11 @@ function vArchives(){
   return shell(`${head('Workspace','Archived searches','Nothing here is deleted. Restoring a search brings back its documents, responses, and history, and issues fresh candidate links.')}
     <div class="band"><div class="wrap stack">
       ${list.length ? list.map(s => `<div class="spec"><div class="spec__body">
-        <div class="waitrow">
-          <div><b>${esc(s.client)}</b> · ${esc(s.position)}<div class="t-small">Archived ${esc(s.archivedAt)}</div></div>
-          ${withTip(`<button type="button" class="btn btn--secondary btn--sm" data-act="restore-search" data-id="${esc(s.id)}">Restore search</button>`,
-            'Put this search back on the book. Candidate links are reissued, so the old ones stay dead.')}
+        <div class="hubrow">
+          <div class="hubrow__id"><b>${esc(s.client)}</b> · ${esc(s.position)}<div class="t-small">Archived ${esc(s.archivedAt)}</div></div>
+          <div class="hubrow__st"></div>
+          <div class="hubrow__act">${withTip(`<button type="button" class="btn btn--secondary btn--sm" data-act="restore-search" data-id="${esc(s.id)}">Restore search</button>`,
+            'Put this search back on the book. Candidate links are reissued, so the old ones stay dead.')}</div>
         </div>
       </div></div>`).join('')
       : emptyState('No archived searches',
@@ -3658,6 +4231,11 @@ function page(){
     case 'new': return vNew();
     case 'packages': return vPackages();
     case 'overview': return vOverview();
+    case 'interviews': return vInterviews();
+    case 'committee': return vCommittee();
+    case 'documents': return vDocuments();
+    case 'activity': return vActivity();
+    case 'process': return vProcess();
     case 'facts': return vFacts();
     case 'team': return vTeam();
     case 'intake':
@@ -3866,10 +4444,32 @@ document.addEventListener('focusout', e => {
   hideTip();
 });
 document.addEventListener('keydown', e => {
+  // A tablist is one stop in the tab order; the arrows move between sections.
+  const tab = e.target.closest?.('[role="tab"][data-tab]');
+  if (tab && ['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){
+    const group = tab.dataset.tab.split(':')[0];
+    const tabs = $$('[data-tab^="'+group+':"]');
+    const at = tabs.indexOf(tab);
+    const to = e.key === 'Home' ? 0
+      : e.key === 'End' ? tabs.length - 1
+      : (at + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length;
+    if (tabs[to]){ e.preventDefault(); setTab(group, tabs[to].dataset.tab.split(':')[1]); }
+    return;
+  }
   if (e.key !== 'Escape') return;
   // Escape dismisses the description without activating anything.
   if (tipOpen){ hideTip(); e.stopPropagation(); return; }
   if (state.navOpen) setNav(false);
+  // Escape also closes an open menu, and returns focus to the control that
+  // opened it, so a keyboard user is not left inside a closed list.
+  const openMenu = $('.menu__btn[aria-expanded="true"]');
+  if (openMenu){
+    const panel = document.getElementById(openMenu.getAttribute('aria-controls'));
+    if (panel) panel.hidden = true;
+    openMenu.setAttribute('aria-expanded','false');
+    state.open[openMenu.dataset.panel] = false;
+    openMenu.focus();
+  }
 });
 window.addEventListener('resize', hideTip);
 
@@ -3962,14 +4562,43 @@ document.addEventListener('change', e => {
   if (e.target.dataset.photo) uploadBrochurePhoto(e.target.dataset.photo, e.target.files?.[0]);
 });
 
+// An open menu closes when the next click lands anywhere else, which is what
+// people expect of a menu and what stops several sitting open down a list.
+function closeMenusExcept(el){
+  for (const btn of $$('.menu__btn[aria-expanded="true"]')){
+    if (el && btn.closest('.menu') === el.closest('.menu')) continue;
+    const panel = document.getElementById(btn.getAttribute('aria-controls'));
+    if (panel) panel.hidden = true;
+    btn.setAttribute('aria-expanded','false');
+    state.open[btn.dataset.panel] = false;
+  }
+}
+
 document.addEventListener('click', async e => {
+  closeMenusExcept(e.target);
   const hit = e.target.closest('.pkgmx tbody td, .pkgmx tfoot td');
   if (hit) {
     const radio = hit.closest('.pkgmx')?.querySelector(`thead th:nth-child(${hit.cellIndex + 1}) input[name="package"]`);
     if (radio) radio.checked = true;
   }
-  const t = e.target.closest('[data-go],[data-open],[data-act],[data-add],[data-del],[data-w],button[data-theme],[data-cand],[data-score],[data-pick],[data-ipick],[data-iadd],[data-idel],[data-iw],[data-phase],[data-panel],[data-mode],[data-artadd],[data-artdel]');
+  const t = e.target.closest('[data-go],[data-open],[data-act],[data-add],[data-del],[data-w],button[data-theme],[data-cand],[data-score],[data-pick],[data-ipick],[data-iadd],[data-idel],[data-iw],[data-phase],[data-panel],[data-mode],[data-artadd],[data-artdel],[data-tab],[data-col]');
   if (!t) return;
+
+  if (t.dataset.tab){
+    const [group, key] = t.dataset.tab.split(':');
+    setTab(group, key);
+    return;
+  }
+  // Which half of the review a narrow screen is showing. Both panels stay in
+  // the document either way, so the scorecard keeps its unsaved entries while
+  // the evidence is being read.
+  if (t.dataset.col){
+    state.reviewCol = t.dataset.col;
+    $$('[data-col]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.col === t.dataset.col)));
+    const wrap = $('.review2');
+    if (wrap) wrap.className = 'review2 review2--' + t.dataset.col;
+    return;
+  }
 
   /* --- structured document editing --------------------------------------- */
   if (t.dataset.artadd || t.dataset.artdel){
@@ -4242,6 +4871,22 @@ document.addEventListener('click', async e => {
     render();
     return;
   }
+  // Selecting a stage on the list. Text and response stay as they are, so the
+  // counts beside every other stage do not move under the user.
+  if (act==='stage-filter'){
+    const f = listFilter();
+    f.stage = f.stage === t.dataset.stage ? '' : t.dataset.stage;
+    render();
+    return;
+  }
+  // A stage count on the overview opens the list showing exactly that stage.
+  // Unrelated filters are cleared, so the number that was clicked is the
+  // number of rows that arrive.
+  if (act==='stage-open'){
+    state.filters[state.search?.id || ''] = { q:'', stage:t.dataset.stage || '', resp:'' };
+    await go('screen');
+    return;
+  }
   if (act==='copy-invite'){
     const c = (state.search?.candidates||[]).find(x => x.id === t.dataset.cid);
     if (!c) return;
@@ -4262,9 +4907,18 @@ document.addEventListener('click', async e => {
     render();
     return;
   }
+  if (act==='clear-home-filter'){
+    state.homeQ = '';
+    render();
+    return;
+  }
   if (act==='pick-all'){
-    const list = state.searches || [];
-    state.picked = pickedIds().length === list.length ? [] : list.map(s => s.id);
+    // Select-all means the rows on screen. Selecting searches the filter is
+    // hiding is how a bulk archive takes files nobody was looking at.
+    const shown = (state.searches || []).filter(matchesHomeQuery);
+    const picked = pickedIds();
+    const already = shown.length > 0 && shown.every(s => picked.includes(s.id));
+    state.picked = already ? [] : shown.map(s => s.id);
     render();
     return;
   }
@@ -4816,6 +5470,7 @@ document.addEventListener('input', e => {
   // unsaved work would ask the user to confirm leaving a page they only
   // searched in.
   if (e.target.dataset.filter){ applyListFilter(e.target); return; }
+  if (e.target.hasAttribute('data-homefilter')){ state.homeQ = e.target.value; render(); return; }
   if (e.target.matches('input, textarea, select') && !e.target.hasAttribute('data-nodirty')){
     state.dirty = true;
     markUnsaved();

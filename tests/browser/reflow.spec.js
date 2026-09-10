@@ -100,7 +100,7 @@ test('an empty search and a step outside the package both land somewhere useful'
 
   // So does a link to a search that is not on the book.
   await page.goto('/#/s/sr-does-not-exist/team');
-  await expect(page.locator('#main h1')).toContainText(/welcome back/i, { timeout: 10000 });
+  await expect(page.locator('#main h1')).toContainText(/your searches/i, { timeout: 10000 });
   await expect(page).toHaveURL(/#\/home/);
 });
 
@@ -125,13 +125,21 @@ test('a committee member is shown their own steps and nothing else', async ({ pa
   await member.waitForLoadState('networkidle');
   await expect(member.locator('#main h1')).toBeVisible({ timeout: 10000 });
 
-  // The rail carries the steps they take part in, not the whole production run.
+  // The rail carries the destinations they have work in, not the whole
+  // workspace. Interviews and Documents are the firm's drafting surfaces, and
+  // Search settings is an editing surface, so none of them are drawn at all.
   const menu = member.getByRole('button', { name: 'Menu', exact: true });
   if (await menu.isVisible().catch(() => false)) await menu.click();
   await expect(member.locator('.rail')).toBeVisible();
-  await expect(member.locator('.rail__link', { hasText: 'Committee input' })).toHaveCount(1);
-  await expect(member.locator('.rail__link', { hasText: 'Ad plan' })).toHaveCount(0);
-  await expect(member.locator('.rail__link', { hasText: 'Search facts' })).toHaveCount(0);
+  await expect(member.locator('.rail__link', { hasText: 'Committee' })).toHaveCount(1);
+  await expect(member.locator('.rail__link', { hasText: 'Interviews' })).toHaveCount(0);
+  await expect(member.locator('.rail__link', { hasText: 'Documents' })).toHaveCount(0);
+  await expect(member.locator('.rail__link', { hasText: 'Search settings' })).toHaveCount(0);
+
+  // Their own questionnaire is still one move away, from the Committee hub.
+  await member.locator('.rail__link', { hasText: 'Committee' }).click();
+  await expect(member.locator('#main h1')).toContainText('Committee');
+  await expect(member.getByRole('button', { name: /open the questionnaire|answer your questionnaire/i }).first()).toBeVisible();
 
   // And a link to a consultant's step lands on the overview, explained.
   await member.goto('/#/s/' + search.id + '/brochure');

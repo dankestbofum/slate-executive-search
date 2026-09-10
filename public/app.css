@@ -79,35 +79,10 @@
 }
 .next h2{font-family:"Newsreader",Georgia,serif; font-size:1.55rem; line-height:1.15; font-weight:500}
 
-.home-row{
-  display:flex; gap:var(--s-3); align-items:center;
-  border-bottom:1px solid var(--line);
-}
-.home-row:last-child{border-bottom:0}
-.home-row--on{background:var(--accent-tint)}
-.home-row__pick{
-  flex:none; display:flex; align-items:center; align-self:stretch;
-  padding:0 0 0 var(--s-4); cursor:pointer;
-}
-.home-row__pick input{width:18px; height:18px; margin:0; accent-color:var(--accent); cursor:pointer}
 .spec__bar-act{margin-left:auto; display:flex; gap:var(--s-2); align-items:center; text-transform:none; letter-spacing:0; font-weight:600}
 /* Client, search number, who runs it, progress. The account-manager column is
    why this is four wide; a stale count here wraps every row onto two lines. */
-.home-row__open{
-  display:grid; grid-template-columns:minmax(0,1fr) auto minmax(90px,auto) minmax(140px,auto);
-  gap:var(--s-4); align-items:center; flex:1; min-width:0; text-align:left;
-  padding:var(--s-4); border:0; background:none; font:inherit; color:inherit; cursor:pointer;
-}
 /* A committee member's row has no manager or progress column. */
-.home-row__open--plain{grid-template-columns:minmax(0,1fr) auto minmax(140px,auto)}
-.home-row:hover{background:var(--sunken)}
-.home-row .btn--danger{flex:none; margin:var(--s-3) var(--s-3) var(--s-3) 0}
-.home-steps{
-  display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
-  gap:var(--s-3) var(--s-5);
-}
-.home-step{display:flex; gap:10px; align-items:baseline; font-size:14px}
-.home-step .mono{color:var(--ink-3); font-size:11.5px}
 /* Service packages: one card per tier, picked when the search is opened. */
 .pkgs{display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:var(--s-3)}
 .pkg{
@@ -190,7 +165,7 @@
 .showtab:hover{background:var(--paper); color:var(--ink)}
 .showtab[aria-selected="true"]{background:var(--paper); color:var(--accent); box-shadow:var(--shadow)}
 .showtab__nm{font-weight:700}
-.showtab__fee{font-family:"IBM Plex Mono",monospace; font-size:11.5px; color:var(--ink-3)}
+.showtab__fee{font-family:"IBM Plex Mono",monospace; font-size:11.5px; color:var(--ink-2)}
 .showtab[aria-selected="true"] .showtab__fee{color:var(--accent)}
 .showcase{display:flex; flex-direction:column; gap:var(--s-4)}
 @media (max-width:720px){
@@ -239,7 +214,6 @@ button.strip__s:hover{background:var(--sunken)}
   gap:var(--s-3); align-items:start; padding:var(--s-3) 0; border-bottom:1px solid var(--line);
 }
 .apply-shell{max-width:760px; margin:0 auto; padding:var(--s-8) var(--s-5)}
-.hero{padding:var(--s-7) 0 var(--s-5); border-bottom:1px solid var(--line)}
 .lede{max-width:62ch; color:var(--ink-2); font-size:1.05rem; line-height:1.6}
 .band{padding:var(--s-6) 0}
 .chip{font-family:"IBM Plex Mono",monospace; font-size:11px; color:var(--accent); background:var(--accent-tint); padding:2px 7px; border-radius:var(--r-1)}
@@ -254,7 +228,6 @@ button.strip__s:hover{background:var(--sunken)}
 .pick button:disabled{opacity:.45; cursor:not-allowed}
 .seal{display:flex; gap:var(--s-3); padding:var(--s-5); border:1px dashed var(--line-strong); border-radius:var(--r-3); background:var(--sunken)}
 .req{color:var(--stop)}
-.whoami__opt{pointer-events:none}
 /* The duplicate .grid2, .sub, .btn--ghost, .btn--sm, .field__hint, .t-small,
    .stack, .mono, .page and textarea rules that used to sit here were second
    copies of rules in styles.css. Because this file loads last, the copies won
@@ -353,7 +326,10 @@ button.strip__s:hover{background:var(--sunken)}
 .rosterchip__i{
   display:flex; align-items:center; justify-content:center;
   width:22px; height:22px; border-radius:999px; background:var(--sunken);
-  font-size:10.5px; font-weight:700; color:var(--ink-3);
+  font-size:10.5px; font-weight:700;
+  /* --ink-3 on the sunken fill reads 4.19:1 at this size; the initials carry
+     the body ink and the fill does the separating. */
+  color:var(--ink-2);
 }
 .rosterchip--mgr .rosterchip__i{background:var(--accent); color:var(--accent-on)}
 
@@ -400,7 +376,7 @@ button.strip__s:hover{background:var(--sunken)}
 .crit-read:last-child{border-bottom:0}
 
 @media (max-width:900px){
-  .home-row,.home-row__open,.crit-row{grid-template-columns:1fr}
+  .crit-row{grid-template-columns:1fr}
   .seat{grid-template-columns:34px minmax(0,1fr)}
   .seat__tags,.seat__acts{grid-column:2; justify-content:flex-start}
   .intake-row,.crit-read{grid-template-columns:1fr}
@@ -437,13 +413,6 @@ button.strip__s:hover{background:var(--sunken)}
 
 /* A single row of work waiting on this person: what it is, which search, and
    the one control that picks it up. */
-.waitrow{
-  display:flex; align-items:center; gap:var(--s-4); flex-wrap:wrap;
-  padding:var(--s-3) 0; border-bottom:1px solid color-mix(in srgb,var(--accent) 22%,transparent);
-}
-.waitrow:last-child{border-bottom:0; padding-bottom:0}
-.waitrow > div{flex:1 1 240px; min-width:0}
-.waitrow b{font-size:15px}
 
 /* --- candidate questionnaire ---------------------------------------------
    The count and the way to reach help both sit near the introduction, where
@@ -462,6 +431,6 @@ button.strip__s:hover{background:var(--sunken)}
 @media (max-width:600px){
   /* The nested header padding narrowed the introduction on a phone. */
   .apply-shell{padding:var(--s-5) var(--s-4)}
-  .apply-shell .hero{padding:var(--s-4) 0 var(--s-3)}
+  .apply-shell .pagehead{padding:var(--s-4) 0 var(--s-3)}
   .apply-shell .wrap{padding:0}
 }

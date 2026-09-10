@@ -44,7 +44,7 @@ test('a search created in this session is on Home straight away', async ({ page 
   // refetched, so the search someone had just opened was missing from it.
   await page.locator('#crumbs button', { hasText: 'Home' }).click();
   await page.waitForURL(/#\/home/);
-  await expect(page.locator('.home-row').filter({ hasText: client })).toHaveCount(1);
+  await expect(page.locator('.hometable tbody tr').filter({ hasText: client })).toHaveCount(1);
 });
 
 test('the heading and the first action are reachable without scrolling past navigation', async ({ page }, testInfo) => {
@@ -161,11 +161,15 @@ test('the screening list offers invitation actions instead of a raw link column'
   await page.goto('/#/s/' + search.id + '/screen');
   await expect(page.locator('.candtable tbody tr')).toHaveCount(1, { timeout: 10000 });
 
-  await expect(page.getByRole('button', { name: 'Copy invite' })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Open questionnaire' })).toHaveAttribute('href', '/apply/' + invite);
-
+  // Handing out a link is an occasional action, so it lives in a labelled menu
+  // on the row rather than beside Review. The row itself still never carries
+  // the raw URL as data.
   const rowText = await page.locator('.candtable tbody').innerText();
   expect(rowText, 'the raw invitation URL is back in the table').not.toContain('/apply/' + invite);
+
+  await page.locator('.candacts').getByRole('button', { name: 'Invite', exact: true }).first().click();
+  await expect(page.getByRole('button', { name: 'Copy invite link' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Open questionnaire' })).toHaveAttribute('href', '/apply/' + invite);
 });
 
 test('a consultant can write a questionnaire without AI or raw JSON', async ({ page }) => {
@@ -238,7 +242,8 @@ test('hover text is available on focus and dismissed with Escape', async ({ page
   await addCandidate(page, search.id, { name: 'Sam Ellis' });
 
   await page.goto('/#/s/' + search.id + '/screen');
-  const copy = page.getByRole('button', { name: 'Copy invite' }).first();
+  await page.locator('.candacts').getByRole('button', { name: 'Invite', exact: true }).first().click();
+  const copy = page.getByRole('button', { name: 'Copy invite link' }).first();
   await expect(copy).toBeVisible({ timeout: 10000 });
 
   await copy.focus();
@@ -249,7 +254,7 @@ test('hover text is available on focus and dismissed with Escape', async ({ page
   await expect(tip).toContainText('questionnaire link');
 
   // The control keeps its own name; the description does not replace it.
-  await expect(copy).toHaveAccessibleName('Copy invite');
+  await expect(copy).toHaveAccessibleName('Copy invite link');
 
   // Escape dismisses the description without activating the control.
   await page.keyboard.press('Escape');

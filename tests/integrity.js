@@ -171,13 +171,16 @@ async function request(url, method = 'GET', body, cookie, revision) {
   const renderer = source.slice(source.indexOf('function vPerson(){'), source.indexOf('function pickApplySurvey('));
   const escapeSource = source.match(/^const esc = .+$/m)[0];
   const html = vm.runInNewContext(escapeSource+'\n'+renderer+';vPerson()', {
-    state:{ search:s, user:login.body.user, users:[], sel:c.id },
+    state:{ search:s, user:login.body.user, users:[], sel:c.id, tab:{}, reviewCol:'both' },
     shell:v=>v, head:()=>'', field:()=>'', canEdit:()=>false, ico:()=>'', surveyRead:()=>'',
     // The scoring surface is assembled from the shared primitives; stub them so
     // the assertion stays about escaping, not about layout.
     KIND:{ skill:{ plural:'Essential skills' } },
     sectionHead:()=>'', ratingGroup:(name, buttons)=>buttons, emptyState:()=>'',
     actionBar:()=>'', withTip:h=>h, TIPS:{}, stagePill:()=>'', pill:(k,label)=>String(label),
+    // The candidate screen now has sections and a record list beside the
+    // scoring; these are the same kind of layout stub as the ones above.
+    secTabs:()=>'', kv:()=>'', stepOf:()=>null,
     location:{ origin:'http://test' }
   });
   check('legacy score markup is escaped by the real renderer', () => { assert.ok(!html.includes(marker)); assert.ok(html.includes('&lt;b')); });

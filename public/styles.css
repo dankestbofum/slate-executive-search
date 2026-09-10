@@ -91,7 +91,7 @@ a{color:var(--accent-deep); text-underline-offset:.18em; text-decoration-thickne
 }
 
 /* ============================================================ shell */
-.shell{display:grid; grid-template-columns:250px minmax(0,1fr); min-height:100vh}
+.shell{display:grid; grid-template-columns:var(--rail-w,250px) minmax(0,1fr); min-height:100vh}
 .skip{
   position:absolute; left:var(--s-3); top:var(--s-3); z-index:120;
   transform:translateY(-250%);
@@ -289,10 +289,6 @@ textarea.input{min-height:104px; line-height:1.55; resize:vertical; font-size:14
 .reviewbar .t-small{flex:1 1 240px; margin:0}
 @media print{ .reviewbar{display:none} }
 
-.tabs{display:flex; gap:var(--s-5); border-bottom:1px solid var(--line); overflow-x:auto}
-.tab{font:inherit; font-size:14px; font-weight:600; background:none; border:0; cursor:pointer; padding:0 0 9px; color:var(--ink-3); border-bottom:2px solid transparent; margin-bottom:-1px; white-space:nowrap}
-.tab[aria-selected="true"]{color:var(--ink); border-bottom-color:var(--accent)}
-.tab:hover{color:var(--ink)}
 
 .crumbs{display:flex; align-items:center; gap:7px; font-size:12.5px; color:var(--ink-3); flex-wrap:wrap}
 .crumbs button{font:inherit; font-size:12.5px; background:none; border:0; padding:0; cursor:pointer; color:var(--ink-3)}
@@ -338,25 +334,6 @@ details.toggle[open] summary::before{transform:rotate(90deg) translateX(-1px)}
    ============================================================ */
 
 /* the who-am-I control: the multi-user model made visible */
-.whoami{border:1px solid var(--line); border-radius:var(--r-3); background:var(--paper); overflow:hidden}
-.whoami__hd{padding:6px var(--s-3) 5px; border-bottom:1px solid var(--line); background:var(--sunken)}
-.whoami__list{display:flex; flex-direction:column; padding:var(--s-1)}
-.whoami__opt{
-  display:flex; gap:9px; align-items:flex-start; text-align:left; width:100%;
-  font:inherit; font-size:13px; line-height:1.4; background:none; border:0; cursor:pointer;
-  padding:6px 7px; border-radius:var(--r-2); color:var(--ink-2);
-}
-.whoami__opt:hover{background:var(--sunken)}
-.whoami__opt--current{background:var(--accent-tint); color:var(--accent)}
-.whoami__init{
-  width:24px; height:24px; flex:none; border-radius:50%; display:grid; place-items:center;
-  font-family:"IBM Plex Mono",monospace; font-size:10.5px; font-weight:500;
-  border:1px solid var(--line-strong); background:var(--paper); color:var(--ink-3);
-}
-.whoami__opt--current .whoami__init{background:var(--accent); border-color:var(--accent); color:var(--accent-on)}
-.whoami__nm{font-weight:600; display:block; color:var(--ink)}
-.whoami__opt--current .whoami__nm{color:var(--accent)}
-.whoami__rl{font-size:11.5px; color:var(--ink-2); display:block}
 
 /* summary tiles */
 .tiles{display:grid; grid-template-columns:repeat(auto-fit,minmax(168px,1fr)); gap:var(--s-3)}
@@ -392,16 +369,6 @@ details.toggle[open] summary::before{transform:rotate(90deg) translateX(-1px)}
 .bar__f--wait{background:var(--wait)}
 .bar__f--idle{background:var(--line-strong)}
 .bar__n{font-family:"IBM Plex Mono",monospace; font-size:12px; font-variant-numeric:tabular-nums; color:var(--ink); min-width:2.4em; text-align:right}
-
-/* trace: shows where a criterion travels downstream */
-.trace{display:grid; grid-template-columns:repeat(auto-fit,minmax(122px,1fr)); gap:1px; background:var(--line); border:1px solid var(--line); border-radius:var(--r-3); overflow:hidden}
-.trace__c{background:var(--paper); padding:var(--s-3) var(--s-4); display:flex; flex-direction:column; gap:3px}
-.trace__s{font-family:"IBM Plex Mono",monospace; font-size:10.5px; color:var(--ink-3)}
-.trace__l{font-size:13px; font-weight:600; line-height:1.35}
-.trace__m{font-size:11.5px; color:var(--ink-3); line-height:1.35}
-.trace__c--on{background:var(--accent-tint)}
-.trace__c--on .trace__l{color:var(--accent)}
-.trace__c--on .trace__s{color:var(--accent)}
 
 /* segmented rating control — the BAR / screening scale */
 .rate{display:inline-flex; border:1px solid var(--line-strong); border-radius:var(--r-2); overflow:hidden; background:var(--paper)}
@@ -687,7 +654,7 @@ details.toggle[open] summary::before{transform:rotate(90deg) translateX(-1px)}
   @page{margin:.6in}
   html[data-print] .rail,
   html[data-print] .masthead,
-  html[data-print] .hero,
+  html[data-print] .pagehead,
   html[data-print] .lookup,
   html[data-print] .toast,
   html[data-print] textarea,
@@ -769,7 +736,7 @@ details.toggle[open] summary::before{transform:rotate(90deg) translateX(-1px)}
 }
 
 /* Keep secondary labels readable on the workspace's tinted panels. */
-.whoami__hd .t-label, .tile--hi .tile__k, .tile--hi .tile__n{color:var(--ink-2)}
+.tile--hi .tile__k, .tile--hi .tile__n{color:var(--ink-2)}
 
 /* ============================================================================
    DEP-13 — shared shell controls, hover text, and form primitives.
@@ -870,14 +837,13 @@ details.toggle[open] summary::before{transform:rotate(90deg) translateX(-1px)}
    Package fees are fixed where they are defined, in app.css, because that file
    loads last and would otherwise win here. */
 .next .t-label,
-.tile--act .tile__n,
-.home-row--on .t-small{color:var(--ink-2)}
+.tile--act .tile__n{color:var(--ink-2)}
 
 /* --- candidate list -------------------------------------------------------
    The screening table used to carry a raw invitation URL per row, which made
    it roughly 1,350px wide inside a 326px phone viewport and pushed the
    advancement controls out of the first screen (D04). */
-.listbar{display:grid; grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr) auto; gap:var(--s-3) var(--s-4); align-items:end}
+.listbar{display:grid; grid-template-columns:minmax(0,2fr) minmax(0,1fr) auto; gap:var(--s-3) var(--s-4); align-items:end; max-width:760px}
 .listbar__act{display:flex; align-items:flex-end}
 .listbar__act .btn{white-space:nowrap}
 @media (max-width:900px){
@@ -975,3 +941,220 @@ details.toggle[open] summary::before{transform:rotate(90deg) translateX(-1px)}
 
 .profgroup{scroll-margin-top:96px}
 .profgroup + .profgroup{margin-top:var(--s-5)}
+
+/* ============================================================================
+   RECRUITING REDESIGN — workspace type, page header, rail destinations, hubs.
+
+   The workspace and the documents it produces are two different type systems.
+   Everything below is workspace chrome: Public Sans, compact, tabular. The
+   serif face stays where it means something — the Slate wordmark, and the
+   brochures, advertisements and packets Slate generates, which keep .doc__*
+   and .pack__* untouched.
+   ========================================================================= */
+
+:root{
+  /* Workspace type scale. Values are the sizes the redesign specifies, held
+     as tokens so a screen never invents a heading size of its own. */
+  --ws-title:30px;      /* page title, desktop */
+  --ws-title-sm:25px;   /* page title, small screens */
+  --ws-section:19px;    /* section heading */
+  --ws-body:15.5px;     /* body copy and inputs */
+  --ws-label:13.5px;    /* labels and table content */
+  --ws-meta:12px;       /* supplemental metadata only */
+  --rail-w:240px;
+}
+
+/* --- the page header ----------------------------------------------------- */
+.pagehead{padding:var(--s-5) 0 var(--s-4); border-bottom:1px solid var(--line)}
+.pagehead__row{display:flex; align-items:flex-start; gap:var(--s-4) var(--s-5); flex-wrap:wrap}
+.pagehead__id{min-width:0; flex:1 1 320px}
+.pagehead__title{
+  font-family:"Public Sans","Segoe UI",system-ui,-apple-system,sans-serif;
+  font-size:var(--ws-title); line-height:1.16; letter-spacing:-.015em; font-weight:600;
+  color:var(--ink); margin-top:3px;
+}
+/* One dominant action per header. Anything else in here is secondary by
+   construction, which is what stopped four blue buttons competing (D06). */
+.pagehead__act{display:flex; flex-wrap:wrap; gap:var(--s-2); align-items:center; flex:0 1 auto; min-width:0}
+.pagehead .eyebrow{font-size:11px; letter-spacing:.13em}
+.pagehead .lede{margin-top:var(--s-3); font-size:var(--ws-body); max-width:74ch}
+@media (max-width:900px){
+  .pagehead{padding:var(--s-4) 0 var(--s-3)}
+  .pagehead__title{font-size:var(--ws-title-sm)}
+  /* The action area takes its own row rather than competing with the title
+     for a width neither of them has. */
+  .pagehead__act{flex:1 1 100%}
+  .pagehead__act .btn{flex:1 1 auto}
+}
+@media (max-width:560px){
+  /* 24px is the low end of the workspace padding scale; below this the
+     content column is narrower than the controls standing in it. */
+  .wrap{padding:0 var(--s-5)}
+}
+
+/* --- rail destinations --------------------------------------------------- */
+.rail__group--dests{gap:2px; border-top:1px solid var(--line); padding-top:var(--s-3)}
+.rail__here{padding:0 8px var(--s-2); min-width:0}
+.rail__here-nm{display:block; font-size:13.5px; font-weight:700; color:var(--ink); overflow-wrap:anywhere}
+.rail__here-sub{display:block; font-size:var(--ws-meta); color:var(--ink-3); overflow-wrap:anywhere}
+.rail__link--dest{gap:9px; min-height:34px; font-size:var(--ws-label)}
+.rail__ico{display:inline-flex; flex:none; color:var(--ink-3)}
+.rail__link--dest[aria-current="page"] .rail__ico{color:var(--accent)}
+/* The count sits on the selected row’s tint, where the muted ink no longer
+   clears 4.5:1; it takes the accent the rest of the row is drawn in. */
+.rail__link[aria-current="page"] .rail__tail{color:var(--accent)}
+.rail__label--dest{
+  flex:1; min-width:0; text-align:left;
+  font-size:var(--ws-label); font-weight:600; letter-spacing:0; text-transform:none; color:inherit;
+}
+.rail__link--sub{padding-left:var(--s-5); font-size:13px}
+.rail__more[aria-expanded="true"]{color:var(--ink)}
+
+/* --- the account chip in the rail footer --------------------------------- */
+.acct{display:flex; align-items:center; gap:9px; min-width:0}
+.acct__init{
+  flex:none; width:28px; height:28px; border-radius:50%;
+  display:grid; place-items:center;
+  background:var(--accent); color:var(--accent-on);
+  font-size:11.5px; font-weight:700; letter-spacing:.02em;
+}
+.acct__id{min-width:0}
+.acct__nm{display:block; font-size:13px; font-weight:600; color:var(--ink); overflow-wrap:anywhere}
+.acct__rl{display:block; font-size:var(--ws-meta); color:var(--ink-3); overflow-wrap:anywhere}
+
+/* --- a menu of infrequent actions ---------------------------------------- */
+.menu{position:relative; display:inline-flex}
+.menu__btn{gap:5px}
+.menu__list{
+  position:absolute; top:calc(100% + 6px); right:0; z-index:30;
+  min-width:220px; display:flex; flex-direction:column; gap:2px; padding:var(--s-2);
+  background:var(--paper); border:1px solid var(--line-strong);
+  border-radius:var(--r-2); box-shadow:var(--shadow);
+}
+.menu__list[hidden]{display:none}
+.menu__list .btn{justify-content:flex-start; width:100%; min-height:36px; font-size:13.5px}
+
+/* --- hub rows ------------------------------------------------------------ */
+.hubrow{
+  display:grid; grid-template-columns:minmax(0,1fr) auto auto;
+  gap:var(--s-3) var(--s-4); align-items:center;
+  padding:var(--s-3) 0; border-bottom:1px solid var(--line);
+}
+.hubrow:last-child{border-bottom:0}
+.hubrow__id b{font-size:var(--ws-label); font-weight:700}
+.hubrow__act{display:flex; gap:var(--s-2); flex-wrap:wrap; justify-content:flex-end}
+@media (max-width:640px){
+  .hubrow{grid-template-columns:minmax(0,1fr); align-items:flex-start}
+  .hubrow__act{justify-content:flex-start}
+}
+
+/* --- workspace type, applied ---------------------------------------------
+   Scoped to .page so the questionnaire, the gate and generated documents are
+   unaffected; .doc and .pack keep the sizes they set for print. */
+.page .sechead__t{font-size:var(--ws-section); font-weight:600}
+.page .t-body{font-size:var(--ws-body)}
+.page .input{font-size:var(--ws-body)}
+.page .field__label{font-size:var(--ws-label)}
+.page .lede{font-size:var(--ws-body)}
+
+/* --- the candidate pipeline ---------------------------------------------- */
+/* Four stages and a total, as counts you can act on. On the overview each one
+   opens the list; on the list each one selects. Same component, so the number
+   a consultant clicked is the number of rows they land on. */
+.stagebar{display:flex; flex-wrap:wrap; gap:var(--s-2)}
+.stagebar__i{
+  display:flex; flex-direction:column; align-items:flex-start; gap:1px;
+  min-width:96px; min-height:44px; padding:6px 12px; cursor:pointer;
+  border:1px solid var(--line); border-radius:var(--r-2);
+  background:var(--paper); color:var(--ink); font:inherit; text-align:left;
+}
+.stagebar__i:hover{background:var(--sunken)}
+.stagebar__i[disabled]{cursor:default; opacity:.75}
+.stagebar__i[disabled]:hover{background:var(--paper)}
+.stagebar__n{font-size:20px; font-weight:700; line-height:1.1; font-variant-numeric:tabular-nums}
+.stagebar__l{font-size:var(--ws-meta); font-weight:600; color:var(--ink-2)}
+.stagebar__i--on{border-color:var(--accent); background:var(--accent-tint)}
+.stagebar__i--on .stagebar__n,.stagebar__i--on .stagebar__l{color:var(--accent)}
+/* Colour supplements the label; it never carries the meaning alone. */
+.stagebar__i--semifinalist{border-left:3px solid var(--wait)}
+.stagebar__i--finalist{border-left:3px solid var(--ok)}
+.stagebar__i--declined{border-left:3px solid var(--line-strong)}
+.stagebar__i--applicant{border-left:3px solid var(--accent)}
+
+/* The candidate's own name is the way in, so a long name does not push Review
+   off the row on a narrow table. */
+.candlink{
+  font:inherit; font-size:var(--ws-label); font-weight:700; color:var(--ink);
+  background:none; border:0; padding:0; text-align:left; cursor:pointer;
+  text-decoration:underline; text-decoration-color:var(--line-strong);
+  text-underline-offset:.18em; overflow-wrap:anywhere;
+}
+.candlink:hover{color:var(--accent); text-decoration-color:currentColor}
+.listcount{
+  caption-side:top; text-align:left; padding:var(--s-3) var(--s-4) 0;
+  font-size:var(--ws-label); color:var(--ink-2);
+}
+/* Row menus open over the rows below them rather than stretching the row. */
+.candacts{position:relative}
+
+/* Declined is an outcome, not a rung on the ladder. It sits after a gap so the
+   pipeline reads as three stages with a separate tally beside it. */
+.stagebar__i--declined{margin-left:var(--s-3)}
+@media (max-width:560px){ .stagebar__i--declined{margin-left:0} }
+
+/* The screen change moves focus to the page heading so it is announced. A
+   heading is not a control and is never reached by tabbing, so the ring that
+   belongs on controls only reads as damage here. Controls keep theirs. */
+#main h1[tabindex="-1"]:focus-visible{outline:none; box-shadow:none}
+
+/* A sticky action bar must not be the thing the browser scrolls a focused row
+   underneath. Anything that takes focus inside the band clears its height. */
+.band .candtable tr,
+.band .hubrow,
+.band .scorerow,
+.band .field{scroll-margin-bottom:96px}
+.band:has(.actionbar){padding-bottom:var(--s-7)}
+
+/* --- the portfolio table -------------------------------------------------- */
+.hometable td{font-size:var(--ws-label)}
+.hometable .pickcell{width:38px}
+.hometable .pickcell input{width:18px; height:18px; margin:0; accent-color:var(--accent); cursor:pointer}
+.hometable tr.is-picked{background:var(--accent-tint)}
+.hometable th[scope="row"] .candmeta{display:block}
+.hometable .candmeta{display:block; font-variant-numeric:normal}
+/* A visible label is better than a hidden one wherever there is room; these
+   two columns are a checkbox and a button, which have their own names. */
+.u-sr{
+  position:absolute; width:1px; height:1px; overflow:hidden;
+  clip:rect(0,0,0,0); white-space:nowrap;
+}
+
+/* --- sections within a screen -------------------------------------------- */
+.sectabs{display:flex; gap:var(--s-2); border-bottom:1px solid var(--line); padding-bottom:0}
+.sectab{
+  font:inherit; font-size:var(--ws-label); font-weight:600; cursor:pointer;
+  min-height:40px; padding:0 var(--s-3); background:none; border:0;
+  border-bottom:2px solid transparent; margin-bottom:-1px; color:var(--ink-3);
+}
+.sectab:hover{color:var(--ink)}
+.sectab[aria-selected="true"]{color:var(--accent); border-bottom-color:var(--accent)}
+/* The panels are layout containers, and a class that sets display beats the
+   bare [hidden] rule. Say it at the panel's own specificity instead. */
+[role="tabpanel"][hidden]{display:none}
+[role="tabpanel"]:focus-visible{outline:2px solid var(--focus); outline-offset:4px}
+
+/* Evidence beside the scorecard is the desktop arrangement. Below that the
+   two stack, and the switch decides which one is in front — both stay in the
+   document, so an unsaved score survives reading the answers. */
+.colswitch{display:none; gap:2px; padding:2px; background:var(--sunken); border:1px solid var(--line); border-radius:var(--r-2)}
+.colswitch button{
+  flex:1; font:inherit; font-size:13px; font-weight:600; cursor:pointer;
+  min-height:36px; padding:0 var(--s-2); border:0; border-radius:var(--r-1);
+  background:transparent; color:var(--ink-2);
+}
+.colswitch button[aria-pressed="true"]{background:var(--paper); color:var(--ink); box-shadow:var(--shadow)}
+@media (max-width:1000px){
+  .colswitch{display:flex}
+  .review2--evidence .review2__col--scorecard,
+  .review2--scorecard .review2__col--evidence{display:none}
+}
