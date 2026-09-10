@@ -120,7 +120,9 @@
 .pkg:has(input:focus-visible){outline:2px solid var(--accent); outline-offset:2px}
 .pkg__hd{display:flex; justify-content:space-between; align-items:baseline; gap:var(--s-3)}
 .pkg__nm{font-weight:700; color:var(--ink)}
-.pkg__fee{font-family:"IBM Plex Mono",monospace; font-size:11.5px; color:var(--ink-3); white-space:nowrap}
+/* --ink-2, not --ink-3: a selected card sits on --accent-tint, where the
+   lighter value measures 4.32:1 (D07). */
+.pkg__fee{font-family:"IBM Plex Mono",monospace; font-size:11.5px; color:var(--ink-2); white-space:nowrap}
 .pkg__svc{margin:4px 0 0; padding:0; list-style:none; display:flex; flex-direction:column; gap:2px; font-size:13px; color:var(--ink-2)}
 .pkg__svc li::before{content:"\2713\00a0"; color:var(--ok)}
 .svcs{display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:6px var(--s-5); margin:0; padding:0; list-style:none; font-size:14px}
@@ -148,7 +150,7 @@
 }
 .pkgmx__pick input{position:absolute; opacity:0; inset:0; margin:0; cursor:pointer}
 .pkgmx__nm{font-size:15px; font-weight:700; letter-spacing:0; text-transform:none; color:var(--ink)}
-.pkgmx__fee{font-family:"IBM Plex Mono",monospace; font-size:11.5px; font-weight:500; letter-spacing:0; text-transform:none; color:var(--ink-3); white-space:nowrap}
+.pkgmx__fee{font-family:"IBM Plex Mono",monospace; font-size:11.5px; font-weight:500; letter-spacing:0; text-transform:none; color:var(--ink-2); white-space:nowrap}
 .pkgmx__cell{text-align:center}
 .pkgmx__yes{font-weight:700; color:var(--ok)}
 .pkgmx__no{color:var(--ink-3)}
@@ -442,3 +444,24 @@ button.strip__s:hover{background:var(--sunken)}
 .waitrow:last-child{border-bottom:0; padding-bottom:0}
 .waitrow > div{flex:1 1 240px; min-width:0}
 .waitrow b{font-size:15px}
+
+/* --- candidate questionnaire ---------------------------------------------
+   The count and the way to reach help both sit near the introduction, where
+   a candidate looks before starting rather than after finishing (D12). */
+.applymeta{
+  display:flex; flex-direction:column; gap:var(--s-2);
+  padding:var(--s-4); margin-top:var(--s-4);
+  border:1px solid var(--line); border-radius:var(--r-3); background:var(--chrome);
+}
+.applybar{display:flex; align-items:center; gap:var(--s-4); flex-wrap:wrap}
+.applybar .t-small{color:var(--ink-3)}
+.apply-help{
+  padding:var(--s-4); border:1px solid var(--line); border-radius:var(--r-3);
+  background:var(--chrome); scroll-margin-top:var(--s-4);
+}
+@media (max-width:600px){
+  /* The nested header padding narrowed the introduction on a phone. */
+  .apply-shell{padding:var(--s-5) var(--s-4)}
+  .apply-shell .hero{padding:var(--s-4) 0 var(--s-3)}
+  .apply-shell .wrap{padding:0}
+}

@@ -32,6 +32,15 @@ async function scan(page) {
   return results.violations;
 }
 
+// Theme controls live in the rail, which is a drawer below the breakpoint.
+async function setTheme(page, theme) {
+  const menu = page.getByRole('button', { name: 'Menu', exact: true });
+  const inDrawer = await menu.isVisible().catch(() => false);
+  if (inDrawer) await menu.click();
+  await page.locator('button[data-theme="' + theme + '"]').click();
+  if (inDrawer) await page.keyboard.press('Escape');
+}
+
 test('the landing page has no WCAG 2.1 AA violations', async ({ page }) => {
   await page.goto('/');
   await page.waitForLoadState('networkidle');
@@ -86,30 +95,100 @@ test('the page still works at 200% zoom without horizontal scrolling', async ({ 
   expect(overflows, 'the page scrolls sideways at a narrow width, which breaks reflow at 200% zoom').toBe(false);
 });
 
-test('the document declares a language and has one main heading', async ({ page }) => {
+test('the document declares a language and names the screen in one heading', async ({ page }) => {
   await page.goto('/');
   await page.waitForLoadState('networkidle');
 
   const lang = await page.evaluate(() => document.documentElement.lang);
   expect(lang, 'the document has no lang attribute, so a screen reader cannot pick a voice').toBeTruthy();
 
-  const headings = await page.locator('h1').count();
-  expect(headings, 'the page has no h1').toBeGreaterThan(0);
+  await page.getByRole('button', { name: 'Start', exact: true }).first().click();
+  await expect(page.getByRole('button', { name: /open a new search/i }).first()).toBeVisible();
+
+  // One h1, and it says where you are. Counting headings alone passed even
+  // when every screen was called the same thing.
+  await expect(page.locator('h1')).toHaveCount(1);
+  await expect(page.locator('h1')).toContainText(/welcome back/i);
+  await expect(page).toHaveTitle(/home/i);
+
+  await page.getByRole('button', { name: /open a new search/i }).first().click();
+  await expect(page.locator('h1')).toHaveCount(1);
+  await expect(page.locator('h1')).toContainText(/who is hiring/i);
+  await expect(page).toHaveTitle(/new search/i);
 });
 
-test('a print stylesheet exists for the materials that get printed', async ({ page }) => {
+test('printing a document drops the editing chrome and keeps the document', async ({ page }) => {
+  // A rule detector passed whether or not the rules did anything. This checks
+  // that under print the packet is what remains on the page.
   await page.goto('/');
   await page.waitForLoadState('networkidle');
+  await page.getByRole('button', { name: 'Start', exact: true }).first().click();
+  await expect(page.getByRole('button', { name: /open a new search/i }).first()).toBeVisible();
 
-  const hasPrintRules = await page.evaluate(() => {
-    for (const sheet of document.styleSheets) {
-      let rules;
-      try { rules = sheet.cssRules; } catch { continue; }
-      for (const rule of rules) {
-        if (rule.type === CSSRule.MEDIA_RULE && String(rule.conditionText || '').includes('print')) return true;
-      }
-    }
-    return false;
+  const search = await (await page.request.post('/api/searches', {
+    data: { client: 'Printed City', position: 'City Manager', package: 'executive' }
+  })).json();
+  const revision = String((await (await page.request.get('/api/searches/' + search.id)).json()).revision);
+  await page.request.put('/api/searches/' + search.id + '/artifact/plan', {
+    headers: { 'if-match': revision },
+    data: { body: { rows: [{ outlet: 'ICMA', audience: 'Members', format: 'Listing', when: 'Week 1', cost: '$400', who: 'Slate', status: 'Planned' }] } }
   });
-  expect(hasPrintRules, 'no @media print rules; brochures and panel materials print as screen layout').toBe(true);
+
+  await page.goto('/#/s/' + search.id + '/plan');
+  await expect(page.locator('.editor')).toBeVisible({ timeout: 10000 });
+
+  await page.emulateMedia({ media: 'print' });
+  await page.evaluate(() => { document.documentElement.dataset.print = 'brochure'; });
+
+  const hidden = sel => page.evaluate(s => {
+    const el = document.querySelector(s);
+    return !el || getComputedStyle(el).display === 'none';
+  }, sel);
+
+  expect(await hidden('.editor'), 'the editing fields print with the document').toBe(true);
+  expect(await hidden('.actionbar'), 'the save bar prints with the document').toBe(true);
+  expect(await hidden('.docbar'), 'the Edit/Preview control prints with the document').toBe(true);
+  expect(await hidden('#main h1'), 'the document heading is missing from the printed page').toBe(false);
+
+  await page.emulateMedia({ media: 'screen' });
+});
+
+test('a populated workspace screen has no WCAG 2.1 AA violations, in either theme', async ({ page }) => {
+  await page.goto('/');
+  await page.waitForLoadState('networkidle');
+  await page.getByRole('button', { name: 'Start', exact: true }).first().click();
+  await expect(page.getByRole('button', { name: /open a new search/i }).first()).toBeVisible();
+
+  const search = await (await page.request.post('/api/searches', {
+    data: { client: 'Scanned City', position: 'City Manager', package: 'executive' }
+  })).json();
+  const revision = async () => String((await (await page.request.get('/api/searches/' + search.id)).json()).revision);
+  await page.request.put('/api/searches/' + search.id + '/profile', {
+    headers: { 'if-match': await revision() },
+    data: { criteria: [
+      { id: 'S1', kind: 'skill', label: 'Financial management', weight: 5, note: 'Closing a structural deficit.' },
+      { id: 'S2', kind: 'skill', label: 'Council relations', weight: 4, note: '' },
+      { id: 'S3', kind: 'skill', label: 'Staff leadership', weight: 3, note: '' }
+    ] }
+  });
+  for (const name of ['Ada Baker', 'Bo Chen']) {
+    await page.request.post('/api/searches/' + search.id + '/candidates', {
+      headers: { 'if-match': await revision() }, data: { name, cur: 'Deputy City Manager', org: 'City of Elsewhere' }
+    });
+  }
+
+  // The screens the audit found problems on were populated ones. The scan
+  // covers the list, the scoring surface and the profile, and repeats after a
+  // theme change, which is when the invalid ARIA appeared.
+  for (const view of ['screen', 'profile', 'new']) {
+    const path = view === 'new' ? '/#/new' : '/#/s/' + search.id + '/' + view;
+    await page.goto(path);
+    await expect(page.locator('#main h1')).toBeVisible({ timeout: 10000 });
+
+    for (const theme of ['light', 'dark']) {
+      await setTheme(page, theme);
+      const violations = await scan(page);
+      expect(violations, view + ' in ' + theme + ':\n    ' + describeViolations(violations)).toEqual([]);
+    }
+  }
 });

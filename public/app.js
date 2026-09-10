@@ -551,6 +551,8 @@ function stepFooter(view, extra=''){
   </div>`;
 }
 
+// Kept for surfaces that still present "what comes next" as a card rather than
+// an action bar. Document screens use the shared bar instead (D06).
 function stepNextCard(view){
   const n = nextOf(view);
   if (!n) return '';
@@ -1984,16 +1986,24 @@ function intakeGroup(kind){
   const rows = d.items.map((it,i)=>({it,i})).filter(x => x.it.kind===kind);
   const labels = new Set(rows.map(x => String(x.it.label||'').trim().toLowerCase()).filter(Boolean));
   const ask = INTAKE_ASK[kind];
-  return `<div class="spec"><div class="spec__bar">${esc(ask.t)}</div>
+  const named = rows.filter(x => String(x.it.label||'').trim()).length;
+  const suggKey = 'isugg-'+kind;
+  const suggOpen = state.open[suggKey] === undefined ? named === 0 : Boolean(state.open[suggKey]);
+  return `<section id="intake-sec-${kind}" class="spec profgroup"><div class="spec__bar">${esc(ask.t)} · ${named} named</div>
     <div class="spec__body stack">
       <p class="t-small">${esc(ask.hint)} Add as many as you want. Rate each 1 to 5 for how much it matters to you.</p>
-      <div class="pick">${(SUGGEST[kind]||[]).map(label => {
-        const on = labels.has(label.toLowerCase());
-        return `<button type="button" data-ipick="${kind}" data-label="${esc(label)}" aria-pressed="${on}">${esc(label)}</button>`;
-      }).join('')}</div>
-      ${rows.map(x => intakeRow(x.it, x.i)).join('') || '<div class="t-small">Nothing here yet. Tap a suggestion or write your own.</div>'}
-      <div class="row"><button class="btn btn--secondary btn--sm" data-iadd="${kind}">Write my own</button></div>
-    </div></div>`;
+      ${rows.map(x => intakeRow(x.it, x.i)).join('') || '<p class="t-small">Nothing here yet. Write your own, or open the suggestions.</p>'}
+      <div class="row">
+        <button type="button" class="btn btn--secondary btn--sm" data-iadd="${kind}">Write my own</button>
+        <button type="button" class="btn btn--ghost btn--sm" data-panel="${suggKey}" aria-expanded="${suggOpen}" aria-controls="ipick-${kind}" data-open-label="Suggestions" data-close-label="Hide suggestions">${suggOpen?'Hide suggestions':'Suggestions'}</button>
+      </div>
+      <div id="ipick-${kind}"${suggOpen?'':' hidden'}>
+        <div class="pick">${(SUGGEST[kind]||[]).map(label => {
+          const on = labels.has(label.toLowerCase());
+          return `<button type="button" data-ipick="${kind}" data-label="${esc(label)}" aria-pressed="${on}">${esc(label)}</button>`;
+        }).join('')}</div>
+      </div>
+    </div></section>`;
 }
 
 function vIntakeAnswer(){
@@ -2006,9 +2016,7 @@ function vIntakeAnswer(){
   const count = d.items.filter(i => String(i.label||'').trim()).length;
   return shell(`
     ${head('Step '+stepNo('intake'), 'What are you looking for?',
-      'Answer for yourself. Nobody on the committee sees your answers, or anyone else’s, until the account manager closes the window. Then everything is read together.',
-      open ? `<button class="btn btn--primary" data-act="submit-intake">${mine?.submitted ? 'Update my answers' : 'Submit my answers'}</button>
-       <button class="btn btn--secondary" data-act="save-intake">Save and finish later</button>` : '')}
+      'Answer for yourself. Nobody on the committee sees your answers, or anyone else’s, until the account manager closes the window. Then everything is read together.')}
     <div class="band"><div class="wrap stack">
       ${!open ? `<div class="notice notice--${closed?'ok':'info'}"><div>
         <div class="notice__t">${closed ? 'Intake is closed' : 'Intake has not opened yet'}</div>
@@ -2023,19 +2031,28 @@ function vIntakeAnswer(){
       ${intake.dueBy ? `<div class="t-small"><b>Due:</b> ${esc(intake.dueBy)}</div>` : ''}
       ${intake.prompt ? `<div class="spec"><div class="spec__bar">From the account manager</div><div class="spec__body"><p>${esc(intake.prompt)}</p></div></div>` : ''}
       ${open ? `
+        <nav class="secnav" aria-label="Questionnaire sections">
+          <span class="secnav__t">Sections</span>
+          ${Object.keys(INTAKE_ASK).map(k => {
+            const named = d.items.filter(i => i.kind===k && String(i.label||'').trim()).length;
+            return `<button type="button" class="${named?'is-done':''}" data-act="jump" data-to="intake-sec-${k}">${esc(KIND[k].plural)} <span class="mono">${named}</span></button>`;
+          }).join('')}
+          <button type="button" data-act="jump" data-to="intake-sec-words">In your own words</button>
+        </nav>
         ${Object.keys(INTAKE_ASK).map(intakeGroup).join('')}
-        <div class="spec"><div class="spec__bar">In your own words</div><div class="spec__body stack">
+        <section id="intake-sec-words" class="spec profgroup"><div class="spec__bar">In your own words</div><div class="spec__body stack">
           ${field('What would make you say yes to a candidate?','', `<textarea class="input ed" id="intake-mustHave" rows="3">${esc(d.mustHave)}</textarea>`)}
           ${field('What would make you say no?','', `<textarea class="input ed" id="intake-dealBreaker" rows="3">${esc(d.dealBreaker)}</textarea>`)}
           ${field('Anything else the search team should know','', `<textarea class="input ed" id="intake-context" rows="3">${esc(d.context)}</textarea>`)}
-        </div></div>
-        <div class="row">
-          <button class="btn btn--primary" data-act="submit-intake">${mine?.submitted?'Update my answers':'Submit my answers'}</button>
-          <button class="btn btn--secondary" data-act="save-intake">Save and finish later</button>
-          <span class="t-small">${count} named so far.</span>
-        </div>` : ''}
+        </div></section>
+        ${actionBar(
+          `<button type="button" class="btn btn--primary" data-act="submit-intake">${mine?.submitted?'Update my answers':'Submit my answers'}</button>`,
+          withTip(`<button type="button" class="btn btn--secondary" data-act="save-intake">Save and finish later</button>`,
+            'Keep what you have written without submitting it. Nobody reads it until you submit.'),
+          count+' named so far.',
+          'Not submitted yet')}` : ''}
       ${closed && s.consensus ? consensusPanels(s.consensus, false) : ''}
-      ${stepFooter('intake')}
+      ${!open ? stepFooter('intake') : ''}
     </div></div>`);
 }
 
@@ -2186,14 +2203,17 @@ function critSource(c){
 }
 
 function critRow(c, i){
+  const name = String(c.label||'').trim() || (KIND[c.kind]?.label || 'This criterion');
   return `<div class="crit-row" data-row="${i}">
     <span class="mono t-small">${esc(c.id||'')}${critSource(c)}</span>
     <div class="stack u-gap-6">
-      <input class="input" data-f="label" value="${esc(c.label)}" placeholder="Label">
-      <input class="input" data-f="note" value="${esc(c.note||'')}" placeholder="Why this matters here">
+      <input class="input" data-f="label" value="${esc(c.label)}" placeholder="Label" aria-label="Criterion ${esc(c.id||i+1)} label">
+      <input class="input" data-f="note" value="${esc(c.note||'')}" placeholder="Why this matters here" aria-label="Why ${esc(name)} matters here">
     </div>
-    <div class="wgt">${[1,2,3,4,5].map(n=>`<button type="button" data-w="${n}" aria-pressed="${Number(c.weight)===n}">${n}</button>`).join('')}</div>
-    <button class="btn btn--ghost btn--sm" data-del="${i}">Remove</button>
+    ${ratingGroup('Weight for '+name,
+      `<div class="wgt">${[1,2,3,4,5].map(n=>`<button type="button" data-w="${n}" aria-label="Weight ${n} of 5 for ${esc(name)}" aria-pressed="${Number(c.weight)===n}">${n}</button>`).join('')}</div>`,
+      '1 = nice to have · 5 = decisive')}
+    <button type="button" class="btn btn--ghost btn--sm" data-del="${i}">Remove</button>
   </div>`;
 }
 
@@ -2244,6 +2264,14 @@ function vProfile(){
       </div></div>`);
   }
 
+  const counts = Object.keys(KIND).map(k => ({ k, n: kindCount(k), ok: inCritRange(kindCount(k)) }));
+  // Buttons, not anchors: the workspace uses the URL hash for routing, so an
+  // in-page "#prof-skill" link would be read as a navigation.
+  const nav = `<nav class="secnav" aria-label="Profile sections">
+    <span class="secnav__t">Sections</span>
+    ${counts.map(c => `<button type="button" class="${c.ok?'is-done':''}" data-act="jump" data-to="prof-${c.k}">${esc(KIND[c.k].plural)} <span class="mono">${c.n}/3–5</span></button>`).join('')}
+  </nav>`;
+
   const groups = Object.keys(KIND).map(k => {
     const rows = (s.criteria||[]).map((c,i)=>({c,i})).filter(x=>x.c.kind===k);
     const n = rows.filter(x => String(x.c.label||'').trim()).length;
@@ -2251,30 +2279,39 @@ function vProfile(){
     const labels = new Set(rows.map(x => x.c.label.trim().toLowerCase()).filter(Boolean));
     const range = inCritRange(n) ? 'ok' : (k==='skill' ? 'wait' : (n ? 'wait' : 'idle'));
     // What the committee named comes first and is marked as theirs. The stock
-    // suggestions stay underneath for the gaps nobody filled.
+    // suggestions stay underneath for the gaps nobody filled. Once a category
+    // has what it needs the bank collapses, so twelve criteria no longer read
+    // as four walls of chips (D10).
     const fromRoom = (agg?.byKind[k] || []).filter(e => !labels.has(e.label.trim().toLowerCase()));
-    return `<div>
-      <div class="sub">${KIND[k].plural} ${pill(range, n+' of 3–5')}</div>
+    const suggKey = 'sugg-'+k;
+    const suggOpen = state.open[suggKey] === undefined ? !inCritRange(n) : Boolean(state.open[suggKey]);
+    return `<section id="prof-${k}" class="profgroup">
+      ${sectionHead(KIND[k].plural, '', pill(range, n+' of 3–5'))}
       ${k==='skill' ? `<p class="t-small">Select 3 to 5 essential skills. These become the spine of the ads, surveys, and interviews.</p>` : ''}
-      ${fromRoom.length ? `<p class="t-small">Named by the committee and not on the profile yet:</p>
-        <div class="pick pick--room">${fromRoom.map(e =>
-          `<button type="button" data-pick="${k}" data-label="${esc(e.label)}" data-weight="${Math.round(e.avgWeight)}" aria-pressed="false" ${atCap?'disabled':''}>${esc(e.label)} <span class="mono">${e.mentions}/${agg.submitted}</span></button>`
-        ).join('')}</div>` : ''}
-      <div class="pick">${(SUGGEST[k]||[]).map(label => {
-        const on = labels.has(label.toLowerCase());
-        return `<button type="button" data-pick="${k}" data-label="${esc(label)}" aria-pressed="${on}" ${!on && atCap ? 'disabled':''}>${esc(label)}</button>`;
-      }).join('')}</div>
-      ${rows.map(x=>critRow(x.c,x.i)).join('') || '<div class="t-small">None selected yet.</div>'}
-      <div class="row u-mt-3"><button class="btn btn--secondary btn--sm" data-add="${k}" ${atCap?'disabled':''}>Add another ${KIND[k].label.toLowerCase()}</button></div>
-    </div>`;
+      ${rows.map(x=>critRow(x.c,x.i)).join('') || '<p class="t-small">None selected yet.</p>'}
+      <div class="row u-mt-3">
+        <button type="button" class="btn btn--secondary btn--sm" data-add="${k}" ${atCap?'disabled':''}>Add another ${KIND[k].label.toLowerCase()}</button>
+        ${atCap ? '<span class="t-small">Five is the maximum. Remove one before adding another.</span>' : ''}
+        <button type="button" class="btn btn--ghost btn--sm" data-panel="${suggKey}" aria-expanded="${suggOpen}" aria-controls="pick-${k}" data-open-label="Suggestions" data-close-label="Hide suggestions">${suggOpen?'Hide suggestions':'Suggestions'}</button>
+      </div>
+      <div id="pick-${k}"${suggOpen?'':' hidden'}>
+        ${fromRoom.length ? `<p class="t-small">Named by the committee and not on the profile yet:</p>
+          <div class="pick pick--room">${fromRoom.map(e =>
+            `<button type="button" data-pick="${k}" data-label="${esc(e.label)}" data-weight="${Math.round(e.avgWeight)}" aria-pressed="false" ${atCap?'disabled':''}>${esc(e.label)} <span class="mono">${e.mentions}/${agg.submitted}</span></button>`
+          ).join('')}</div>` : ''}
+        <div class="pick">${(SUGGEST[k]||[]).map(label => {
+          const on = labels.has(label.toLowerCase());
+          return `<button type="button" data-pick="${k}" data-label="${esc(label)}" aria-pressed="${on}" ${!on && atCap ? 'disabled':''}>${esc(label)}</button>`;
+        }).join('')}</div>
+      </div>
+    </section>`;
   }).join('');
 
+  const prepOpen = Boolean(state.open.profileprep);
+  const aiReady = Boolean(state.health?.hasKey);
+
   return shell(`
-    ${head('Step '+stepNo('profile'),'Candidate profile','This is the spine. Built from what the committee said in Step '+stepNo('intake')+', then edited by you. Recruiting markets it. Surveys test it. Interviews evidence it.',
-      `<button class="btn btn--primary" data-act="save-profile-next">Save and move on</button>
-       <button class="btn btn--secondary" data-act="save-profile">Save profile</button>
-       ${agg?.submitted && canManage() ? `<button class="btn btn--secondary" data-act="adopt-consensus">${adopted?'Rebuild from committee':'Build from committee'}</button>` : ''}
-       <button class="btn btn--secondary" data-act="draft-profile">Draft with Claude</button>`)}
+    ${head('Step '+stepNo('profile'),'Candidate profile','This is the spine. Built from what the committee said in Step '+stepNo('intake')+', then edited by you. Recruiting markets it. Surveys test it. Interviews evidence it.')}
     <div class="band"><div class="wrap stack">
       ${agg?.submitted ? `<div class="notice notice--${adopted?'ok':'info'}"><div>
         <div class="notice__t">${agg.submitted} of ${agg.seats} on the committee answered</div>
@@ -2282,16 +2319,33 @@ function vProfile(){
           ? 'This profile was built from their answers. The badge on each line shows how many of them named it. Edit freely; the badges follow the label.'
           : 'Build the matrix from their answers rather than typing it from memory, then edit.'}
           ${agg.contested.length ? ' <b>'+agg.contested.length+'</b> item'+(agg.contested.length===1?' is':'s are')+' contested — the committee disagrees on how much '+(agg.contested.length===1?'it matters':'they matter')+'.' : ''}
-          <button class="btn btn--ghost btn--sm" data-go="intake">See what they said</button></div>
+          <button type="button" class="btn btn--ghost btn--sm" data-go="intake">See what they said</button></div>
       </div></div>` : `<div class="notice notice--info"><div>
         <div class="notice__t">No committee input on file</div>
         <div class="notice__b">Step ${stepNo('intake')} collects what each member is looking for, and this matrix is normally built from it. You can still write the profile by hand.</div>
       </div></div>`}
-      ${modelToggle()}
-      ${field('Notes for the draft','Paste governing-body workshop notes. Claude drafts from the committee’s answers first, then these. You still choose the skills.',
-        `<textarea class="input ed" id="profilenotes">${esc(s.notes||'')}</textarea>`)}
+      ${nav}
       ${groups}
-      ${stepFooter('profile')}
+      ${sectionHead('Preparation', 'Optional', `<button type="button" class="btn btn--ghost btn--sm" data-panel="profileprep" aria-expanded="${prepOpen}" aria-controls="profileprep" data-open-label="Open" data-close-label="Close">${prepOpen?'Close':'Open'}</button>`)}
+      <div id="profileprep"${prepOpen?'':' hidden'}>
+        <div class="stack stack--tight">
+          ${field('Notes for the draft','Paste governing-body workshop notes. Claude drafts from the committee’s answers first, then these. You still choose the skills.',
+            `<textarea class="input ed" id="profilenotes">${esc(s.notes||'')}</textarea>`)}
+          ${modelToggle()}
+          <div class="row">
+            ${withTip(`<button type="button" class="btn btn--secondary" data-act="draft-profile" ${aiReady?'':'disabled'}>Draft with Claude</button>`, 'Write a first matrix from the committee’s answers and these notes. You still choose and weight the criteria.')}
+            ${aiReady ? '' : '<span class="t-small">No API key is configured, so drafting is unavailable. The matrix can be built by hand or from committee input.</span>'}
+          </div>
+        </div>
+      </div>
+      ${actionBar(
+        `<button type="button" class="btn btn--primary" data-act="save-profile">Save profile</button>`,
+        `${agg?.submitted && canManage() ? withTip(`<button type="button" class="btn btn--secondary" data-act="adopt-consensus">${adopted?'Rebuild from committee':'Build from committee'}</button>`, 'Replace this matrix with what the committee named, ranked by how many of them named it.') : ''}
+         <button type="button" class="btn btn--secondary" data-act="save-profile-next">Save and move on</button>`,
+        profileGaps(s.criteria||[]).length
+          ? 'Still needed: '+esc(profileGaps(s.criteria||[]).join(', '))+'.'
+          : 'Every category has 3 to 5.',
+        'Unsaved edits')}
     </div></div>`);
 }
 
@@ -2435,7 +2489,8 @@ function collectArtifact(kind){
   const form = $('#edit-'+kind);
   if (form){
     const out = JSON.parse(JSON.stringify(state.search.artifacts?.[kind] || {}));
-    $$('[data-path]', form).forEach(el => setAt(out, el.dataset.path, el.value));
+    $$('[data-path]', form).forEach(el =>
+      setAt(out, el.dataset.path, el.type === 'checkbox' ? el.checked : el.value));
     return out;
   }
   const raw = $('#art-'+kind)?.value;
@@ -2443,16 +2498,52 @@ function collectArtifact(kind){
   return JSON.parse(raw);
 }
 function editorWrap(kind, inner){
-  return `<form id="edit-${kind}" class="editor">
-    <div class="sub">Edit the copy</div>
-    <p class="t-small">Change the wording in these fields, then Save edits. The preview above updates. You do not need to edit JSON.</p>
-    ${inner}
-  </form>`;
+  return `<form id="edit-${kind}" class="editor">${inner}</form>`;
 }
+
+/* --- structured editing ---------------------------------------------------
+ * A blank document used to offer nothing but an editable `{}` and a Draft
+ * with Claude button, so writing a questionnaire by hand was not really
+ * supported (D05). Every document type now has add and remove controls that
+ * work from empty. Raw JSON stays, under Advanced.
+ * ----------------------------------------------------------------------- */
+
+function artAdd(kind, path, label){
+  return `<button type="button" class="btn btn--secondary btn--sm" data-artadd="${esc(kind)}:${esc(path)}">${esc(label)}</button>`;
+}
+function artDel(kind, path, index, label){
+  return `<button type="button" class="btn btn--ghost btn--sm" data-artdel="${esc(kind)}:${esc(path)}:${index}">${esc(label)}</button>`;
+}
+function artItem(title, controls, remove){
+  return `<div class="artitem">
+    <div class="artitem__hd"><span class="artitem__t">${esc(title)}</span>${remove}</div>
+    ${controls}
+  </div>`;
+}
+function checkField(path, label, on, hint=''){
+  return `<label class="check"><input type="checkbox" data-path="${esc(path)}" ${on?'checked':''}>
+    <span>${esc(label)}${hint?`<small>${esc(hint)}</small>`:''}</span></label>`;
+}
+
+// Template rows for each list a document can grow.
+const ART_TEMPLATE = {
+  'survey1.questions': list => ({ n:list.length+1, prompt:'', required:false, crit:[] }),
+  'survey2.questions': list => ({ n:list.length+1, prompt:'', required:false, crit:[] }),
+  'guide.questions':   list => ({ n:list.length+1, stem:'', approach:'', results:'', experience:'', crit:[] }),
+  'guide.scenarios':   list => ({ id:String.fromCharCode(65+list.length), name:'', mins:'', who:'', brief:'' }),
+  'contract.sections': () => ({ h:'', body:'' }),
+  'plan.rows':         () => ({ outlet:'', audience:'', format:'', when:'', cost:'', who:'', status:'' }),
+  'bar.behavior':      () => ({ t:'', d:'' }),
+  'bar.actions':       () => ({ t:'', due:'' }),
+  'bar.results':       () => ({ t:'', target:'' }),
+  'bar.governance':    () => ({ t:'' }),
+  'community.facts':   () => ({ k:'', v:'' })
+};
+
 function sourceJson(kind, obj, folded){
   const ta = `<textarea class="input ed ed--lg" id="art-${kind}">${esc(JSON.stringify(obj||{}, null, 2))}</textarea>`;
   if (!folded) return `<div class="sub">Source (editable JSON)</div>${ta}`;
-  return `<details class="srcjson"><summary>Source JSON</summary><p class="t-small">The fields above are the usual way to edit. This is the raw file.</p>${ta}</details>`;
+  return `<details class="srcjson"><summary>Advanced · source JSON</summary><p class="t-small">The fields above are the usual way to edit this. This is the raw file, for when something has to be moved or pasted wholesale.</p>${ta}</details>`;
 }
 function artifactEditor(kind, a){
   a = a || {};
@@ -2461,10 +2552,11 @@ function artifactEditor(kind, a){
     const facts = Array.isArray(a.facts) ? a.facts : [];
     return editorWrap(kind, `
       ${editArea('lede','Why a candidate would live and lead here', a.lede,'',5)}
-      ${facts.length ? `<div class="sub">Facts pulled from research</div>${facts.map((f,i)=>`<div class="grid2">${editArea('facts.'+i+'.k','Label',f.k,'',1)}${editArea('facts.'+i+'.v','Value',f.v,'',2)}</div>`).join('')}` : ''}
-      <div class="sub">Form of government</div>
+      ${sectionHead('Facts', facts.length ? facts.length+' on file' : 'None yet', artAdd(kind,'facts','Add a fact'))}
+      ${facts.map((f,i)=>`<div class="formgrid">${editArea('facts.'+i+'.k','Label',f.k,'',1)}${editArea('facts.'+i+'.v','Value',f.v,'',2)}<div class="field--span">${artDel(kind,'facts',i,'Remove this fact')}</div></div>`).join('')}
+      ${sectionHead('Form of government')}
       ${govFields().map(([k,label]) => editArea('government.'+k, label, gov[k], '', 3)).join('')}
-      <div class="sub">The community</div>
+      ${sectionHead('The community')}
       ${placeFields().map(([k,label]) => editArea('community.'+k, label, typeof place[k]==='string'?place[k]:'', '', 3)).join('')}
       ${editArea('organization','The organization', a.organization,'',4)}
       ${editArea('why','Why lead here', a.why,'',3)}
@@ -2507,52 +2599,89 @@ function artifactEditor(kind, a){
   }
   if (kind==='survey1' || kind==='survey2'){
     const qs = a.questions || [];
-    if (!qs.length && !a.intro) return '';
     return editorWrap(kind, `
+      ${sectionHead('Introduction')}
       ${editArea('intro','Introduction shown to the candidate', a.intro,'',3)}
       ${editArea('dueHint','Deadline hint', a.dueHint,'',1)}
-      ${qs.map((q,i)=>`${editArea('questions.'+i+'.prompt','Question '+String(q.n||i+1).padStart(2,'0'), q.prompt,'',3)}`).join('')}
+      ${sectionHead('Questions', qs.length ? qs.length+' on this questionnaire' : 'None yet',
+        artAdd(kind,'questions','Add a question'))}
+      ${qs.length ? qs.map((q,i)=>artItem('Question '+String(q.n||i+1).padStart(2,'0'),
+        `${editArea('questions.'+i+'.prompt','What the candidate is asked', q.prompt,'',3)}
+         ${checkField('questions.'+i+'.required','Answer required', q.required, 'The questionnaire cannot be submitted without this one.')}`,
+        artDel(kind,'questions',i,'Remove'))).join('')
+        : `<p class="t-small">No questions yet. Add them here, or draft the questionnaire with Claude and edit what it writes.</p>`}
+      <div class="row">${artAdd(kind,'questions','Add a question')}</div>
     `);
   }
   if (kind==='plan'){
     const rows = a.rows || [];
-    if (!rows.length) return '';
-    return editorWrap(kind, `<div class="tablewrap" tabindex="0" role="region" aria-label="Scrollable table"><table>
-      <thead><tr><th>Outlet</th><th>Audience</th><th>Format</th><th>When</th><th>Cost</th><th>Who</th><th>Status</th></tr></thead>
+    return editorWrap(kind, `
+      ${sectionHead('Where the position is advertised', rows.length ? rows.length+' outlets' : 'None yet', artAdd(kind,'rows','Add an outlet'))}
+      ${rows.length ? `<div class="tablewrap"><table>
+      <thead><tr><th>Outlet</th><th>Audience</th><th>Format</th><th>When</th><th>Cost</th><th>Who</th><th>Status</th><th></th></tr></thead>
       <tbody>${rows.map((r,i)=>`<tr>
-        <td><input class="input" data-path="rows.${i}.outlet" value="${esc(r.outlet||'')}"></td>
-        <td><input class="input" data-path="rows.${i}.audience" value="${esc(r.audience||'')}"></td>
-        <td><input class="input" data-path="rows.${i}.format" value="${esc(r.format||'')}"></td>
-        <td><input class="input" data-path="rows.${i}.when" value="${esc(r.when||'')}"></td>
-        <td><input class="input" data-path="rows.${i}.cost" value="${esc(r.cost||'')}"></td>
-        <td><input class="input" data-path="rows.${i}.who" value="${esc(r.who||'')}"></td>
-        <td><input class="input" data-path="rows.${i}.status" value="${esc(r.status||'')}"></td>
-      </tr>`).join('')}</tbody></table></div>`);
+        <td><input class="input" data-path="rows.${i}.outlet" value="${esc(r.outlet||'')}" aria-label="Outlet ${i+1}"></td>
+        <td><input class="input" data-path="rows.${i}.audience" value="${esc(r.audience||'')}" aria-label="Audience ${i+1}"></td>
+        <td><input class="input" data-path="rows.${i}.format" value="${esc(r.format||'')}" aria-label="Format ${i+1}"></td>
+        <td><input class="input" data-path="rows.${i}.when" value="${esc(r.when||'')}" aria-label="When ${i+1}"></td>
+        <td><input class="input" data-path="rows.${i}.cost" value="${esc(r.cost||'')}" aria-label="Cost ${i+1}"></td>
+        <td><input class="input" data-path="rows.${i}.who" value="${esc(r.who||'')}" aria-label="Who ${i+1}"></td>
+        <td><input class="input" data-path="rows.${i}.status" value="${esc(r.status||'')}" aria-label="Status ${i+1}"></td>
+        <td>${artDel(kind,'rows',i,'Remove')}</td>
+      </tr>`).join('')}</tbody></table></div>`
+      : `<p class="t-small">No outlets yet. Add the places this position will be advertised, or draft the plan with Claude.</p>`}
+    `);
   }
   if (kind==='guide'){
     const qs = a.questions || [];
     const sc = a.scenarios || [];
-    if (!qs.length && !sc.length) return '';
     return editorWrap(kind, `
-      ${qs.map((q,i)=>`<div class="sub">Question ${q.n||i+1}</div>
-        ${editArea('questions.'+i+'.stem','Stem', q.stem,'',2)}
-        ${editArea('questions.'+i+'.approach','Approach', q.approach,'',2)}
-        ${editArea('questions.'+i+'.results','Results', q.results,'',2)}
-        ${editArea('questions.'+i+'.experience','Experience', q.experience,'',2)}`).join('')}
-      ${sc.map((s,i)=>`<div class="sub">Scenario ${esc(s.id||String(i+1))}</div>
-        ${editArea('scenarios.'+i+'.name','Name', s.name,'',1)}
-        ${editArea('scenarios.'+i+'.mins','Minutes', s.mins,'',1)}
-        ${editArea('scenarios.'+i+'.who','Who observes', s.who,'',1)}
-        ${editArea('scenarios.'+i+'.brief','Brief', s.brief,'',4)}`).join('')}
+      ${sectionHead('Interview questions', qs.length ? qs.length+' questions' : 'None yet', artAdd(kind,'questions','Add a question'))}
+      ${qs.length ? qs.map((q,i)=>artItem('Question '+(q.n||i+1),
+        `${editArea('questions.'+i+'.stem','Stem', q.stem,'What the panel asks.',2)}
+         ${editArea('questions.'+i+'.approach','Approach', q.approach,'What a strong answer describes doing.',2)}
+         ${editArea('questions.'+i+'.results','Results', q.results,'What a strong answer can show for it.',2)}
+         ${editArea('questions.'+i+'.experience','Experience', q.experience,'What background the answer should evidence.',2)}`,
+        artDel(kind,'questions',i,'Remove'))).join('')
+        : `<p class="t-small">No questions yet. Add them here, or draft the guide with Claude.</p>`}
+      ${sectionHead('Assessment scenarios', sc.length ? sc.length+' scenarios' : 'None yet', artAdd(kind,'scenarios','Add a scenario'))}
+      ${sc.map((s,i)=>artItem('Scenario '+(s.id||String(i+1)),
+        `${editArea('scenarios.'+i+'.name','Name', s.name,'',1)}
+         <div class="formgrid">
+           ${editArea('scenarios.'+i+'.mins','Minutes', s.mins,'',1)}
+           ${editArea('scenarios.'+i+'.who','Who observes', s.who,'',1)}
+         </div>
+         ${editArea('scenarios.'+i+'.brief','Brief', s.brief,'',4)}`,
+        artDel(kind,'scenarios',i,'Remove'))).join('')}
     `);
   }
   if (kind==='contract'){
     const secs = a.sections || [];
-    if (!secs.length && !a.title) return '';
     return editorWrap(kind, `
       ${editArea('title','Title', a.title,'',1)}
-      ${secs.map((sec,i)=>`${editArea('sections.'+i+'.h','Heading', sec.h,'',1)}${editArea('sections.'+i+'.body','Body', sec.body,'',5)}`).join('')}
+      ${sectionHead('Sections', secs.length ? secs.length+' sections' : 'None yet', artAdd(kind,'sections','Add a section'))}
+      ${secs.length ? secs.map((sec,i)=>artItem(sec.h || 'Section '+(i+1),
+        `${editArea('sections.'+i+'.h','Heading', sec.h,'',1)}
+         ${editArea('sections.'+i+'.body','Body', sec.body,'',5)}`,
+        artDel(kind,'sections',i,'Remove'))).join('')
+        : `<p class="t-small">No sections yet. Add them here, or draft the agreement with Claude and edit what it writes. It still goes to counsel.</p>`}
     `);
+  }
+  if (kind==='bar'){
+    const parts = [
+      ['behavior','Behavior','What the governing body expects of how the manager works', ['t','Behavior'], ['d','What it looks like']],
+      ['actions','Actions','Specific commitments for the year', ['t','Action'], ['due','Due']],
+      ['results','Results','Measurable outcomes', ['t','Result'], ['target','Target']],
+      ['governance','Governing body governance survey','Questions the body answers about its own conduct', ['t','Question']]
+    ];
+    return editorWrap(kind, parts.map(([path, title, lede, ...fields]) => {
+      const list = a[path] || [];
+      return `${sectionHead(title, list.length ? list.length+' items' : 'None yet', artAdd(kind, path, 'Add'))}
+        <p class="t-small">${esc(lede)}</p>
+        ${list.map((item,i)=>artItem(title+' '+(i+1),
+          fields.map(([f,label]) => editArea(path+'.'+i+'.'+f, label, typeof item==='string' ? (f==='t'?item:'') : item[f], '', f==='d'||f==='target' ? 2 : 1)).join(''),
+          artDel(kind, path, i, 'Remove'))).join('')}`;
+    }).join(''));
   }
   if (kind==='schedule'){
     const g = a.guide || {};
@@ -2834,32 +2963,44 @@ function communityEmptyNotice(s){
 function vCommunity(){
   const s = state.search, meta = DRAFTS.community, has = Boolean(s.artifacts?.community);
   const profileDone = (s.steps||[]).find(st=>st.key==='profile')?.status==='done';
+  const mode = docMode('community');
+  const aiReady = Boolean(state.health?.hasKey);
   return shell(`
-    ${head('Step '+stepNo('community'), meta.title, meta.lede,
-      `<button class="btn btn--primary" data-act="research" ${profileDone?'':'disabled'}>Research this ${jurisdictionInfo().noun}</button>
-       <button class="btn btn--secondary" data-act="save-art" data-kind="community">Save edits</button>
-       <button class="btn btn--primary" data-act="next-step" data-from="community">Next · Initial survey</button>`)}
+    ${head('Step '+stepNo('community'), meta.title, meta.lede)}
     <div class="band"><div class="wrap stack">
-      ${!profileDone ? `<div class="notice notice--info"><div><div class="notice__t">The profile comes first</div><div class="notice__b">Adopt the candidate profile (Step ${stepNo('profile')}) — 3 to 5 essential skills — then look up the jurisdiction.</div></div></div>` : ''}
-      ${modelToggle()}
-      <form id="citylookup" class="grid2">
-        ${field(jurisdictionInfo().key==='county'?'County':'Jurisdiction','', `<input class="input" name="city" value="${esc(s.client||'')}" placeholder="${esc(jurisdictionInfo().clientPlaceholder)}">`)}
-        ${field('Official website','http or https', `<input class="input" name="website" value="${esc(s.website||'')}" placeholder="https://www.fcgov.com">`)}
-      </form>
-      <p class="t-small">A research agent reads the official site, Census, and budget documents, then fills the facts on this search. It will not invent numbers. Check the file before you use it in recruiting.</p>
-      ${sourceList(s.research)}
-      ${(s.population || s.budget || s.fog || s.state || s.salary) ? `<div class="tiles">
-        ${s.state?`<div class="tile"><span class="tile__k">State</span><span class="tile__v u-fs-115">${esc(s.state)}</span></div>`:''}
-        ${s.fog?`<div class="tile"><span class="tile__k">Form of government</span><span class="tile__v u-fs-115">${esc(s.fog)}</span></div>`:''}
-        ${s.population?`<div class="tile"><span class="tile__k">Population</span><span class="tile__v u-fs-115">${esc(s.population)}</span></div>`:''}
-        ${s.budget?`<div class="tile"><span class="tile__k">Budget</span><span class="tile__v u-fs-115">${esc(s.budget)}</span></div>`:''}
-        ${s.salary?`<div class="tile"><span class="tile__k">Salary</span><span class="tile__v u-fs-115">${esc(s.salary)}</span></div>`:''}
-      </div><p class="t-small">Those facts are also on <button class="btn btn--ghost btn--sm" data-go="facts">Search facts</button>. Check them before you draft recruiting copy.</p>`:''}
-      ${has ? renderArtifact('community', s.artifacts.community) : communityEmptyNotice(s)}
-      ${artifactEditor('community', s.artifacts?.community)}
-      ${stepNextCard('community')}
-      ${sourceJson('community', s.artifacts?.community, true)}
-      ${stepFooter('community')}
+      ${!profileDone ? prereqNotice('The profile comes first',
+        'Adopt the candidate profile — 3 to 5 essential skills — then look up the jurisdiction. Research writes this profile against what the committee said it is looking for.',
+        'profile', 'Open Step '+stepNo('profile')+' · Candidate profile') : ''}
+      ${!has ? communityEmptyNotice(s) : ''}
+      ${docBar('community', has)}
+      ${mode==='edit' ? `
+        ${sectionHead('Look this jurisdiction up')}
+        <form id="citylookup" class="formgrid">
+          ${field(jurisdictionInfo().key==='county'?'County':'Jurisdiction','', `<input class="input" name="city" value="${esc(s.client||'')}" placeholder="${esc(jurisdictionInfo().clientPlaceholder)}">`)}
+          ${field('Official website','http or https', `<input class="input" name="website" value="${esc(s.website||'')}" placeholder="https://www.fcgov.com">`)}
+        </form>
+        <p class="t-small">A research agent reads the official site, Census, and budget documents, then fills the facts on this search. It will not invent numbers. Check the file before you use it in recruiting.</p>
+        ${modelToggle()}
+        ${sourceList(s.research)}
+        ${(s.population || s.budget || s.fog || s.state || s.salary) ? `<div class="tiles">
+          ${s.state?`<div class="tile"><span class="tile__k">State</span><span class="tile__v u-fs-115">${esc(s.state)}</span></div>`:''}
+          ${s.fog?`<div class="tile"><span class="tile__k">Form of government</span><span class="tile__v u-fs-115">${esc(s.fog)}</span></div>`:''}
+          ${s.population?`<div class="tile"><span class="tile__k">Population</span><span class="tile__v u-fs-115">${esc(s.population)}</span></div>`:''}
+          ${s.budget?`<div class="tile"><span class="tile__k">Budget</span><span class="tile__v u-fs-115">${esc(s.budget)}</span></div>`:''}
+          ${s.salary?`<div class="tile"><span class="tile__k">Salary</span><span class="tile__v u-fs-115">${esc(s.salary)}</span></div>`:''}
+        </div><p class="t-small">Those facts are also on <button type="button" class="btn btn--ghost btn--sm" data-go="facts">Search facts</button>. Check them before you draft recruiting copy.</p>`:''}
+        ${artifactEditor('community', s.artifacts?.community)}
+        ${sourceJson('community', s.artifacts?.community, true)}`
+      : (has ? renderArtifact('community', s.artifacts.community)
+             : emptyState('Nothing to preview yet','Switch to Edit and research the jurisdiction, or write the profile by hand.'))}
+      ${actionBar(
+        `<button type="button" class="btn btn--primary" data-act="save-art" data-kind="community">Save edits</button>`,
+        `${withTip(`<button type="button" class="btn btn--secondary" data-act="research" ${profileDone && aiReady ?'':'disabled'}>Research this ${esc(jurisdictionInfo().noun)}</button>`, TIPS.research)}
+         ${!profileDone ? '<span class="t-small">Research runs once the candidate profile is adopted.</span>'
+           : !aiReady ? '<span class="t-small">No API key is configured, so research is unavailable. You can write this profile by hand.</span>' : ''}
+         <button type="button" class="btn btn--secondary" data-act="next-step" data-from="community">Next · Initial survey</button>`,
+        'Saved edits stay on the file.',
+        'Unsaved edits')}
     </div></div>`);
 }
 
@@ -2897,47 +3038,126 @@ function vBrochure(){
   const a = s.artifacts?.brochure;
   const has = brochureHasCopy(a);
   const hasComm = Boolean(s.artifacts?.community);
+  const mode = docMode('brochure');
+  const aiReady = Boolean(state.health?.hasKey);
   return shell(`
-    ${head('Step '+stepNo('brochure'), meta.title, meta.lede,
-      `${hasComm ? `<button class="btn btn--primary" data-act="assemble" data-kind="brochure">${has?'Refill from community':'Fill from community'}</button>` : ''}
-       ${a ? `<button class="btn btn--secondary" data-act="save-art" data-kind="brochure">Save edits</button>` : ''}
-       ${has ? `<button class="btn btn--secondary" data-act="print-pack" data-kind="brochure">Print brochure</button>` : ''}
-       ${has ? `<button class="btn btn--ghost" data-act="generate" data-kind="brochure">Tighten with Claude</button>` : ''}
-       ${nextBtn('brochure')}`)}
+    ${head('Step '+stepNo('brochure'), meta.title, meta.lede)}
     <div class="band"><div class="wrap stack">
-      ${!hasComm ? `<div class="notice notice--info"><div><div class="notice__t">The community file and the ad plan come first</div><div class="notice__b">The community research (Step ${stepNo('community')}) is what this packet is built from. Finish the ad plan (Step ${stepNo('plan')}), then come back. You will add pictures here, not write a second narrative.</div></div></div>` : ''}
+      ${!hasComm ? prereqNotice('The community file comes first',
+        'The community research is what this packet is built from, and the ad plan says where it goes. You add pictures here rather than writing a second narrative.',
+        'community', 'Open Step '+stepNo('community')+' · Community') : ''}
       ${hasComm && !has ? `<div class="notice notice--info"><div><div class="notice__t">Fill from the community file</div><div class="notice__b">This step lays out the research you already have, then lets you add photos and change the design. Claude is optional after that.</div></div></div>` : ''}
+      ${docBar('brochure', has)}
       ${reviewBar('brochure', has)}
-      ${a ? brochureStudio(a) : ''}
-      ${a ? artifactEditor('brochure', a) : ''}
-      ${sourceJson('brochure', a, Boolean(a))}
-      ${stepFooter('brochure')}
+      ${mode==='preview'
+        ? (has ? renderArtifact('brochure', a)
+               : emptyState('Nothing to preview yet','Fill the brochure from the community file, then come back.'))
+        : `${a ? brochureStudio(a) : ''}
+           ${artifactEditor('brochure', a || {})}
+           ${sourceJson('brochure', a, true)}`}
+      ${actionBar(
+        hasComm
+          ? withTip(`<button type="button" class="btn btn--primary" data-act="assemble" data-kind="brochure">${has?'Refill from community':'Fill from community'}</button>`,
+              has ? 'Rebuild this packet from the community research. Photos and layout stay as they are.' : 'Lay the community research out as a recruitment packet.')
+          : `<button type="button" class="btn btn--primary" data-act="save-art" data-kind="brochure">Save edits</button>`,
+        `${a ? `<button type="button" class="btn btn--secondary" data-act="save-art" data-kind="brochure">Save edits</button>` : ''}
+         ${has ? withTip(`<button type="button" class="btn btn--secondary" data-act="print-pack" data-kind="brochure">Print brochure</button>`, TIPS.printPack) : ''}
+         ${has ? withTip(`<button type="button" class="btn btn--ghost" data-act="generate" data-kind="brochure" ${aiReady?'':'disabled'}>Tighten with Claude</button>`, 'Rewrite this copy tighter. Photos and layout stay put.') : ''}
+         ${has && !aiReady ? '<span class="t-small">No API key is configured, so tightening is unavailable.</span>' : ''}
+         ${nextBtn('brochure').replace('btn--primary','btn--secondary')}`,
+        'Saved edits stay on the file.',
+        'Unsaved edits')}
     </div></div>`);
+}
+
+/* ===========================================================================
+ * Document surfaces
+ *
+ * Every drafted document is edited the same way: an explicit Edit/Preview
+ * pair, a visible status telling unsaved from saved draft from reviewed from
+ * needs-another-look, structured fields that work from empty, raw JSON under
+ * Advanced, and one save bar. Before DEP-13 a blank document offered a
+ * `{}` textarea and four competing buttons (D05, D06).
+ * ========================================================================= */
+
+function docMode(key){
+  return state.mode[key] === 'preview' ? 'preview' : 'edit';
+}
+
+function docStatus(key, has){
+  if (!has) return pill('idle','Nothing on file yet');
+  if (state.search?.staleArtifacts?.[key]) return pill('wait','Sources changed since this was written');
+  if (takesReview(key)){
+    const r = reviewOf(state.search, key);
+    return r?.status === 'approved'
+      ? pill('ok','Reviewed '+((r.at||'').slice(0,10)))
+      : pill('wait','Draft, not reviewed');
+  }
+  return pill('info','Saved draft');
+}
+
+function docBar(key, has){
+  const mode = docMode(key);
+  return `<div class="docbar">
+    ${docStatus(key, has)}
+    <div class="modeswitch" role="group" aria-label="Editing mode">
+      ${withTip(`<button type="button" data-mode="edit" data-mode-key="${esc(key)}" aria-pressed="${mode==='edit'}">Edit</button>`, 'Change the wording and structure of this document.')}
+      ${withTip(`<button type="button" data-mode="preview" data-mode-key="${esc(key)}" aria-pressed="${mode==='preview'}">Preview</button>`, 'See this document the way it will be read. Unsaved edits are included.')}
+    </div>
+  </div>`;
+}
+
+// A prerequisite explained where the work is, with a way to go and do it.
+function prereqNotice(title, body, goKey, goLabel){
+  return `<div class="notice notice--wait"><div>
+    <div class="notice__t">${esc(title)}</div>
+    <div class="notice__b">${body}${goKey && canOpenStep(goKey) ? ` <button type="button" class="btn btn--secondary btn--sm" data-go="${esc(goKey)}">${esc(goLabel)}</button>` : ''}</div>
+  </div></div>`;
+}
+
+// Claude is optional on every document. When it is unavailable, say so beside
+// the control rather than leaving a disabled button to explain itself.
+function generateControls(key, has){
+  const ready = Boolean(state.health?.hasKey);
+  return `${withTip(`<button type="button" class="btn btn--secondary" data-act="generate" data-kind="${esc(key)}" ${ready?'':'disabled'}>${has?'Redraft with Claude':'Draft with Claude'}</button>`,
+      has ? 'Replace this draft with a new one written from the profile and the search facts.' : 'Write a first draft from the adopted profile and the search facts. You edit it afterwards.')}
+    ${ready ? '' : `<span class="t-small">No API key is configured, so drafting is unavailable. Write this by hand in Edit; nothing here depends on Claude.</span>`}`;
+}
+
+function docActionBar(key, has){
+  return actionBar(
+    `<button type="button" class="btn btn--primary" data-act="save-art" data-kind="${esc(key)}">Save edits</button>`,
+    `${generateControls(key, has)}
+     ${(key==='brochure'||key==='ads') && has ? withTip(`<button type="button" class="btn btn--ghost" data-act="print-pack" data-kind="${esc(key)}">Print for posting</button>`, TIPS.printPack) : ''}
+     ${nextBtn(key).replace('btn--primary','btn--secondary')}`,
+    'Saved edits stay on the file.',
+    'Unsaved edits');
 }
 
 function vDraft(key){
   const s = state.search, meta = DRAFTS[key], has = Boolean(s.artifacts?.[key]);
-  const editor = artifactEditor(key, s.artifacts?.[key]);
+  const mode = docMode(key);
   return shell(`
-    ${head('Step '+stepNo(key), meta.title, meta.lede,
-      `<button class="btn btn--primary" data-act="generate" data-kind="${key}">${has?'Redraft':'Draft with Claude'}</button>
-       <button class="btn btn--secondary" data-act="save-art" data-kind="${key}">Save edits</button>
-       ${(key==='brochure'||key==='ads') && has ? `<button class="btn btn--secondary" data-act="print-pack" data-kind="${key}">Print for posting</button>` : ''}
-       ${nextBtn(key)}`)}
+    ${head('Step '+stepNo(key), meta.title, meta.lede)}
     <div class="band"><div class="wrap stack">
+      ${key==='ads' && !stepOf('brochure') ? '' : ''}
+      ${!has ? `<div class="notice notice--info"><div><div class="notice__t">Nothing on file yet</div><div class="notice__b">${
+        key==='ads' ? (stepOf('brochure')
+          ? 'Build it from the brochure and the profile, or draft it with Claude. Color and layout come from the brochure, so the ads stay a matched packet.'
+          : 'Write it here, or draft it with Claude from the ad plan and the profile. The '+esc(packageLabel(s.package))+' package has no brochure; this announcement is what gets posted.')
+        : key==='contract' ? 'Write the sections here, or draft them with Claude from the profile. Either way it goes to counsel.'
+        : 'Write it here, or draft it with Claude from the profile, then edit what it writes.'
+      }</div></div></div>` : ''}
+      ${docBar(key, has)}
       ${reviewBar(key, has)}
       ${key==='ads' && stepOf('brochure') ? packStudioBar(s.artifacts?.brochure || {}) : ''}
       ${key==='contract' ? modelToggle() : ''}
-      ${has ? renderArtifact(key, s.artifacts[key]) : `<div class="notice notice--info"><div><div class="notice__t">Nothing on file yet</div><div class="notice__b">${
-        key==='ads' ? (stepOf('brochure')
-          ? 'Draft with Claude from the brochure and the profile. Color and layout come from the brochure, so the ads stay a matched packet.'
-          : 'Draft with Claude from the ad plan and the profile. The '+esc(packageLabel(s.package))+' package has no brochure; this announcement is what gets posted.')
-        : key==='contract' ? 'Draft with Claude from the profile, then edit the copy in the fields below. Opus 5 often does better on this legal language, since it goes to counsel.'
-        : 'Draft with Claude from the profile, then edit the copy in the fields below.'
-      }</div></div></div>`}
-      ${editor}
-      ${sourceJson(key, s.artifacts?.[key], Boolean(editor))}
-      ${stepFooter(key)}
+      ${mode==='preview'
+        ? (has ? renderArtifact(key, s.artifacts[key])
+               : emptyState('Nothing to preview yet','Switch to Edit and add the content, or draft it with Claude.'))
+        : artifactEditor(key, s.artifacts?.[key])}
+      ${mode==='edit' ? sourceJson(key, s.artifacts?.[key], true) : ''}
+      ${docActionBar(key, has)}
     </div></div>`);
 }
 
@@ -3222,7 +3442,7 @@ function applySupport(a){
     ? bits.join(' · ') + (s.hours ? '<div class="t-small">' + esc(s.hours) + '</div>' : '')
     : '<span class="t-small">A contact for this search has not been published yet.</span>';
 
-  return '<div class="apply-help u-mt-5">'
+  return '<div class="apply-help u-mt-5" id="apply-help" tabindex="-1">'
     + '<div class="t-label">Need help or an accommodation?</div>'
     + '<p class="t-small">' + contact + '</p>'
     + (a.correctionNote ? '<p class="t-small">' + esc(a.correctionNote) + '</p>' : '')
@@ -3251,15 +3471,26 @@ function vApply(){
   const survey = a[which];
   const title = which === 'survey2' ? 'Semifinalist questionnaire' : 'Initial candidate survey';
   const due = which === 'survey2' && a.deadline2 ? ` Respond by ${esc(a.deadline2)}.` : '';
+  const questions = survey.questions || [];
+  const required = questions.filter(q => q.required).length;
   return `<div class="apply-shell">
     ${head(a.client, title, esc(survey.intro||'')+due)}
+    <div class="applymeta">
+      <p class="t-small"><b>${questions.length} question${questions.length===1?'':'s'}.</b>
+        ${required ? esc(required)+' of them must be answered; those are marked with an asterisk. ' : 'None of them are required. '}
+        Answers are saved only when you submit, so finish in one sitting.</p>
+      <p class="t-small"><button type="button" class="btn btn--ghost btn--sm" data-act="jump" data-to="apply-help">Need help or an accommodation?</button></p>
+    </div>
     <form id="applyform" class="stack u-mt-5" data-which="${which}">
-      ${(survey.questions||[]).map(q => `
+      ${questions.map(q => `
         <div class="q">
           <div class="q__hd"><span class="q__n" aria-hidden="true">${String(q.n).padStart(2,'0')}</span><span class="q__t" id="q${q.n}-label">${esc(q.prompt)}${q.required?' <span class="req" aria-hidden="true">*</span>':''}</span></div>
           <div class="q__bd"><textarea class="input ed" name="q${q.n}" id="q${q.n}-input" aria-labelledby="q${q.n}-label" ${q.required?'required aria-required="true"':''}></textarea></div>
         </div>`).join('')}
-      <button class="btn btn--primary" type="submit">Submit questionnaire</button>
+      <div class="applybar">
+        <button class="btn btn--primary" type="submit">Submit questionnaire</button>
+        <span class="t-small" id="applycount" role="status" data-total="${questions.length}">0 of ${questions.length} answered</span>
+      </div>
     </form>
     ${a.deadlines && a.deadlines.note ? `<p class="t-small u-mt-3">${esc(a.deadlines.note)} (${esc(a.deadlines.timezone||'')})</p>` : ''}
     ${applySupport(a)}
@@ -3293,26 +3524,29 @@ function vStaff(key){
   const done = Boolean(rec.doneAt);
   const consentRows = key==='references' && cands ? cands.map(c => `
     <tr>
-      <td>${esc(c.name)}</td>
-      <td>${stagePill(c.stage)}</td>
-      <td>${c.referenceConsentAt ? pill('ok','Consent on file')+' <span class="t-small">'+esc((c.referenceConsentAt||'').slice(0,10))+(c.referenceConsentBy?' · '+esc(c.referenceConsentBy):'')+'</span>' : pill('wait','No consent yet')}</td>
-      <td>${canEdit() ? `<button class="btn btn--${c.referenceConsentAt?'ghost':'secondary'} btn--sm" data-act="ref-consent" data-cid="${c.id}" data-on="${c.referenceConsentAt?'0':'1'}">${c.referenceConsentAt?'Withdraw':'Record consent'}</button>` : ''}</td>
+      <th scope="row"><span class="candname">${esc(c.name)}</span></th>
+      <td data-label="Stage">${stagePill(c.stage)}</td>
+      <td data-label="Consent">${c.referenceConsentAt ? pill('ok','Consent on file')+' <span class="t-small">'+esc((c.referenceConsentAt||'').slice(0,10))+(c.referenceConsentBy?' · '+esc(c.referenceConsentBy):'')+'</span>' : pill('wait','No consent yet')}</td>
+      <td data-label="Actions" class="candacts">${canEdit() ? withTip(`<button type="button" class="btn btn--${c.referenceConsentAt?'ghost':'secondary'} btn--sm" data-act="ref-consent" data-cid="${c.id}" data-on="${c.referenceConsentAt?'0':'1'}">${c.referenceConsentAt?'Withdraw':'Record consent'}</button>`,
+        c.referenceConsentAt ? 'Remove this finalist’s consent. Reference entries about them are blocked again.' : 'Record that this finalist agreed to have their references contacted.') : ''}</td>
     </tr>`).join('') : '';
   const logged = (rec.log||[]).length;
   return shell(`
-    ${head('Step '+stepNo(key), meta.title, meta.lede+' '+pill(done?'ok':logged?'wait':'idle', done?'Complete':logged?logged+' logged':'Not started')+' '+pill('info','Staff work'),
-      `${canEdit() ? `<button class="btn btn--${done?'secondary':'primary'}" data-act="staff-done" data-key="${key}" data-done="${done?'0':'1'}">${done?'Reopen':'Mark complete'}</button>` : ''}
-       ${nextBtn(key)}`)}
+    ${head('Step '+stepNo(key), meta.title, meta.lede+' '+pill(done?'ok':logged?'wait':'idle', done?'Complete':logged?logged+' logged':'Not started')+' '+pill('info','Staff work'))}
     <div class="band"><div class="wrap stack">
-      ${st.blocked ? `<div class="notice notice--info"><div><div class="notice__t">${esc(stepWaitCopy(st, s))}</div><div class="notice__b">You can still log work here; the step reads as waiting until what it depends on is done.</div></div></div>` : ''}
+      ${st.blocked ? prereqNotice(stepWaitCopy(st, s),
+        'You can still log work here; the step reads as waiting until what it depends on is done.',
+        st.needsCandidates ? 'screen' : '', 'Open screening') : ''}
       ${done ? `<div class="notice notice--ok"><div><div class="notice__t">Completed ${esc((rec.doneAt||'').slice(0,10))} by ${esc(rec.doneByName||'a consultant')}</div><div class="notice__b">Logging anything new reopens the step.</div></div></div>` : ''}
       ${key==='references' ? `<div class="spec"><div class="spec__bar">Consent to contact references</div>
         <div class="spec__body">
-          <p class="t-small u-mb-3">Nothing is logged for a finalist until their consent is on this table. If nobody is listed, name finalists first (Step ${stepNo('finalists')}).</p>
-          <div class="tablewrap" tabindex="0" role="region" aria-label="Scrollable table"><table>
-            <thead><tr><th>Finalist</th><th>Stage</th><th>Consent</th><th></th></tr></thead>
-            <tbody>${consentRows || `<tr><td colspan="4">No finalists yet.</td></tr>`}</tbody>
-          </table></div>
+          <p class="t-small u-mb-3">Nothing is logged for a finalist until their consent is on this table.</p>
+          ${consentRows ? `<div class="tablewrap"><table class="candtable">
+            <thead><tr><th scope="col">Finalist</th><th scope="col">Stage</th><th scope="col">Consent</th><th scope="col">Actions</th></tr></thead>
+            <tbody>${consentRows}</tbody>
+          </table></div>` : emptyState('No finalists yet',
+            'Reference checks are for finalists only. Name them first, then record each one’s consent here.',
+            openBtn('finalists','Open Step '+stepNo('finalists')+' · Select finalists', true))}
         </div></div>` : ''}
       ${canEdit() ? `<div class="spec"><div class="spec__bar">Log an entry</div>
         <div class="spec__body stack">
@@ -3324,32 +3558,57 @@ function vStaff(key){
           <div class="row"><button class="btn btn--primary" data-act="staff-log" data-key="${key}">Add to the log</button></div>
         </div></div>` : ''}
       <div class="spec"><div class="spec__bar">Work log${logged?' · '+logged:''}</div>
-        <div class="spec__body"><div class="feed">${(rec.log||[]).map(e => staffLogEntry(key, e)).join('') || '<div class="t-small">Nothing logged yet.</div>'}</div></div>
+        <div class="spec__body">${(rec.log||[]).length
+          ? `<div class="feed">${(rec.log||[]).map(e => staffLogEntry(key, e)).join('')}</div>`
+          : emptyState('Nothing logged yet', esc(meta.ask)+' Each entry is dated and attributed. Nothing here reaches the committee.')}</div>
       </div>
       ${canEdit() ? `<div class="spec"><div class="spec__bar">Working notes</div>
         <div class="spec__body stack">
-          <textarea class="input ed" id="staff-notes" placeholder="Running notes for this step. Not published; not shown to the committee.">${esc(rec.notes||'')}</textarea>
-          <div class="row"><button class="btn btn--secondary" data-act="staff-notes" data-key="${key}">Save notes</button></div>
+          ${field('Notes for this step','Not published; not shown to the committee.',
+            `<textarea class="input ed" id="staff-notes" placeholder="Running notes for this step.">${esc(rec.notes||'')}</textarea>`)}
+          <div class="row"><button type="button" class="btn btn--secondary" data-act="staff-notes" data-key="${key}">Save notes</button></div>
         </div></div>` : ''}
-      <p class="t-small">${esc(meta.doneWhen)}</p>
-      ${stepFooter(key)}
+      ${actionBar(
+        canEdit()
+          ? withTip(`<button type="button" class="btn btn--${done?'secondary':'primary'}" data-act="staff-done" data-key="${esc(key)}" data-done="${done?'0':'1'}">${done?'Reopen this step':'Mark complete'}</button>`,
+              done ? 'Reopen the step so more work can be logged against it.' : esc(meta.doneWhen))
+          : '',
+        nextBtn(key).replace('btn--primary','btn--secondary'),
+        esc(meta.doneWhen))}
     </div></div>`);
 }
 
 function vArchives(){
-  return shell(`${head('Workspace','Archived searches','Restore a search with its documents, responses, and history.')}
-    <div class="band"><div class="wrap stack">${(state.archives || []).map(s => `<div class="spec"><div class="spec__body"><b>${esc(s.client)}</b> · ${esc(s.position)}<p class="t-small">Archived ${esc(s.archivedAt)}</p><button class="btn btn--secondary" data-act="restore-search" data-id="${esc(s.id)}">Restore search</button></div></div>`).join('') || '<p>No archived searches.</p>'}</div></div>`);
+  const list = state.archives || [];
+  return shell(`${head('Workspace','Archived searches','Nothing here is deleted. Restoring a search brings back its documents, responses, and history, and issues fresh candidate links.')}
+    <div class="band"><div class="wrap stack">
+      ${list.length ? list.map(s => `<div class="spec"><div class="spec__body">
+        <div class="waitrow">
+          <div><b>${esc(s.client)}</b> · ${esc(s.position)}<div class="t-small">Archived ${esc(s.archivedAt)}</div></div>
+          ${withTip(`<button type="button" class="btn btn--secondary btn--sm" data-act="restore-search" data-id="${esc(s.id)}">Restore search</button>`,
+            'Put this search back on the book. Candidate links are reissued, so the old ones stay dead.')}
+        </div>
+      </div></div>`).join('')
+      : emptyState('No archived searches',
+        'Searches archived from Home appear here and can be restored at any time.',
+        `<button type="button" class="btn btn--secondary" data-go="home">Back to Home</button>`)}
+    </div></div>`);
 }
 
 function vHistory(){
   const entries = (state.history?.history || []).map((entry, index) => ({ ...entry, index })).reverse();
-  return shell(`${head('This search','History and recovery','Previous copy and evaluations stay on file. Restoring a profile requires new scores.')}
-    <div class="band"><div class="wrap stack">${entries.map(e => `<details class="spec"><summary class="spec__bar">${esc(e.key || e.kind)} · ${esc(e.at)} · ${esc(e.who)}</summary><div class="spec__body">
-      ${e.criteria ? `<p>Profile revision ${esc(e.revision)}</p><ul>${e.criteria.map(c => `<li>${esc(c.id)}: ${esc(c.label)} (weight ${esc(c.weight)})</li>`).join('')}</ul>` : ''}
-      ${historyRecord(e)}
-      ${['artifact','profile','facts'].includes(e.kind) ? `<button class="btn btn--secondary" data-act="restore-history" data-index="${e.index}">Restore this ${e.kind==='artifact'?'copy':e.kind}</button>` : ''}
-    </div></details>`).join('') || '<p>No previous revisions yet.</p>'}
-    <details class="spec"><summary class="spec__bar">Activity record</summary><div class="spec__body">${(state.history?.activity || []).map(e=>`<p>${esc(e.at)} · ${esc(e.who)}: ${esc(e.x)}</p>`).join('')}</div></details>
+  return shell(`${head('This search','History and recovery','Previous copy and evaluations stay on file. Restoring a profile clears current scores, because they were given against the old one.')}
+    <div class="band"><div class="wrap stack">
+      ${entries.length ? entries.map(e => `<details class="spec"><summary class="spec__bar">${esc(e.key || e.kind)} · ${esc(e.at)} · ${esc(e.who)}</summary><div class="spec__body stack stack--tight">
+        ${e.criteria ? `<p class="t-small">Profile revision ${esc(e.revision)}</p><ul>${e.criteria.map(c => `<li>${esc(c.id)}: ${esc(c.label)} (weight ${esc(c.weight)})</li>`).join('')}</ul>` : ''}
+        ${historyRecord(e)}
+        ${['artifact','profile','facts'].includes(e.kind) ? `<div class="row">${withTip(`<button type="button" class="btn btn--secondary btn--sm" data-act="restore-history" data-index="${e.index}">Restore this ${e.kind==='artifact'?'copy':e.kind}</button>`,
+          'Bring this saved version back as the current one. The version it replaces stays in this list.')}</div>` : ''}
+      </div></details>`).join('')
+      : emptyState('No previous revisions yet',
+        'Saved versions appear here as documents are edited, profiles are adopted, and responses are corrected.',
+        openBtn('profile','Open the candidate profile') || `<button type="button" class="btn btn--secondary" data-go="overview">Back to this search</button>`)}
+      <details class="spec"><summary class="spec__bar">Activity record</summary><div class="spec__body">${(state.history?.activity || []).map(e=>`<p class="t-small">${esc(e.at)} · ${esc(e.who)}: ${esc(e.x)}</p>`).join('') || '<p class="t-small">Nothing recorded yet.</p>'}</div></details>
     </div></div>`);
 }
 
@@ -3423,6 +3682,14 @@ function focusKey(el){
   const row = el.closest?.('[data-row]');
   if (row && el.dataset.f) return '[data-row="'+row.dataset.row+'"] [data-f="'+el.dataset.f+'"]';
   if (el.dataset.path) return '[data-path="'+el.dataset.path+'"]';
+  // Suggestion chips and add/remove controls: identified by what they act on,
+  // so the keyboard stays where it was after the list redraws.
+  for (const attr of ['pick','ipick']){
+    if (el.dataset[attr] && el.dataset.label && !el.dataset.label.includes('"')){
+      return '[data-'+attr+'="'+el.dataset[attr]+'"][data-label="'+el.dataset.label+'"]';
+    }
+  }
+  for (const attr of ['add','iadd']) if (el.dataset[attr]) return '[data-'+attr+'="'+el.dataset[attr]+'"]';
   if (el.name && el.form?.id) return '#'+el.form.id+' [name="'+el.name+'"]';
   return null;
 }
@@ -3663,8 +3930,33 @@ document.addEventListener('click', async e => {
     const radio = hit.closest('.pkgmx')?.querySelector(`thead th:nth-child(${hit.cellIndex + 1}) input[name="package"]`);
     if (radio) radio.checked = true;
   }
-  const t = e.target.closest('[data-go],[data-open],[data-act],[data-add],[data-del],[data-w],button[data-theme],[data-cand],[data-score],[data-pick],[data-ipick],[data-iadd],[data-idel],[data-iw],[data-phase],[data-panel],[data-mode]');
+  const t = e.target.closest('[data-go],[data-open],[data-act],[data-add],[data-del],[data-w],button[data-theme],[data-cand],[data-score],[data-pick],[data-ipick],[data-iadd],[data-idel],[data-iw],[data-phase],[data-panel],[data-mode],[data-artadd],[data-artdel]');
   if (!t) return;
+
+  /* --- structured document editing --------------------------------------- */
+  if (t.dataset.artadd || t.dataset.artdel){
+    const spec = (t.dataset.artadd || t.dataset.artdel).split(':');
+    const kind = spec[0], path = spec[1];
+    let draft;
+    // Read the form first so nothing typed since the last save is lost when
+    // the list grows or shrinks.
+    try { draft = collectArtifact(kind); }
+    catch { toast('Fix the source JSON before changing this list.'); return; }
+    const list = Array.isArray(draft[path]) ? draft[path] : [];
+    if (t.dataset.artadd){
+      const make = ART_TEMPLATE[kind+'.'+path];
+      list.push(make ? make(list) : {});
+    } else {
+      list.splice(Number(spec[2]), 1);
+    }
+    draft[path] = list;
+    state.search.artifacts = { ...(state.search.artifacts||{}), [kind]: draft };
+    state.dirty = true;
+    render();
+    // Put the caret in the first field of the item that was just created.
+    if (t.dataset.artadd) $('#edit-'+kind+' [data-path^="'+path+'.'+(list.length-1)+'."]')?.focus();
+    return;
+  }
 
   if (t.dataset.theme){
     const v = t.dataset.theme;
@@ -3701,7 +3993,16 @@ document.addEventListener('click', async e => {
     return;
   }
   if (t.dataset.mode){
-    state.mode[t.dataset.modeKey || state.view] = t.dataset.mode;
+    const key = t.dataset.modeKey || state.view;
+    // Carry unsaved edits across the switch, so Preview shows what was just
+    // typed and going back to Edit finds it still there.
+    if ($('#edit-'+key) || $('#art-'+key)){
+      let draft;
+      try { draft = collectArtifact(key); }
+      catch { toast('Fix the source JSON before switching to preview.'); return; }
+      state.search.artifacts = { ...(state.search.artifacts||{}), [key]: draft };
+    }
+    state.mode[key] = t.dataset.mode;
     render();
     return;
   }
@@ -3887,6 +4188,15 @@ document.addEventListener('click', async e => {
       state.user = null; state.search = null; state.view = 'home';
     } catch (err) { toast(err.message); }
     finally { hideWait(); render(); }
+    return;
+  }
+  if (act==='jump'){
+    const target = document.getElementById(t.dataset.to);
+    if (!target) return;
+    target.scrollIntoView({ behavior:'smooth', block:'start' });
+    // Move the keyboard with the page, not just the scroll position.
+    target.setAttribute('tabindex','-1');
+    target.focus({ preventScroll:true });
     return;
   }
   if (act==='clear-filters'){
@@ -4472,7 +4782,18 @@ document.addEventListener('input', e => {
     state.dirty = true;
     markUnsaved();
   }
+  if (e.target.closest('#applyform')) paintApplyProgress();
 });
+
+// How far through the questionnaire a candidate is. Updated against the live
+// DOM: re-rendering the public form would throw away what they have typed.
+function paintApplyProgress(){
+  const el = $('#applycount');
+  if (!el) return;
+  const total = Number(el.dataset.total) || 0;
+  const done = $$('#applyform textarea').filter(t => t.value.trim()).length;
+  el.textContent = done + ' of ' + total + ' answered';
+}
 window.addEventListener('beforeunload', e => {
   if (state.dirty) { e.preventDefault(); e.returnValue = ''; }
 });

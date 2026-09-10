@@ -1300,7 +1300,9 @@ async function run(){
 
   record('Each process step has a Next button', /data-act="next-step"/.test(appJs) && /function nextBtn/.test(appJs) && /function stepFooter/.test(appJs) && /act==='next-step'/.test(appJs));
 
-  record('Community has Next to the initial survey', /data-from="community"/.test(appJs) && /Next · Initial survey/.test(appJs) && /stepNextCard\('community'\)/.test(appJs));
+  // Next now lives in the shared action bar rather than a card of its own, so
+  // one screen no longer offers the same move twice (D06).
+  record('Community has Next to the initial survey', /data-from="community"/.test(appJs) && /Next · Initial survey/.test(appJs) && /function actionBar/.test(appJs));
 
   record('Brochure and ads have a posting design', /pack--brochure/.test(appJs) && /pack--ad/.test(appJs) && /Copy for posting/.test(appJs) && /act==='print-pack'/.test(appJs) && /act==='copy-post'/.test(appJs));
 
@@ -1320,7 +1322,15 @@ async function run(){
 
   record('Draft profile reads notes before withBusy', /act==='draft-profile'[\s\S]*profilenotes[\s\S]*withBusy/.test(appJs));
 
-  record('Drafts edit in labeled fields', /function collectArtifact/.test(appJs) && /id="edit-\$\{kind\}"/.test(appJs) && /data-path/.test(appJs) && /Edit the copy/.test(appJs) && /theOpportunity/.test(appJs));
+  record('Drafts edit in labeled fields', /function collectArtifact/.test(appJs) && /id="edit-\$\{kind\}"/.test(appJs) && /data-path/.test(appJs)
+    && /function docBar/.test(appJs) && /data-mode="edit"/.test(appJs) && /theOpportunity/.test(appJs));
+
+  // A questionnaire, guide, agreement or ad plan can be built by hand from
+  // nothing. Before DEP-13 a blank document offered only an editable `{}` (D05).
+  record('Documents can be written without AI or raw JSON',
+    /const ART_TEMPLATE = \{/.test(appJs) && /data-artadd=/.test(appJs) && /data-artdel=/.test(appJs)
+      && /'survey1\.questions'/.test(appJs) && /Add a question/.test(appJs)
+      && /Answer required/.test(appJs) && /Advanced · source JSON/.test(appJs));
 
   record('Save artifact reads the form before withBusy', /act==='save-art'[\s\S]*collectArtifact[\s\S]*withBusy/.test(appJs));
 
