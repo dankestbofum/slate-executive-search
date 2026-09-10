@@ -253,19 +253,14 @@ button.strip__s:hover{background:var(--sunken)}
 .seal{display:flex; gap:var(--s-3); padding:var(--s-5); border:1px dashed var(--line-strong); border-radius:var(--r-3); background:var(--sunken)}
 .req{color:var(--stop)}
 .whoami__opt{pointer-events:none}
-textarea.input{min-height:42px}
-.field__hint{font-size:12.5px; color:var(--ink-3); line-height:1.45}
-.t-small{font-size:.875rem; line-height:1.55; color:var(--ink-2)}
-.sub{font-size:11px; font-weight:700; letter-spacing:.13em; text-transform:uppercase; color:var(--ink-3); margin:var(--s-5) 0 var(--s-3); padding-bottom:var(--s-2); border-bottom:1px solid var(--line)}
-.grid2{display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:var(--s-4)}
-.stack{display:flex; flex-direction:column; gap:var(--s-4)}
-.mono{font-family:"IBM Plex Mono",ui-monospace,monospace}
-.page{min-width:0; background:var(--paper)}
+/* The duplicate .grid2, .sub, .btn--ghost, .btn--sm, .field__hint, .t-small,
+   .stack, .mono, .page and textarea rules that used to sit here were second
+   copies of rules in styles.css. Because this file loads last, the copies won
+   silently — .grid2 became a four-column dashboard grid on desktop forms
+   (D09). They are defined once, in styles.css. */
 .shell.busy{cursor:wait}
 .rail__note b{color:var(--ink)}
 .mast__id{margin-left:auto; font-size:11.5px}
-.btn--ghost{background:transparent; color:var(--accent); border-color:transparent}
-.btn--sm{min-height:32px; padding:0 11px; font-size:13px}
 .tile__n{font-size:13px; color:var(--ink-3)}
 .tile--hi{border-color:color-mix(in srgb,var(--accent) 40%,transparent); background:var(--accent-tint)}
 .step__n{font-variant-numeric:tabular-nums}

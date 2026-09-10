@@ -1,0 +1,139 @@
+[
+  {
+    "name": "desktop-new-measured",
+    "viewport": 1440,
+    "documentWidth": 1440,
+    "height": 2117,
+    "heading": "Who is hiring, and for what",
+    "headingTop": 105.0625,
+    "mainTop": 0,
+    "clientFieldTop": 1644.890625,
+    "tableWidth": 1054,
+    "tableViewport": 1056
+  },
+  {
+    "name": "package-basic",
+    "viewport": 1440,
+    "documentWidth": 1440,
+    "height": 3176,
+    "heading": "Basic · $3,500 to $5,000",
+    "headingTop": 105.0625,
+    "mainTop": 0,
+    "clientFieldTop": null,
+    "tableWidth": 1054,
+    "tableViewport": 1056
+  },
+  {
+    "name": "package-enhanced",
+    "viewport": 1440,
+    "documentWidth": 1440,
+    "height": 4646,
+    "heading": "Enhanced · $7,500 to $12,500",
+    "headingTop": 105.0625,
+    "mainTop": 0,
+    "clientFieldTop": null,
+    "tableWidth": 1054,
+    "tableViewport": 1056
+  },
+  {
+    "name": "package-executive",
+    "viewport": 1440,
+    "documentWidth": 1440,
+    "height": 4253,
+    "heading": "Executive · $15,000 to $25,000+",
+    "headingTop": 105.0625,
+    "mainTop": 0,
+    "clientFieldTop": null,
+    "tableWidth": 1054,
+    "tableViewport": 1056
+  },
+  {
+    "name": "candidate-desktop",
+    "viewport": 1440,
+    "documentWidth": 1440,
+    "height": 1189,
+    "heading": "Initial candidate survey",
+    "headingTop": 137.8125,
+    "mainTop": null,
+    "clientFieldTop": null,
+    "violations": []
+  },
+  {
+    "name": "candidate-mobile",
+    "viewport": 390,
+    "documentWidth": 390,
+    "height": 1372,
+    "heading": "Initial candidate survey",
+    "headingTop": 137.8125,
+    "mainTop": null,
+    "clientFieldTop": null,
+    "violations": []
+  },
+  {
+    "name": "candidate-receipt",
+    "viewport": 390,
+    "documentWidth": 390,
+    "height": 844,
+    "heading": "Received",
+    "headingTop": 137.8125,
+    "mainTop": null,
+    "clientFieldTop": null,
+    "violations": []
+  },
+  {
+    "name": "candidate-receipt-reload",
+    "viewport": 390,
+    "documentWidth": 390,
+    "height": 844,
+    "heading": "Received",
+    "headingTop": 137.8125,
+    "mainTop": null,
+    "clientFieldTop": null
+  },
+  {
+    "name": "committee-home",
+    "viewport": 1440,
+    "documentWidth": 1440,
+    "height": 1000,
+    "heading": "Welcome, Dana",
+    "headingTop": 105.0625,
+    "mainTop": 0,
+    "clientFieldTop": null,
+    "violations": [
+      {
+        "id": "color-contrast",
+        "impact": "serious",
+        "nodes": [
+          {
+            "target": [
+              ".next > .t-label"
+            ],
+            "summary": "Fix any of the following:\n  Element has insufficient color contrast of 4.32 (foreground color: #5e737d, background color: #e9f0f8, font size: 8.3pt (11px), font weight: bold). Expected contrast ratio of 4.5:1"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "committee-intake",
+    "viewport": 1440,
+    "documentWidth": 1440,
+    "height": 2318,
+    "heading": "What are you looking for?",
+    "headingTop": 105.0625,
+    "mainTop": 0,
+    "clientFieldTop": null,
+    "violations": []
+  },
+  {
+    "name": "committee-intake-mobile",
+    "viewport": 390,
+    "documentWidth": 390,
+    "height": 4503,
+    "heading": "What are you looking for?",
+    "headingTop": 867.734375,
+    "mainTop": 732.046875,
+    "clientFieldTop": null,
+    "violations": []
+  }
+]

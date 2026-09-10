@@ -22,10 +22,22 @@ async function startWorkspace(page) {
   await expect(page.getByRole('button', { name: /open a new search/i }).first()).toBeVisible({ timeout: 10000 });
 }
 
+// Below the desktop breakpoint the rail is a drawer, so anything in it has to
+// be opened before it can be used. On desktop the menu button is not rendered
+// and the rail is already there.
+async function openNav(page) {
+  const menu = page.getByRole('button', { name: 'Menu', exact: true });
+  if (await menu.isVisible().catch(() => false)) {
+    await menu.click();
+    await expect(page.locator('.shell')).toHaveClass(/shell--navopen/);
+  }
+}
+
 test('Start opens the workspace without credentials and survives reload', async ({ page }) => {
   await startWorkspace(page);
   await page.reload();
   await expect(page.getByRole('button', { name: /open a new search/i }).first()).toBeVisible();
+  await openNav(page);
   await page.getByRole('button', { name: 'Leave workspace', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Start', exact: true })).toHaveCount(2);
   await page.getByRole('button', { name: 'Start', exact: true }).last().click();
@@ -69,11 +81,11 @@ test('a county search can be opened and reloads with its type intact', async ({ 
 
   await page.getByRole('button', { name: /create search/i }).click();
 
-  await expect(page.getByText('Browser County').first()).toBeVisible({ timeout: 10000 });
+  await expect(page.getByText('Browser County').filter({ visible: true }).first()).toBeVisible({ timeout: 10000 });
 
   await page.reload();
   await page.waitForLoadState('networkidle');
-  await expect(page.getByText('Browser County').first()).toBeVisible({ timeout: 10000 });
+  await expect(page.getByText('Browser County').filter({ visible: true }).first()).toBeVisible({ timeout: 10000 });
 });
 
 test('the candidate questionnaire is usable and states its support contact', async ({ page, request }) => {

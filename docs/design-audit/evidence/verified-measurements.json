@@ -1,0 +1,33 @@
+{
+  "mobileOverview": {
+    "headingTop": 1475.734375,
+    "mainTop": 1340.046875,
+    "viewport": 390
+  },
+  "mobileScreen": {
+    "headingTop": 1475.734375,
+    "mainTop": 1340.046875,
+    "viewport": 390,
+    "tableWidth": 1349.734375,
+    "tableViewport": 326
+  },
+  "tablet": {
+    "headingTop": 1445.109375,
+    "mainTop": 1340.046875,
+    "viewport": 768
+  },
+  "darkRoot": "true",
+  "violations": [
+    {
+      "id": "aria-allowed-attr",
+      "nodes": [
+        {
+          "target": [
+            "html"
+          ],
+          "summary": "Fix all of the following:\n  ARIA attribute is not allowed: aria-pressed=\"true\""
+        }
+      ]
+    }
+  ]
+}

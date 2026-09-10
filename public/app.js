@@ -87,7 +87,24 @@ const state = {
   newPackage:null,
   // Search ids checked on Home for a bulk delete. Dropped after the delete
   // runs, and ignored if a file is no longer on the book.
-  picked:[]
+  picked:[],
+  // Why the last search-index refresh failed, if it did. The previously
+  // loaded list stays on screen; this drives the retry notice above it.
+  searchesError:null,
+  // Navigation shell state. `navOpen` is the mobile drawer; `railOpen` holds
+  // the phase groups the user has expanded or collapsed by hand, so a render
+  // does not fight their choice.
+  navOpen:false,
+  railOpen:{},
+  // Where each route was scrolled to, so Back returns to the same place.
+  scrollMem:{},
+  // Screening list filters, kept per search so Back recovers list context.
+  filters:{},
+  // Open/close state for panels that collapse (suggestion banks, advanced
+  // source JSON, package comparison).
+  open:{},
+  // Which editor mode a document surface is in: 'edit' or 'preview'.
+  mode:{}
 };
 
 function toast(msg, ms=3400){
@@ -572,25 +589,149 @@ function offPackage(view){
   return !s.steps.some(st => st.key === key);
 }
 
-async function go(view, extra={}){
+/* ===========================================================================
+ * Routing
+ *
+ * Until DEP-13 the current screen lived only in `state.view`: refreshing threw
+ * the user back to Home, browser Back left the app, and there was no address
+ * to send anyone. Every screen now has a URL, and the visible Back control and
+ * the browser's own Back move through the same history.
+ * ========================================================================= */
+
+// How many entries this session has pushed. Anything above zero means the
+// previous entry belongs to the app, so Back can safely use browser history.
+let navDepth = 0;
+
+function routeFor(view = state.view, opts = {}){
+  const sel = opts.sel !== undefined ? opts.sel : state.sel;
+  if (view === 'packages') return '#/packages/' + encodeURIComponent(opts.pkg || state.showcasePkg || '');
+  if (view === 'new' || view === 'archives' || view === 'home') return '#/' + view;
+  const id = opts.searchId || state.search?.id;
+  if (!id) return '#/home';
+  if (view === 'overview') return '#/s/' + encodeURIComponent(id);
+  if (view === 'person') return '#/s/' + encodeURIComponent(id) + '/person/' + encodeURIComponent(sel || '');
+  return '#/s/' + encodeURIComponent(id) + '/' + encodeURIComponent(view);
+}
+
+function parseRoute(hash){
+  const parts = String(hash || '').replace(/^#\/?/, '').split('/').filter(Boolean).map(p => {
+    try { return decodeURIComponent(p); } catch { return p; }
+  });
+  if (!parts.length) return { view:'home' };
+  if (parts[0] === 's'){
+    if (!parts[1]) return { view:'home' };
+    const view = parts[2] || 'overview';
+    return { view, searchId:parts[1], sel: view === 'person' ? (parts[3] || null) : null };
+  }
+  if (parts[0] === 'packages') return { view:'packages', pkg: parts[1] || null };
+  if (['home','new','archives'].includes(parts[0])) return { view:parts[0] };
+  return { view:'home' };
+}
+
+// The route the address bar is showing right now, used to key scroll memory.
+function currentRoute(){
+  return location.hash || '#/home';
+}
+
+function rememberScroll(){
+  state.scrollMem[currentRoute()] = window.scrollY || 0;
+}
+
+function pushRoute(replace){
+  const url = routeFor();
+  if (replace || url === currentRoute()){
+    history.replaceState({ slateDepth:navDepth }, '', url);
+  } else {
+    navDepth += 1;
+    history.pushState({ slateDepth:navDepth }, '', url);
+  }
+}
+
+// Where the visible Back control lands when there is no in-app history to pop:
+// a deep link opened in a fresh tab. Never leaves the app.
+function backFallback(){
+  const v = state.view;
+  if (v === 'person') return { view:'screen', label:'Back to screening' };
+  if (v === 'home' || v === 'new' || v === 'archives' || v === 'packages') return { view:'home', label:'Back to Home' };
+  if (v === 'overview') return { view:'home', label:'Back to Home' };
+  if (state.search) return { view:'overview', label:'Back to '+(state.search.client || 'this search') };
+  return { view:'home', label:'Back to Home' };
+}
+
+function canGoBack(){
+  if (location.pathname.startsWith('/apply/')) return false;
+  if (!state.user) return false;
+  // Home with nothing behind it has no meaningful return destination.
+  if (state.view === 'home' && navDepth <= 0) return false;
+  return true;
+}
+
+function backControl(){
+  if (!canGoBack()) return '';
+  const label = navDepth > 0 ? 'Back' : backFallback().label;
+  return `<div class="backbar"><button type="button" class="backlink" data-act="back">
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3 5 8l5 5"/></svg>
+    <span>${esc(label)}</span>
+  </button></div>`;
+}
+
+// Back is one behaviour whether it is pressed on the page or in the browser
+// chrome: same history, same unsaved-edit prompt, same fallbacks.
+async function goBack(){
+  if (navDepth > 0){ history.back(); return; }
+  const to = backFallback();
+  await go(to.view);
+}
+
+// Move to a parsed route without pushing a new entry. Used by boot (deep link
+// or refresh) and by popstate (browser Back/Forward).
+async function applyRoute(route, { push=false }={}){
+  if (route.searchId && state.search?.id !== route.searchId){
+    try { await loadSearch(route.searchId); }
+    catch { toast('That search is not on your book, or is no longer available.'); await go('home', {}, { replace:true }); return; }
+  }
+  if (!route.searchId && ['overview','facts','person','history'].includes(route.view)) route = { view:'home' };
+  if (route.pkg) state.showcasePkg = route.pkg;
+  const extra = route.sel ? { sel:route.sel } : {};
+  await go(route.view, extra, { push, replace:!push, fromHistory:true });
+}
+
+async function go(view, extra={}, opts={}){
   if (!state.busy && state.dirty && !confirm('Leave this page and discard unsaved edits?')) return;
   state.dirty = false;
-  if (view === 'home') state.search = null;
-  try {
-    if (view === 'archives') state.archives = await api('/api/archives');
-    if (view === 'history') state.history = await api('/api/searches/'+state.search.id+'/history');
-  } catch (error) { toast(error.message); return; }
+  if (!opts.fromHistory) rememberScroll();
+  state.navOpen = false;
+  if (view === 'home') { state.search = null; state.sel = null; }
   if (offPackage(view)) {
     const st = (state.health?.steps || []).find(x => x.key === view);
     toast((st ? STEP_NAME[view] || st.t : 'That step')+' is not part of the '+packageLabel(state.search.package)+' package.');
     view = 'overview';
   }
+  // A deep link can name a step a committee member does not take part in.
+  if (isCommittee() && STEP_FLOW.includes(view === 'intake-mine' ? 'intake' : view)
+      && !COMMITTEE_STEPS.has(view === 'intake-mine' ? 'intake' : view)){
+    toast('That step is run by the search consultant.');
+    view = 'overview';
+  }
+  if (state.search && ['facts','history'].includes(view) && !canEdit()){
+    view = 'overview';
+  }
+  if (view === 'archives' && isCommittee()) view = 'home';
+  // Every other screen belongs to an open search. A link to one without a
+  // loaded file lands on Home rather than rendering an empty workspace.
+  if (!state.search && !['home','new','archives','packages'].includes(view)) view = 'home';
+  try {
+    if (view === 'home') await refreshSearches();
+    if (view === 'archives') state.archives = await api('/api/archives');
+    if (view === 'history') state.history = await api('/api/searches/'+state.search.id+'/history');
+  } catch (error) { toast(error.message); return; }
   Object.assign(state, extra, { view });
   if (view === 'brochure' && brochureNeedsFill(state.search)){
+    pushRoute(opts.replace);
     if (state.busy) {
       try { await fillBrochureFromCommunity(); }
       catch (err) { toast(err.message); }
-      window.scrollTo({ top:0, behavior:'instant' });
+      settleView(opts);
       return;
     }
     await withBusy(() => fillBrochureFromCommunity(), {
@@ -599,11 +740,28 @@ async function go(view, extra={}){
       copy: 'Pulling the community research and the adopted profile into a packet. Then you can add pictures.',
       steps: ['Reading the community file', 'Laying out the packet']
     });
-    window.scrollTo({ top:0, behavior:'instant' });
+    settleView(opts);
     return;
   }
+  pushRoute(opts.replace);
   render();
-  window.scrollTo({ top:0, behavior:'instant' });
+  settleView(opts);
+}
+
+// After a screen changes: put the page where the user expects it and move
+// keyboard focus to the new heading, which is what makes a screen change
+// announce itself instead of silently repainting.
+function settleView(opts = {}){
+  const y = opts.fromHistory ? (state.scrollMem[currentRoute()] || 0) : 0;
+  window.scrollTo({ top:y, behavior:'instant' });
+  focusHeading();
+}
+
+function focusHeading(){
+  const h = $('#app h1');
+  if (!h) return;
+  h.setAttribute('tabindex','-1');
+  h.focus({ preventScroll:true });
 }
 
 function brochureHasCopy(b){
@@ -673,11 +831,65 @@ function ico(name){
   return `<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">${p}</svg>`;
 }
 function pill(k, label){ return `<span class="pill pill--${k}">${esc(label)}</span>`; }
+
+/* ===========================================================================
+ * Hover text and contextual help
+ *
+ * A short description of what a control actually does, available on hover, on
+ * keyboard focus, and — where a pointer cannot hover — from a labelled help
+ * button beside it. The description is attached with aria-describedby so the
+ * control keeps its own accessible name. Anything a user must know before
+ * acting stays visible in the page; these only explain.
+ * ========================================================================= */
+
+let tipSeq = 0;
+
+/**
+ * Wrap a control with a tooltip.
+ *
+ * `html` must start with the control's own opening tag; the id is written into
+ * that tag as aria-describedby. Tooltips hold no interactive content, so they
+ * are safe to leave in the accessibility tree as description text.
+ */
+function withTip(html, text){
+  if (!text) return html;
+  const markup = String(html).trim();
+  const id = 'tip-' + (++tipSeq);
+  const m = /^<(button|a|span|select|input|summary|label)\b/.exec(markup);
+  if (!m) return markup;
+  const described = markup.replace(/^<([a-z]+)\b/, '<$1 aria-describedby="'+id+'"');
+  return `<span class="tipwrap">${described}<button type="button" class="tiphelp" data-act="tip-help" aria-expanded="false" aria-controls="${id}" aria-label="Explain this control">?</button><span class="tip" role="tooltip" id="${id}" hidden>${esc(text)}</span></span>`;
+}
+
+// Explanations reused across screens, so the same control says the same thing
+// wherever it appears.
+const TIPS = {
+  copyInvite:'Copy this candidate’s questionnaire link to share with them.',
+  openQuestionnaire:'Open this candidate’s questionnaire in a new tab, exactly as they see it.',
+  release:'Make panel scores visible to the search committee. Until then each person sees only their own.',
+  seal:'Hide panel scores again. Everyone sees only their own scores.',
+  review:'Record that you checked this draft against its sources.',
+  unreview:'Send this back to draft so it can be edited and reviewed again.',
+  advanceSemi:'Move this candidate to semifinalist. It opens the semifinalist questionnaire step.',
+  advanceFinal:'Move this candidate to finalist. Reference checks are for finalists only.',
+  saveScores:'Save your ratings and your note to the file.',
+  reloadSearch:'Fetch the latest saved version of this search from the server.',
+  archive:'Move this search to Archived searches. Nothing is deleted and it can be restored.',
+  replaceInvite:'Issue a new questionnaire link. The old one stops working immediately.',
+  reopenSurvey:'Let this candidate answer again. The original response stays in history.',
+  research:'Read public sources for this jurisdiction and fill the community profile and search facts.',
+  premium:'Use the larger model for this draft. It costs more per draft.',
+  weight:'How much this criterion counts, from 1 (least) to 5 (most).',
+  score:'Rate this candidate against this criterion, from 1 (weakest) to 5 (strongest).',
+  printPack:'Open the browser print dialog with only the printable packet on the page.',
+  backTip:'Return to the screen you came from.'
+};
 function field(label, hint, control){
   return `<label class="field field--wide"><span class="field__label">${label}</span>${hint?`<span class="field__hint">${hint}</span>`:''}${control}</label>`;
 }
 function head(eyebrow, title, lede, actions=''){
   return `<div class="hero"><div class="wrap">
+    ${backControl()}
     <div class="eyebrow">${esc(eyebrow)}</div>
     <h1 class="t-display">${esc(title)}</h1>
     ${lede?`<p class="lede">${lede}</p>`:''}
@@ -711,7 +923,21 @@ async function loadMe(){
     return true;
   } catch { state.user = null; return false; }
 }
-async function loadSearches(){ state.searches = await api('/api/searches'); }
+async function loadSearches(){ state.searches = await api('/api/searches'); state.searchesError = null; }
+
+/**
+ * Reconcile the search index without ever blanking it.
+ *
+ * The audit's D03: `createSearch()` updated `state.search` and Home rendered a
+ * list that had not been refetched, so a search someone had just created was
+ * missing and the counts still read zero. Home now refetches on entry and
+ * after anything that changes the book. A failed refetch keeps the records
+ * already on screen and says so, rather than showing an empty book.
+ */
+async function refreshSearches(){
+  try { await loadSearches(); return true; }
+  catch (error) { state.searchesError = error.message || 'The list could not be refreshed.'; return false; }
+}
 async function loadSearch(id){
   // An in-progress intake draft belongs to one search. Drop it when the file
   // changes so answers cannot bleed from one committee into another.
@@ -724,12 +950,26 @@ async function loadSearch(id){
 // steps they cannot open would only be a list of locked doors.
 const COMMITTEE_STEPS = new Set(['team','intake','profile','screen','finalists']);
 
+// The step the workspace is on right now, whether the view is the step itself
+// or one of the screens that belong to it.
+function isCurrentStep(key){
+  return state.view===key
+    || (state.view==='person' && key==='screen')
+    || (state.view==='intake-mine' && key==='intake');
+}
+
 function railStepLink(st){
-  const current = state.view===st.key
-    || (state.view==='person' && st.key==='screen')
-    || (state.view==='intake-mine' && st.key==='intake');
+  const current = isCurrentStep(st.key);
   const label = (st.n || '')+' · '+(STEP_NAME[st.key] || st.t);
-  return `<button class="rail__link" data-go="${st.key}" ${current?'aria-current="page"':''}>${esc(label)}</button>`;
+  const mark = st.status==='done' ? 'done' : st.blocked ? 'wait' : st.status==='now' ? 'now' : '';
+  return `<button class="rail__link${mark?' rail__link--'+mark:''}" data-go="${st.key}" ${current?'aria-current="page"':''}>${esc(label)}</button>`;
+}
+
+// Phase groups collapse. Nineteen steps in one unbroken column is what pushed
+// the heading 1,400px down the mobile workspace (D01); only the phase being
+// worked opens by default, and a hand-set choice wins over that default.
+function phaseIsOpen(id, here){
+  return state.railOpen[id] === undefined ? here : Boolean(state.railOpen[id]);
 }
 
 function railPhaseGroups(search){
@@ -739,12 +979,31 @@ function railPhaseGroups(search){
     const list = steps.filter(st => st.phase===p.id);
     if (!list.length) return '';
     const wait = p.id===2 && !hasPeople;
+    const done = list.filter(st => st.status==='done').length;
+    const here = list.some(st => isCurrentStep(st.key));
+    const open = phaseIsOpen(p.id, here);
+    const id = 'railphase-'+p.id;
     return `<div class="rail__group${wait?' rail__group--later':''}">
-      <div class="rail__label">${esc(p.t)}</div>
-      ${wait?`<div class="rail__hint">${isCommittee()?'Nothing to do here until candidates apply.':'Add people in Screening. The rest waits until someone is on the file.'}</div>`:''}
-      ${list.map(railStepLink).join('')}
+      <button type="button" class="rail__toggle" data-phase="${p.id}" aria-expanded="${open}" aria-controls="${id}">
+        <svg class="rail__caret" width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3l5 5-5 5"/></svg>
+        <span class="rail__label">${esc(p.t)}</span>
+        <span class="rail__tail">${done}/${list.length}${here?' · here':''}</span>
+      </button>
+      <div class="rail__steps" id="${id}"${open?'':' hidden'}>
+        ${wait?`<div class="rail__hint">${isCommittee()?'Nothing to do here until candidates apply.':'Add people in Screening. The rest waits until someone is on the file.'}</div>`:''}
+        ${list.map(railStepLink).join('')}
+      </div>
     </div>`;
   }).join('');
+}
+
+// What the compact mobile bar says you are looking at, so the current search
+// and step stay visible with the drawer closed.
+function shellContext(s){
+  if (state.view === 'packages') return 'Sample · '+packageLabel(showcasePkg());
+  if (!s) return state.view === 'new' ? 'New search' : state.view === 'archives' ? 'Archived searches' : 'Home';
+  const st = (s.steps||[]).find(x => isCurrentStep(x.key));
+  return (s.client || 'Search') + (st ? ' · Step '+st.n+' · '+(STEP_NAME[st.key]||st.t) : '');
 }
 
 function shell(body){
@@ -754,11 +1013,25 @@ function shell(body){
   // Search facts are an editing surface; a committee member gets the overview.
   const nav = isCommittee() ? NAV.filter(([v]) => v !== 'facts') : NAV;
   const workspace = nav.map(([v,l]) => `<button class="rail__link" data-go="${v}" ${state.view===v?'aria-current="page"':''}>${l}</button>`).join('');
-  return `<div class="shell${state.busy?' busy':''}">
-    <nav class="rail" aria-label="Primary">
+  return `<div class="shell${state.busy?' busy':''}${state.navOpen?' shell--navopen':''}">
+    <a class="skip" href="#main" data-act="skip">Skip to content</a>
+    <header class="appbar">
+      <button type="button" class="appbar__menu" data-act="nav-toggle" aria-expanded="${state.navOpen}" aria-controls="rail">
+        <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M2 4h12M2 8h12M2 12h12"/></svg>
+        <span>Menu</span>
+      </button>
+      <span class="appbar__ctx">${esc(shellContext(s))}</span>
+    </header>
+    <div class="scrim" data-act="nav-close" ${state.navOpen?'':'hidden'}></div>
+    <nav class="rail" id="rail" aria-label="Primary">
+      <div class="rail__head">
       <div class="rail__brand">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="u-accent" aria-hidden="true"><path d="M4 20h16M6 20V9l6-4 6 4v11M10 20v-5h4v5"/></svg>
         <span class="rail__name">Slate</span><span class="rail__ver">Live</span>
+      </div>
+      <button type="button" class="rail__close" data-act="nav-close" aria-label="Close navigation">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+      </button>
       </div>
       <div class="whoami">
         <div class="whoami__hd"><span class="t-label">Workspace account</span></div>
@@ -787,9 +1060,9 @@ function shell(body){
         <button class="btn btn--ghost btn--sm" data-act="logout">Leave workspace</button>
       </div>
     </nav>
-    <main class="page">
+    <main class="page" id="main" tabindex="-1">
       <div class="masthead"><div class="wrap"><div class="masthead__in">
-        <nav class="crumbs" id="crumbs"></nav>
+        <nav class="crumbs" id="crumbs" aria-label="Breadcrumb"></nav>
         <span class="mono mast__id">${state.view==='packages'?'SAMPLE · '+esc(packageLabel(showcasePkg())):(s?esc(s.no)+' · '+esc(s.position)+(s.package?' · '+esc(packageLabel(s.package)):''):'Slate')}</span>
       </div></div></div>
       ${body}
@@ -797,14 +1070,41 @@ function shell(body){
   </div>`;
 }
 
+// What screen the user is on, in one phrase. Feeds both the breadcrumb tail
+// and the document title, so a browser tab and a screen-reader announcement
+// name the actual step rather than the product.
+function viewLabel(){
+  const v = state.view;
+  if (v === 'packages') return 'Packages · '+packageLabel(showcasePkg());
+  if (v === 'home') return 'Home';
+  if (v === 'new') return 'New search';
+  if (v === 'archives') return 'Archived searches';
+  if (v === 'history') return 'History and recovery';
+  if (v === 'facts') return 'Search facts';
+  if (v === 'overview') return 'Overview';
+  if (v === 'person'){
+    const c = (state.search?.candidates||[]).find(x => x.id === state.sel);
+    return c ? c.name : 'Candidate';
+  }
+  const key = v === 'intake-mine' ? 'intake' : v === 'people' ? 'screen' : v;
+  const st = stepOf(key);
+  const name = STEP_NAME[key] || DRAFTS[key]?.title || STAFF[key]?.title;
+  if (!name) return 'Slate';
+  return st?.n ? 'Step '+st.n+' · '+name : name;
+}
+
 function crumbs(){
   const el = $('#crumbs');
   if (!el) return;
   const s = state.search;
+  const tail = state.view==='home' ? '' : `<span class="dot"></span><span aria-current="page"><b>${esc(viewLabel())}</b></span>`;
   el.innerHTML = `<button type="button" data-go="home">Home</button>` +
-    (state.view==='packages' ? `<span class="dot"></span><span>Packages</span><span class="dot"></span><span>${esc(packageLabel(showcasePkg()))}</span>` :
-    (s ? `<span class="dot"></span><button type="button" data-go="overview">${esc(s.client||'Search')}</button>` :
-      (state.view==='new' ? `<span class="dot"></span><span>New search</span>` : '')));
+    (state.view==='packages' ? `<span class="dot"></span><span>Packages</span>` :
+    (s ? `<span class="dot"></span><button type="button" data-go="overview">${esc(s.client||'Search')}</button>` : '')) +
+    tail;
+  document.title = state.user
+    ? (state.view==='home' ? 'Home' : viewLabel()) + (s ? ' · '+(s.client||'Search') : '') + ' · Slate'
+    : 'Slate — Executive Search';
 }
 
 function vGate(){
@@ -860,6 +1160,18 @@ function vHomeCommittee(){
         <div class="spec__body spec__body--flush">${rows || '<div class="empty"><div class="empty__t">Nothing yet</div>When a consultant seats you on a search, it appears here.</div>'}</div>
       </div>
     </div></div>`);
+}
+
+// Shown when the search index could not be refreshed. The records already
+// loaded stay on the page; this says they may be out of date and offers a
+// retry, rather than replacing the book with an empty state.
+function searchesNotice(){
+  if (!state.searchesError) return '';
+  return `<div class="notice notice--wait" role="status"><div>
+    <div class="notice__t">This list may be out of date</div>
+    <div class="notice__b">${esc(state.searchesError)} The searches below are the ones last loaded.
+      <button class="btn btn--secondary btn--sm" data-act="retry-searches">Try again</button></div>
+  </div></div>`;
 }
 
 function pickedIds(){
@@ -2802,15 +3114,155 @@ function page(){
   }
 }
 
+// Mark the selected theme on the three theme buttons and nowhere else.
+function paintTheme(){
+  const theme = document.documentElement.getAttribute('data-theme') || 'auto';
+  $$('button[data-theme]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.theme === theme)));
+  // A previous release wrote this onto the document element, where it is not
+  // a valid attribute and where it survived switching back to Light.
+  if (document.documentElement.hasAttribute('aria-pressed')) document.documentElement.removeAttribute('aria-pressed');
+}
+
+/**
+ * A stable way to find the field that had focus, across a re-render.
+ *
+ * Adding a criterion, changing a weight, or picking a suggestion redraws the
+ * whole page. Without this the caret jumps to the top of the document in the
+ * middle of typing a profile (D11).
+ */
+function focusKey(el){
+  if (!el || el === document.body || !el.matches?.('input, textarea, select, button')) return null;
+  if (el.id) return '#' + el.id;
+  const row = el.closest?.('[data-row]');
+  if (row && el.dataset.f) return '[data-row="'+row.dataset.row+'"] [data-f="'+el.dataset.f+'"]';
+  if (el.dataset.path) return '[data-path="'+el.dataset.path+'"]';
+  if (el.name && el.form?.id) return '#'+el.form.id+' [name="'+el.name+'"]';
+  return null;
+}
+
 function render(){
   const root = $('#app');
   if (!root) return;
+  const active = document.activeElement;
+  const key = focusKey(active);
+  const caret = key && 'selectionStart' in active ? [active.selectionStart, active.selectionEnd] : null;
+  const scroll = window.scrollY;
+  tipSeq = 0;
+  hideTip();
   root.innerHTML = page();
   applyDynamicStyles(root);
   crumbs();
-  const theme = document.documentElement.getAttribute('data-theme') || 'auto';
-  $$('[data-theme]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.theme === theme)));
+  paintTheme();
+  if (key){
+    let el = null;
+    try { el = root.querySelector(key); } catch { el = null; }
+    if (el){
+      el.focus({ preventScroll:true });
+      if (caret && 'setSelectionRange' in el){
+        try { el.setSelectionRange(caret[0], caret[1]); } catch { /* not a text field */ }
+      }
+      window.scrollTo({ top:scroll, behavior:'instant' });
+    }
+  }
 }
+
+/**
+ * Open or close the mobile navigation drawer.
+ *
+ * Done against the live DOM rather than through a re-render so that focus and
+ * anything half-typed in the page survive opening the menu.
+ */
+function setNav(open){
+  state.navOpen = Boolean(open);
+  const shell = $('.shell');
+  if (!shell) return;
+  shell.classList.toggle('shell--navopen', state.navOpen);
+  const scrim = $('.scrim');
+  if (scrim) scrim.hidden = !state.navOpen;
+  const menu = $('.appbar__menu');
+  if (menu) menu.setAttribute('aria-expanded', String(state.navOpen));
+  if (state.navOpen) $('.rail__close')?.focus();
+  else menu?.focus();
+}
+
+/* --- tooltip runtime ------------------------------------------------------ */
+
+let tipTimer = null;
+let tipOpen = null;
+
+function tipOf(wrap){ return wrap ? wrap.querySelector(':scope > .tip') : null; }
+
+function hideTip(){
+  clearTimeout(tipTimer);
+  const tip = tipOf(tipOpen);
+  if (tip){
+    tip.hidden = true;
+    tip.classList.remove('tip--below');
+    tip.style.removeProperty('transform');
+  }
+  tipOpen?.querySelector(':scope > .tiphelp')?.setAttribute('aria-expanded','false');
+  tipOpen = null;
+}
+
+// Keep the description inside the viewport, including at 320px and under zoom.
+function placeTip(tip){
+  const pad = 8;
+  const r = tip.getBoundingClientRect();
+  let dx = 0;
+  if (r.left < pad) dx = pad - r.left;
+  else if (r.right > window.innerWidth - pad) dx = (window.innerWidth - pad) - r.right;
+  if (dx) tip.style.transform = 'translateX(calc(-50% + '+Math.round(dx)+'px))';
+  if (r.top < pad) tip.classList.add('tip--below');
+}
+
+function showTip(wrap, immediate){
+  const tip = tipOf(wrap);
+  if (!tip) return;
+  clearTimeout(tipTimer);
+  if (tipOpen === wrap && !tip.hidden) return;
+  const open = () => {
+    if (tipOpen !== wrap) hideTip();
+    tip.hidden = false;
+    tipOpen = wrap;
+    placeTip(tip);
+  };
+  // A brief delay so descriptions do not flash while the pointer crosses a
+  // row of controls on its way somewhere else.
+  if (immediate) open(); else tipTimer = setTimeout(open, 320);
+}
+
+document.addEventListener('pointerover', e => {
+  if (e.pointerType === 'touch') return;
+  const wrap = e.target.closest?.('.tipwrap');
+  if (wrap) showTip(wrap, false);
+  else if (tipOpen && !tipOpen.contains(e.target)) hideTip();
+});
+document.addEventListener('pointerout', e => {
+  if (e.pointerType === 'touch') return;
+  const wrap = e.target.closest?.('.tipwrap');
+  if (!wrap || wrap !== tipOpen) return;
+  // Moving onto the description itself keeps it open and readable.
+  if (e.relatedTarget && wrap.contains(e.relatedTarget)) return;
+  hideTip();
+});
+document.addEventListener('focusin', e => {
+  const wrap = e.target.closest?.('.tipwrap');
+  if (wrap) showTip(wrap, true);
+  else if (tipOpen && !tipOpen.contains(e.target)) hideTip();
+});
+document.addEventListener('focusout', e => {
+  if (!tipOpen) return;
+  if (e.relatedTarget && tipOpen.contains(e.relatedTarget)) return;
+  if (tipOpen.querySelector(':scope > .tiphelp[aria-expanded="true"]')) return;
+  hideTip();
+});
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  // Escape dismisses the description without activating anything.
+  if (tipOpen){ hideTip(); e.stopPropagation(); return; }
+  if (state.navOpen) setNav(false);
+});
+window.addEventListener('resize', hideTip);
 
 function collectCriteria(){
   $$('.crit-row[data-row]').forEach(row => {
@@ -2897,14 +3349,39 @@ document.addEventListener('click', async e => {
     const radio = hit.closest('.pkgmx')?.querySelector(`thead th:nth-child(${hit.cellIndex + 1}) input[name="package"]`);
     if (radio) radio.checked = true;
   }
-  const t = e.target.closest('[data-go],[data-open],[data-act],[data-add],[data-del],[data-w],[data-theme],[data-cand],[data-score],[data-pick],[data-ipick],[data-iadd],[data-idel],[data-iw]');
+  const t = e.target.closest('[data-go],[data-open],[data-act],[data-add],[data-del],[data-w],button[data-theme],[data-cand],[data-score],[data-pick],[data-ipick],[data-iadd],[data-idel],[data-iw],[data-phase],[data-panel],[data-mode]');
   if (!t) return;
 
   if (t.dataset.theme){
     const v = t.dataset.theme;
     if (v==='auto') document.documentElement.removeAttribute('data-theme');
     else document.documentElement.setAttribute('data-theme', v);
-    $$('[data-theme]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.theme===v)));
+    // Scoped to the buttons. Selecting every [data-theme] wrote aria-pressed
+    // onto <html>, which is invalid there and outlived the theme change (D07).
+    paintTheme();
+    return;
+  }
+  if (t.dataset.phase !== undefined && t.dataset.phase !== ''){
+    const id = t.dataset.phase;
+    const next = !(t.getAttribute('aria-expanded') === 'true');
+    state.railOpen[id] = next;
+    t.setAttribute('aria-expanded', String(next));
+    const panel = document.getElementById(t.getAttribute('aria-controls'));
+    if (panel) panel.hidden = !next;
+    return;
+  }
+  if (t.dataset.panel){
+    const key = t.dataset.panel;
+    const next = !(t.getAttribute('aria-expanded') === 'true');
+    state.open[key] = next;
+    t.setAttribute('aria-expanded', String(next));
+    const panel = document.getElementById(t.getAttribute('aria-controls'));
+    if (panel) panel.hidden = !next;
+    return;
+  }
+  if (t.dataset.mode){
+    state.mode[t.dataset.modeKey || state.view] = t.dataset.mode;
+    render();
     return;
   }
   if (t.dataset.go){
@@ -3011,6 +3488,30 @@ document.addEventListener('click', async e => {
   }
 
   const act = t.dataset.act;
+  if (act==='tip-help'){
+    // The touch equivalent of hover: a labelled control that discloses the
+    // same description. Tapping the action itself still performs the action.
+    const wrap = t.closest('.tipwrap');
+    const tip = tipOf(wrap);
+    if (!tip) return;
+    const open = tip.hidden;
+    hideTip();
+    if (open){ tip.hidden = false; tipOpen = wrap; t.setAttribute('aria-expanded','true'); placeTip(tip); }
+    return;
+  }
+  if (act==='back'){ await goBack(); return; }
+  if (act==='nav-toggle'){ setNav(!state.navOpen); return; }
+  if (act==='nav-close'){ setNav(false); return; }
+  if (act==='skip'){
+    e.preventDefault();
+    const main = $('#main');
+    if (main){ main.focus(); main.scrollIntoView({ behavior:'instant', block:'start' }); }
+    return;
+  }
+  if (act==='retry-searches'){
+    await withBusy(async () => { await refreshSearches(); }, false);
+    return;
+  }
   if (act==='reload-search') {
     if (state.dirty && !confirm('Discard unsaved edits and load the latest search?')) return;
     await withBusy(() => loadSearch(state.search.id));
@@ -3537,6 +4038,9 @@ async function createSearch(){
   try {
     await withBusy(async () => {
       state.search = await api('/api/searches', { method:'POST', body });
+      // The book of business has changed. Reconcile it now so Home shows the
+      // new file the moment the user goes back to it (D03).
+      await refreshSearches();
     });
     state.newPackage = null;
     state.newJurisdiction = null;
@@ -3554,6 +4058,21 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').catch(() => {});
 }
 
+// Browser Back/Forward. The same unsaved-edit guard the on-page control uses:
+// if the user cancels, the entry is pushed back so the address bar, the view,
+// and every typed value stay exactly as they were.
+window.addEventListener('popstate', async event => {
+  if (location.pathname.startsWith('/apply/')) return;
+  if (!state.user) return;
+  if (state.dirty && !confirm('Leave this page and discard unsaved edits?')){
+    history.pushState({ slateDepth:navDepth }, '', routeFor());
+    return;
+  }
+  state.dirty = false;
+  navDepth = Number(event.state?.slateDepth) || 0;
+  await applyRoute(parseRoute(location.hash), { push:false });
+});
+
 (async function boot(){
   await loadHealth();
   const m = location.pathname.match(/^\/apply\/([^/]+)/);
@@ -3564,8 +4083,9 @@ if ('serviceWorker' in navigator) {
     return;
   }
   if (await loadMe()){
-    await loadSearches();
-    go('home');
+    await refreshSearches();
+    navDepth = Number(history.state?.slateDepth) || 0;
+    await applyRoute(parseRoute(location.hash), { push:false });
   } else {
     render();
   }

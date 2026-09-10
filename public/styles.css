@@ -92,6 +92,14 @@ a{color:var(--accent-deep); text-underline-offset:.18em; text-decoration-thickne
 
 /* ============================================================ shell */
 .shell{display:grid; grid-template-columns:250px minmax(0,1fr); min-height:100vh}
+.skip{
+  position:absolute; left:var(--s-3); top:var(--s-3); z-index:120;
+  transform:translateY(-250%);
+  background:var(--paper); color:var(--ink); border:1px solid var(--line-strong);
+  border-radius:var(--r-2); padding:10px var(--s-4); font-size:14px; font-weight:600;
+  text-decoration:none;
+}
+.skip:focus{transform:translateY(0)}
 .rail{
   position:sticky; top:0; align-self:start; height:100vh;
   background:var(--chrome); border-right:1px solid var(--line);
@@ -107,9 +115,43 @@ a{color:var(--accent-deep); text-underline-offset:.18em; text-decoration-thickne
   color:var(--accent); background:var(--accent-tint); padding:2px 6px; border-radius:var(--r-1);
   margin-left:auto;
 }
+.rail__head{display:flex; align-items:center; gap:var(--s-2)}
+.rail__head .rail__brand{flex:1; min-width:0}
+.rail__close{
+  display:none; flex:none; align-items:center; justify-content:center;
+  width:40px; height:40px; border:1px solid var(--line); border-radius:var(--r-2);
+  background:var(--paper); color:var(--ink-2); cursor:pointer;
+}
 .rail__group{display:flex; flex-direction:column; gap:1px}
-.rail__hint{font-size:11.5px; line-height:1.45; color:var(--ink-3); padding:0 8px var(--s-2)}
-.rail__group--later{opacity:.92}
+.rail__toggle{
+  display:flex; align-items:center; gap:7px; width:100%;
+  padding:7px 8px; border:0; border-radius:var(--r-2); background:none;
+  font:inherit; text-align:left; cursor:pointer; color:var(--ink-3);
+}
+.rail__toggle:hover{background:var(--sunken); color:var(--ink-2)}
+.rail__caret{flex:none; transition:transform .12s ease}
+.rail__toggle[aria-expanded="true"] .rail__caret{transform:rotate(90deg)}
+.rail__toggle .rail__label{flex:1; min-width:0}
+.rail__label{
+  font-size:11.5px; font-weight:700; letter-spacing:.1em; text-transform:uppercase;
+  color:var(--ink-3); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.rail__steps{display:flex; flex-direction:column; gap:1px}
+.rail__steps[hidden]{display:none}
+.rail__link--done::after{content:"\2713"; margin-left:auto; color:var(--ok); font-size:12px}
+.rail__link--now::after{content:"\25CF"; margin-left:auto; color:var(--accent); font-size:9px}
+.rail__link--wait::after{content:"\2014"; margin-left:auto; color:var(--ink-3); font-size:11px}
+
+/* Compact bar and navigation drawer below the desktop breakpoint. The rail
+   used to become a full-height block of content that pushed the page heading
+   roughly 1,400px down a phone screen (D01). */
+.appbar{display:none}
+.scrim{display:none}
+.rail__hint{font-size:12px; line-height:1.45; color:var(--ink-2); padding:0 8px var(--s-2)}
+/* This group used to be faded as a whole. Fading a navigation group drops its
+   explanatory text under the contrast minimum (D07); the waiting state is
+   carried by the step marks and the hint text instead. */
+.rail__group--later .rail__link{color:var(--ink-3)}
 .rail__link{
   display:flex; align-items:center; gap:9px; padding:5px 8px; border-radius:var(--r-2);
   color:var(--ink-2); font:inherit; font-size:14px; line-height:1.5; text-align:left;
@@ -679,10 +721,152 @@ details.toggle[open] summary::before{transform:rotate(90deg) translateX(-1px)}
 
 @media (max-width:900px){
   .shell{grid-template-columns:minmax(0,1fr)}
-  .rail{position:static; height:auto; border-right:0; border-bottom:1px solid var(--line)}
-  .rail__foot{margin-top:var(--s-3)}
-  .t-display{font-size:2rem}
+  .appbar{
+    display:flex; align-items:center; gap:var(--s-3);
+    position:sticky; top:0; z-index:40;
+    padding:6px var(--s-4); min-height:52px;
+    background:var(--chrome); border-bottom:1px solid var(--line);
+  }
+  .appbar__menu{
+    display:inline-flex; align-items:center; gap:7px; flex:none;
+    min-height:40px; padding:0 12px; border:1px solid var(--line-strong);
+    border-radius:var(--r-2); background:var(--paper); color:var(--ink);
+    font:inherit; font-size:14px; font-weight:600; cursor:pointer;
+  }
+  .appbar__ctx{
+    min-width:0; flex:1; font-size:13px; font-weight:600; color:var(--ink-2);
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .rail{
+    position:fixed; top:0; left:0; bottom:0; z-index:60;
+    width:min(300px,86vw); height:100%;
+    transform:translateX(-102%);
+    /* Hidden, not merely moved: a closed drawer must be out of the keyboard
+       and screen-reader order, not parked off the left edge. */
+    visibility:hidden;
+    transition:transform .16s ease, visibility 0s linear .16s;
+    border-right:1px solid var(--line); box-shadow:var(--shadow);
+  }
+  .shell--navopen .rail{
+    transform:translateX(0); visibility:visible;
+    transition:transform .16s ease, visibility 0s;
+  }
+  .rail__close{display:inline-flex}
+  .scrim{
+    display:block; position:fixed; inset:0; z-index:50;
+    background:color-mix(in srgb,var(--ink) 42%,transparent);
+    border:0; padding:0;
+  }
+  .scrim[hidden]{display:none}
+  .rail__foot{margin-top:auto}
+  .t-display{font-size:1.9rem}
+  .masthead{top:52px}
+}
+@media (prefers-reduced-motion:reduce){
+  .rail{transition:none}
 }
 
 /* Keep secondary labels readable on the workspace's tinted panels. */
 .whoami__hd .t-label, .tile--hi .tile__k, .tile--hi .tile__n{color:var(--ink-2)}
+
+/* ============================================================================
+   DEP-13 — shared shell controls, hover text, and form primitives.
+
+   Everything below was added with the design audit in docs/design-audit. The
+   rules are deliberately in this file rather than app.css: app.css had grown a
+   second copy of .grid2, .sub, .btn--ghost, .btn--sm and the textarea sizing,
+   and the later copy silently won. New shared components live here once.
+   ========================================================================= */
+
+/* --- the visible Back control ------------------------------------------- */
+.backbar{margin-bottom:var(--s-3)}
+.backlink{
+  display:inline-flex; align-items:center; gap:6px;
+  min-height:36px; padding:0 10px 0 6px; margin-left:-6px;
+  border:0; border-radius:var(--r-2); background:none; color:var(--ink-2);
+  font:inherit; font-size:13.5px; font-weight:600; cursor:pointer;
+}
+.backlink:hover{background:var(--sunken); color:var(--ink)}
+
+/* --- hover text and contextual help -------------------------------------- */
+.tipwrap{position:relative; display:inline-flex; align-items:center; gap:4px; max-width:100%}
+.tip{
+  position:absolute; bottom:calc(100% + 8px); left:50%; transform:translateX(-50%);
+  z-index:80; width:max-content; max-width:min(280px,88vw);
+  background:var(--ink); color:var(--paper);
+  border-radius:var(--r-2); padding:8px 10px;
+  font-size:12.5px; font-weight:500; line-height:1.45; text-transform:none; letter-spacing:0;
+  box-shadow:var(--shadow); pointer-events:auto;
+}
+.tip[hidden]{display:none}
+/* Flipped below its control when there is no room above, at the top of a
+   page or under heavy zoom. */
+.tip--below{bottom:auto; top:calc(100% + 8px)}
+.tiphelp{
+  display:none; flex:none; align-items:center; justify-content:center;
+  width:24px; height:24px; border-radius:50%;
+  border:1px solid var(--line-strong); background:var(--paper); color:var(--ink-2);
+  font:inherit; font-size:12px; font-weight:700; line-height:1; cursor:pointer;
+}
+.tiphelp:hover{background:var(--sunken); color:var(--ink)}
+/* A pointer that cannot hover gets a control it can tap instead. Tapping the
+   action itself still performs the action. */
+@media (pointer:coarse){
+  .tiphelp{display:inline-flex; min-width:24px}
+}
+
+/* --- form primitives ------------------------------------------------------
+   Form grids get explicit column counts. `.grid2` is a dashboard auto-fit
+   grid, and forms that used it became four columns wide on a desktop (D09). */
+.formgrid{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--s-4) var(--s-5)}
+.formgrid--one{grid-template-columns:minmax(0,1fr)}
+.formgrid--three{grid-template-columns:repeat(3,minmax(0,1fr))}
+.formgrid > .field--span{grid-column:1 / -1}
+@media (max-width:760px){
+  .formgrid,.formgrid--three{grid-template-columns:minmax(0,1fr)}
+}
+/* Help text sits under the control, so a field with a hint keeps the same
+   baseline as the field beside it. */
+.field{gap:6px}
+.field__hint{order:3; margin-top:2px}
+.field__req{margin-left:4px}
+
+/* --- section headings, action bars, empty states -------------------------- */
+.sechead{display:flex; align-items:baseline; gap:var(--s-3); flex-wrap:wrap; margin:var(--s-6) 0 var(--s-3)}
+.sechead:first-child{margin-top:0}
+.sechead__t{font-size:15px; font-weight:700; letter-spacing:0; text-transform:none; color:var(--ink)}
+.sechead__n{font-size:12.5px; color:var(--ink-3)}
+.sechead__act{margin-left:auto; display:flex; gap:var(--s-2); align-items:center}
+
+/* One dominant action per area, with save state beside it rather than a row of
+   competing blue buttons (D06). */
+.actionbar{
+  position:sticky; bottom:0; z-index:30;
+  display:flex; align-items:center; gap:var(--s-3); flex-wrap:wrap;
+  padding:var(--s-3) var(--s-4); margin-top:var(--s-4);
+  background:var(--paper); border:1px solid var(--line); border-radius:var(--r-3);
+  box-shadow:var(--shadow);
+}
+.actionbar__state{font-size:13px; color:var(--ink-2); margin-left:auto}
+.actionbar__state--dirty{color:var(--wait); font-weight:600}
+@media print{ .actionbar{display:none} }
+
+.emptystate{
+  display:flex; flex-direction:column; gap:var(--s-3); align-items:flex-start;
+  padding:var(--s-6); border:1px dashed var(--line-strong); border-radius:var(--r-3);
+  background:var(--sunken); color:var(--ink-2);
+}
+.emptystate__t{font-size:15px; font-weight:700; color:var(--ink)}
+
+/* A rating scale is a named group with its endpoints written out, not a bare
+   row of numbers (D07). */
+.rating{display:flex; flex-direction:column; gap:5px}
+.rating__scale{display:flex; align-items:center; gap:8px}
+.rating__ends{font-size:11.5px; color:var(--ink-3)}
+
+/* --- keep secondary text legible on tinted surfaces ---------------------- */
+.next .t-label,
+.tile--act .tile__n,
+.home-row--on .t-small,
+.pkgmx__fee,
+.pkg__fee{color:var(--ink-2)}

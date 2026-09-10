@@ -1,0 +1,959 @@
+{
+  "metrics": [
+    {
+      "name": "01-landing-desktop",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "height": 1415,
+      "mainTop": null,
+      "headingTop": 121,
+      "heading": "Three ways to run a search",
+      "primaryActions": [
+        "Start",
+        "Start"
+      ],
+      "smallControls": [],
+      "overflows": [],
+      "violations": []
+    },
+    {
+      "name": "02-home-empty",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "height": 1000,
+      "mainTop": 0,
+      "headingTop": 105.0625,
+      "heading": "Welcome back, Slate",
+      "primaryActions": [
+        "Open a new search"
+      ],
+      "smallControls": [
+        {
+          "text": "Home",
+          "width": 34.453125,
+          "height": 20.25
+        }
+      ],
+      "overflows": [],
+      "violations": []
+    },
+    {
+      "name": "03-new-desktop",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "height": 2117,
+      "mainTop": 0,
+      "headingTop": 105.0625,
+      "heading": "Who is hiring, and for what",
+      "primaryActions": [
+        "Create search"
+      ],
+      "smallControls": [
+        {
+          "text": "Home",
+          "width": 34.453125,
+          "height": 20.25
+        }
+      ],
+      "overflows": [],
+      "violations": [
+        {
+          "id": "color-contrast",
+          "impact": "serious",
+          "help": "Elements must meet minimum color contrast ratio thresholds",
+          "nodes": [
+            {
+              "target": [
+                ".pkgmx__col.pkgmx__c-executive[scope=\"col\"] > .pkgmx__pick > .pkgmx__fee"
+              ],
+              "summary": "Fix any of the following:\n  Element has insufficient color contrast of 4.32 (foreground color: #5e737d, background color: #e9f0f8, font size: 8.6pt (11.5px), font weight: normal). Expected contrast ratio of 4.5:1"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "04-created-search-team",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "height": 1307,
+      "mainTop": 0,
+      "headingTop": 105.0625,
+      "heading": "Search committee",
+      "primaryActions": [
+        "Roster is set",
+        "Next · Committee input",
+        "Seat this person",
+        "Next · Step 2 · Committee input"
+      ],
+      "smallControls": [
+        {
+          "text": "Home",
+          "width": 34.453125,
+          "height": 20.25
+        },
+        {
+          "text": "City of Ridgeline",
+          "width": 95.65625,
+          "height": 20.25
+        }
+      ],
+      "overflows": [],
+      "violations": [
+        {
+          "id": "color-contrast",
+          "impact": "serious",
+          "help": "Elements must meet minimum color contrast ratio thresholds",
+          "nodes": [
+            {
+              "target": [
+                ".rail__hint"
+              ],
+              "summary": "Fix any of the following:\n  Element has insufficient color contrast of 3.91 (foreground color: #6a7d86, background color: #f6f4f2, font size: 8.6pt (11.5px), font weight: normal). Expected contrast ratio of 4.5:1"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "desktop-facts",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "height": 2049,
+      "mainTop": 0,
+      "headingTop": 105.0625,
+      "heading": "City of Ridgeline",
+      "primaryActions": [
+        "Save facts"
+      ],
+      "smallControls": [
+        {
+          "text": "Home",
+          "width": 34.453125,
+          "height": 20.25
+        },
+        {
+          "text": "City of Ridgeline",
+          "width": 95.65625,
+          "height": 20.25
+        }
+      ],
+      "overflows": [],
+      "violations": [
+        {
+          "id": "color-contrast",
+          "impact": "serious",
+          "help": "Elements must meet minimum color contrast ratio thresholds",
+          "nodes": [
+            {
+              "target": [
+                ".rail__hint"
+              ],
+              "summary": "Fix any of the following:\n  Element has insufficient color contrast of 3.91 (foreground color: #6a7d86, background color: #f6f4f2, font size: 8.6pt (11.5px), font weight: normal). Expected contrast ratio of 4.5:1"
+            },
+            {
+              "target": [
+                ".pkgmx__col.pkgmx__c-executive[scope=\"col\"] > .pkgmx__pick > .pkgmx__fee"
+              ],
+              "summary": "Fix any of the following:\n  Element has insufficient color contrast of 4.32 (foreground color: #5e737d, background color: #e9f0f8, font size: 8.6pt (11.5px), font weight: normal). Expected contrast ratio of 4.5:1"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "desktop-team",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "height": 1307,
+      "mainTop": 0,
+      "headingTop": 105.0625,
+      "heading": "Search committee",
+      "primaryActions": [
+        "Roster is set",
+        "Next · Committee input",
+        "Seat this person",
+        "Next · Step 2 · Committee input"
+      ],
+      "smallControls": [
+        {
+          "text": "Home",
+          "width": 34.453125,
+          "height": 20.25
+        },
+        {
+          "text": "City of Ridgeline",
+          "width": 95.65625,
+          "height": 20.25
+        }
+      ],
+      "overflows": [],
+      "violations": [
+        {
+          "id": "color-contrast",
+          "impact": "serious",
+          "help": "Elements must meet minimum color contrast ratio thresholds",
+          "nodes": [
+            {
+              "target": [
+                ".rail__hint"
+              ],
+              "summary": "Fix any of the following:\n  Element has insufficient color contrast of 3.91 (foreground color: #6a7d86, background color: #f6f4f2, font size: 8.6pt (11.5px), font weight: normal). Expected contrast ratio of 4.5:1"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "desktop-intake",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "height": 1435,
+      "mainTop": 0,
+      "headingTop": 105.0625,
+      "heading": "Committee input",
+      "primaryActions": [
+        "Open the window",
+        "Next · Candidate profile",
+        "Next · Step 3 · Candidate profile"
+      ],
+      "smallControls": [
+        {
+          "text": "Home",
+          "width": 34.453125,
+          "height": 20.25
+        },
+        {
+          "text": "City of Ridgeline",
+          "width": 95.65625,
+          "height": 20.25
+        }
+      ],
+      "overflows": []
+    },
+    {
+      "name": "desktop-profile",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "height": 1745,
+      "mainTop": 0,
+      "headingTop": 105.0625,
+      "heading": "Candidate profile",
+      "primaryActions": [
+        "Save and move on",
+        "Next · Step 4 · Community"
+      ],
+      "smallControls": [
+        {
+          "text": "Home",
+          "width": 34.453125,
+          "height": 20.25
+        },
+        {
+          "text": "City of Ridgeline",
+          "width": 95.65625,
+          "height": 20.25
+        },
+        {
+          "text": "",
+          "width": 13,
+          "height": 13
+        }
+      ],
+      "overflows": [],
+      "violations": [
+        {
+          "id": "color-contrast",
+          "impact": "serious",
+          "help": "Elements must meet minimum color contrast ratio thresholds",
+          "nodes": [
+            {
+              "target": [
+                ".rail__hint"
+              ],
+              "summary": "Fix any of the following:\n  Element has insufficient color contrast of 3.91 (foreground color: #6a7d86, background color: #f6f4f2, font size: 8.6pt (11.5px), font weight: normal). Expected contrast ratio of 4.5:1"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "desktop-community",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "height": 4509,
+      "mainTop": 0,
+      "headingTop": 105.0625,
+      "heading": "Community and form of government",
+      "primaryActions": [
+        "Research this jurisdiction",
+        "Next · Initial survey",
+        "Next · Step 5 · Initial survey",
+        "Next · Step 5 · Initial survey"
+      ],
+      "smallControls": [
+        {
+          "text": "Home",
+          "width": 34.453125,
+          "height": 20.25
+        },
+        {
+          "text": "City of Ridgeline",
+          "width": 95.65625,
+          "height": 20.25
+        },
+        {
+          "text": "",
+          "width": 13,
+          "height": 13
+        }
+      ],
+      "overflows": []
+    },
+    {
+      "name": "desktop-survey1",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "height": 1000,
+      "mainTop": 0,
+      "headingTop": 105.0625,
+      "heading": "Initial candidate survey",
+      "primaryActions": [
+        "Draft with Claude",
+        "Next · Interview guide",
+        "Next · Step 6 · Interview guide"
+      ],
+      "smallControls": [
+        {
+          "text": "Home",
+          "width": 34.453125,
+          "height": 20.25
+        },
+        {
+          "text": "City of Ridgeline",
+          "width": 95.65625,
+          "height": 20.25
+        }
+      ],
+      "overflows": []
+    },
+    {
+      "name": "desktop-guide",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "height": 1000,
+      "mainTop": 0,
+      "headingTop": 105.0625,
+      "heading": "Interview guide",
+      "primaryActions": [
+        "Draft with Claude",
+        "Next · Semifinalist survey",
+        "Next · Step 7 · Semifinalist survey"
+      ],
+      "smallControls": [
+        {
+          "text": "Home",
+          "width": 34.453125,
+          "height": 20.25
+        },
+        {
+          "text": "City of Ridgeline",
+          "width": 95.65625,
+          "height": 20.25
+        }
+      ],
+      "overflows": []
+    },
+    {
+      "name": "desktop-survey2",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "height": 1000,
+      "mainTop": 0,
+      "headingTop": 105.0625,
+      "heading": "Semifinalist questionnaire",
+      "primaryActions": [
+        "Draft with Claude",
+        "Next · Ad plan",
+        "Next · Step 8 · Ad plan"
+      ],
+      "smallControls": [
+        {
+          "text": "Home",
+          "width": 34.453125,
+          "height": 20.25
+        },
+        {
+          "text": "City of Ridgeline",
+          "width": 95.65625,
+          "height": 20.25
+        }
+      ],
+      "overflows": []
+    },
+    {
+      "name": "desktop-plan",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "height": 1000,
+      "mainTop": 0,
+      "headingTop": 105.0625,
+      "heading": "Recruitment and advertising plan",
+      "primaryActions": [
+        "Draft with Claude",
+        "Next · Brochure",
+        "Next · Step 9 · Brochure"
+      ],
+      "smallControls": [
+        {
+          "text": "Home",
+          "width": 34.453125,
+          "height": 20.25
+        },
+        {
+          "text": "City of Ridgeline",
+          "width": 95.65625,
+          "height": 20.25
+        }
+      ],
+      "overflows": []
+    },
+    {
+      "name": "desktop-brochure",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "height": 1000,
+      "mainTop": 0,
+      "headingTop": 105.0625,
+      "heading": "Recruitment brochure",
+      "primaryActions": [
+        "Next · Advertisements",
+        "Next · Step 10 · Advertisements"
+      ],
+      "smallControls": [
+        {
+          "text": "Home",
+          "width": 34.453125,
+          "height": 20.25
+        },
+        {
+          "text": "City of Ridgeline",
+          "width": 95.65625,
+          "height": 20.25
+        }
+      ],
+      "overflows": []
+    },
+    {
+      "name": "desktop-ads",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "height": 2638,
+      "mainTop": 0,
+      "headingTop": 105.0625,
+      "heading": "Advertisements",
+      "primaryActions": [
+        "Draft with Claude",
+        "Next · Sourcing",
+        "Next · Step 11 · Sourcing"
+      ],
+      "smallControls": [
+        {
+          "text": "Home",
+          "width": 34.453125,
+          "height": 20.25
+        },
+        {
+          "text": "City of Ridgeline",
+          "width": 95.65625,
+          "height": 20.25
+        }
+      ],
+      "overflows": []
+    },
+    {
+      "name": "desktop-sourcing",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "height": 1292,
+      "mainTop": 0,
+      "headingTop": 105.0625,
+      "heading": "Source and recruit candidates",
+      "primaryActions": [
+        "Mark complete",
+        "Next · Screening",
+        "Add to the log",
+        "Next · Step 12 · Screening"
+      ],
+      "smallControls": [
+        {
+          "text": "Home",
+          "width": 34.453125,
+          "height": 20.25
+        },
+        {
+          "text": "City of Ridgeline",
+          "width": 95.65625,
+          "height": 20.25
+        }
+      ],
+      "overflows": []
+    },
+    {
+      "name": "desktop-screen",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "height": 1000,
+      "mainTop": 0,
+      "headingTop": 105.0625,
+      "heading": "Screen candidate surveys",
+      "primaryActions": [
+        "Add candidate",
+        "Next · Semifinalist questionnaire",
+        "Next · Step 13 · Semifinalist questionnaire"
+      ],
+      "smallControls": [
+        {
+          "text": "Home",
+          "width": 34.453125,
+          "height": 20.25
+        },
+        {
+          "text": "City of Ridgeline",
+          "width": 95.65625,
+          "height": 20.25
+        }
+      ],
+      "overflows": [],
+      "violations": [
+        {
+          "id": "color-contrast",
+          "impact": "serious",
+          "help": "Elements must meet minimum color contrast ratio thresholds",
+          "nodes": [
+            {
+              "target": [
+                ".rail__hint"
+              ],
+              "summary": "Fix any of the following:\n  Element has insufficient color contrast of 3.91 (foreground color: #6a7d86, background color: #f6f4f2, font size: 8.6pt (11.5px), font weight: normal). Expected contrast ratio of 4.5:1"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "desktop-send2",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "height": 1000,
+      "mainTop": 0,
+      "headingTop": 105.0625,
+      "heading": "Open semifinalist questionnaire",
+      "primaryActions": [
+        "Open for all semifinalists",
+        "Next · Video interviews",
+        "Next · Step 14 · Video interviews"
+      ],
+      "smallControls": [
+        {
+          "text": "Home",
+          "width": 34.453125,
+          "height": 20.25
+        },
+        {
+          "text": "City of Ridgeline",
+          "width": 95.65625,
+          "height": 20.25
+        }
+      ],
+      "overflows": []
+    },
+    {
+      "name": "desktop-video",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "height": 1350,
+      "mainTop": 0,
+      "headingTop": 105.0625,
+      "heading": "Video interviews",
+      "primaryActions": [
+        "Mark complete",
+        "Next · Finalists",
+        "Add to the log",
+        "Next · Step 15 · Finalists"
+      ],
+      "smallControls": [
+        {
+          "text": "Home",
+          "width": 34.453125,
+          "height": 20.25
+        },
+        {
+          "text": "City of Ridgeline",
+          "width": 95.65625,
+          "height": 20.25
+        }
+      ],
+      "overflows": []
+    },
+    {
+      "name": "desktop-finalists",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "height": 1000,
+      "mainTop": 0,
+      "headingTop": 105.0625,
+      "heading": "Select finalists",
+      "primaryActions": [
+        "Next · Finalist week",
+        "Next · Step 16 · Finalist week"
+      ],
+      "smallControls": [
+        {
+          "text": "Home",
+          "width": 34.453125,
+          "height": 20.25
+        },
+        {
+          "text": "City of Ridgeline",
+          "width": 95.65625,
+          "height": 20.25
+        }
+      ],
+      "overflows": []
+    },
+    {
+      "name": "desktop-schedule",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "height": 1945,
+      "mainTop": 0,
+      "headingTop": 105.0625,
+      "heading": "Finalist week and assessment center",
+      "primaryActions": [
+        "Draft with Claude",
+        "Next · Reference checks",
+        "Next · Step 17 · Reference checks"
+      ],
+      "smallControls": [
+        {
+          "text": "Home",
+          "width": 34.453125,
+          "height": 20.25
+        },
+        {
+          "text": "City of Ridgeline",
+          "width": 95.65625,
+          "height": 20.25
+        }
+      ],
+      "overflows": []
+    },
+    {
+      "name": "desktop-references",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "height": 1595,
+      "mainTop": 0,
+      "headingTop": 105.0625,
+      "heading": "Reference checks",
+      "primaryActions": [
+        "Mark complete",
+        "Next · Contract",
+        "Add to the log",
+        "Next · Step 18 · Contract"
+      ],
+      "smallControls": [
+        {
+          "text": "Home",
+          "width": 34.453125,
+          "height": 20.25
+        },
+        {
+          "text": "City of Ridgeline",
+          "width": 95.65625,
+          "height": 20.25
+        }
+      ],
+      "overflows": []
+    },
+    {
+      "name": "desktop-contract",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "height": 1000,
+      "mainTop": 0,
+      "headingTop": 105.0625,
+      "heading": "Employment agreement",
+      "primaryActions": [
+        "Draft with Claude",
+        "Next · Evaluation",
+        "Next · Step 19 · Evaluation"
+      ],
+      "smallControls": [
+        {
+          "text": "Home",
+          "width": 34.453125,
+          "height": 20.25
+        },
+        {
+          "text": "City of Ridgeline",
+          "width": 95.65625,
+          "height": 20.25
+        },
+        {
+          "text": "",
+          "width": 13,
+          "height": 13
+        }
+      ],
+      "overflows": []
+    },
+    {
+      "name": "desktop-bar",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "height": 1000,
+      "mainTop": 0,
+      "headingTop": 105.0625,
+      "heading": "BAR evaluation",
+      "primaryActions": [
+        "Draft with Claude",
+        "Next",
+        "Back to this search"
+      ],
+      "smallControls": [
+        {
+          "text": "Home",
+          "width": 34.453125,
+          "height": 20.25
+        },
+        {
+          "text": "City of Ridgeline",
+          "width": 95.65625,
+          "height": 20.25
+        }
+      ],
+      "overflows": []
+    },
+    {
+      "name": "desktop-history",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "height": 1000,
+      "mainTop": 0,
+      "headingTop": 105.0625,
+      "heading": "History and recovery",
+      "primaryActions": [],
+      "smallControls": [
+        {
+          "text": "Home",
+          "width": 34.453125,
+          "height": 20.25
+        },
+        {
+          "text": "City of Ridgeline",
+          "width": 95.65625,
+          "height": 20.25
+        }
+      ],
+      "overflows": []
+    },
+    {
+      "name": "desktop-screen-populated",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "height": 1000,
+      "mainTop": 0,
+      "headingTop": 105.0625,
+      "heading": "Screen candidate surveys",
+      "primaryActions": [
+        "Add candidate",
+        "Next · Semifinalist questionnaire",
+        "Next · Step 13 · Semifinalist questionnaire"
+      ],
+      "smallControls": [
+        {
+          "text": "Home",
+          "width": 34.453125,
+          "height": 20.25
+        },
+        {
+          "text": "City of Ridgeline",
+          "width": 95.65625,
+          "height": 20.25
+        }
+      ],
+      "overflows": [
+        "TABLE.",
+        "THEAD.",
+        "TR.",
+        "TH.",
+        "TH.",
+        "TBODY.",
+        "TR.",
+        "TD.mono t-small",
+        "TD.",
+        "BUTTON.btn btn--secondary btn--sm",
+        "TR.",
+        "TD.mono t-small"
+      ],
+      "violations": []
+    },
+    {
+      "name": "desktop-person",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "height": 1000,
+      "mainTop": 0,
+      "headingTop": 105.0625,
+      "heading": "Jordan Avery",
+      "primaryActions": [
+        "Advance to semifinalist",
+        "Save my scores"
+      ],
+      "smallControls": [
+        {
+          "text": "Home",
+          "width": 34.453125,
+          "height": 20.25
+        },
+        {
+          "text": "City of Ridgeline",
+          "width": 95.65625,
+          "height": 20.25
+        }
+      ],
+      "overflows": [],
+      "violations": []
+    },
+    {
+      "name": "desktop-home-stale",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "height": 1000,
+      "mainTop": 0,
+      "headingTop": 105.0625,
+      "heading": "Welcome back, Slate",
+      "primaryActions": [
+        "Open a new search"
+      ],
+      "smallControls": [
+        {
+          "text": "Home",
+          "width": 34.453125,
+          "height": 20.25
+        }
+      ],
+      "overflows": []
+    },
+    {
+      "name": "desktop-archives",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "height": 1000,
+      "mainTop": 0,
+      "headingTop": 105.0625,
+      "heading": "Archived searches",
+      "primaryActions": [],
+      "smallControls": [
+        {
+          "text": "Home",
+          "width": 34.453125,
+          "height": 20.25
+        }
+      ],
+      "overflows": []
+    },
+    {
+      "name": "desktop-packages",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "height": 3176,
+      "mainTop": 0,
+      "headingTop": 105.0625,
+      "heading": "Basic · $3,500 to $5,000",
+      "primaryActions": [
+        "Open a Basic search"
+      ],
+      "smallControls": [
+        {
+          "text": "Home",
+          "width": 34.453125,
+          "height": 20.25
+        }
+      ],
+      "overflows": []
+    },
+    {
+      "name": "mobile-home-stale",
+      "viewport": 390,
+      "documentWidth": 390,
+      "height": 1519,
+      "mainTop": 444.78125,
+      "headingTop": 549.84375,
+      "heading": "Welcome back, Slate",
+      "primaryActions": [
+        "Open a new search"
+      ],
+      "smallControls": [
+        {
+          "text": "Home",
+          "width": 34.453125,
+          "height": 20.25
+        }
+      ],
+      "overflows": [],
+      "violations": []
+    },
+    {
+      "name": "mobile-new",
+      "viewport": 390,
+      "documentWidth": 390,
+      "height": 3780,
+      "mainTop": 444.78125,
+      "headingTop": 549.84375,
+      "heading": "Who is hiring, and for what",
+      "primaryActions": [
+        "Create search"
+      ],
+      "smallControls": [
+        {
+          "text": "Home",
+          "width": 34.453125,
+          "height": 20.25
+        }
+      ],
+      "overflows": [
+        "TABLE.pkgmx pkgmx--pick",
+        "COLGROUP.",
+        "COL.pkgmx__c-executive",
+        "THEAD.",
+        "TR.",
+        "TH.pkgmx__col pkgmx__c-executive",
+        "LABEL.pkgmx__pick",
+        "INPUT.",
+        "SPAN.pkgmx__nm",
+        "SPAN.pkgmx__fee",
+        "TBODY.",
+        "TR.pkgmx__band"
+      ],
+      "violations": [
+        {
+          "id": "color-contrast",
+          "impact": "serious",
+          "help": "Elements must meet minimum color contrast ratio thresholds",
+          "nodes": [
+            {
+              "target": [
+                ".pkgmx__col.pkgmx__c-executive[scope=\"col\"] > .pkgmx__pick > .pkgmx__fee"
+              ],
+              "summary": "Fix any of the following:\n  Element has insufficient color contrast of 4.32 (foreground color: #5e737d, background color: #e9f0f8, font size: 8.6pt (11.5px), font weight: normal). Expected contrast ratio of 4.5:1"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "errors": []
+}
