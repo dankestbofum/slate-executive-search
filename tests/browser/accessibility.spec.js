@@ -17,6 +17,7 @@
 
 const { test, expect } = require('@playwright/test');
 const AxeBuilder = require('@axe-core/playwright').default;
+const { installClerk } = require('./clerk');
 
 const TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'];
 
@@ -47,39 +48,39 @@ async function setTheme(page, theme) {
 }
 
 test('the landing page has no WCAG 2.1 AA violations', async ({ page }) => {
+  await installClerk(page, { signedIn: false });
   await page.goto('/');
   await page.waitForLoadState('networkidle');
   const violations = await scan(page);
   expect(violations, '\n    ' + describeViolations(violations)).toEqual([]);
 });
 
-test('the workspace opened with Start has no WCAG 2.1 AA violations', async ({ page }) => {
+test('the signed-in workspace has no WCAG 2.1 AA violations', async ({ page }) => {
+  await installClerk(page);
   await page.goto('/');
   await page.waitForLoadState('networkidle');
-  await page.getByRole('button', { name: 'Start', exact: true }).first().click();
   await expect(page.getByRole('button', { name: /open a new search/i }).first()).toBeVisible();
 
   const violations = await scan(page);
   expect(violations, '\n    ' + describeViolations(violations)).toEqual([]);
 });
 
-test('the candidate questionnaire has no WCAG 2.1 AA violations', async ({ page, request }) => {
-  const login = await request.post('/api/login', { data: { email: 'abe@slate.local', pin: '2468' } });
-  expect(login.ok()).toBeTruthy();
+test('the candidate questionnaire has no WCAG 2.1 AA violations', async ({ page }) => {
+  await installClerk(page);
 
-  const created = await (await request.post('/api/searches', {
+  const created = await (await page.request.post('/api/searches', {
     data: { client: 'Accessible County', position: 'County Administrator', jurisdictionType: 'county' }
   })).json();
-  const revision = async () => String((await (await request.get('/api/searches/' + created.id)).json()).revision);
+  const revision = async () => String((await (await page.request.get('/api/searches/' + created.id)).json()).revision);
 
-  await request.put('/api/searches/' + created.id + '/artifact/survey1', {
+  await page.request.put('/api/searches/' + created.id + '/artifact/survey1', {
     headers: { 'if-match': await revision() },
     data: { body: { intro: 'Tell us about your experience.', questions: [
       { n: 1, prompt: 'Describe your county budget experience.', required: true },
       { n: 2, prompt: 'What would your first ninety days look like?', required: false }
     ] } }
   });
-  const withCandidate = await (await request.post('/api/searches/' + created.id + '/candidates', {
+  const withCandidate = await (await page.request.post('/api/searches/' + created.id + '/candidates', {
     headers: { 'if-match': await revision() }, data: { name: 'Accessible Candidate' }
   })).json();
 
@@ -101,14 +102,14 @@ test('the page still works at 200% zoom without horizontal scrolling', async ({ 
 });
 
 test('the document declares a language and names the screen in one heading', async ({ page }) => {
+  await installClerk(page);
   await page.goto('/');
   await page.waitForLoadState('networkidle');
 
   const lang = await page.evaluate(() => document.documentElement.lang);
   expect(lang, 'the document has no lang attribute, so a screen reader cannot pick a voice').toBeTruthy();
 
-  await page.getByRole('button', { name: 'Start', exact: true }).first().click();
-  await expect(page.getByRole('button', { name: /open a new search/i }).first()).toBeVisible();
+  await expect(page.getByRole('button', { name: /open a new search/i }).first()).toBeVisible({ timeout: 10000 });
 
   // One h1, and it says where you are. Counting headings alone passed even
   // when every screen was called the same thing.
@@ -125,10 +126,10 @@ test('the document declares a language and names the screen in one heading', asy
 test('printing a document drops the editing chrome and keeps the document', async ({ page }) => {
   // A rule detector passed whether or not the rules did anything. This checks
   // that under print the packet is what remains on the page.
+  await installClerk(page);
   await page.goto('/');
   await page.waitForLoadState('networkidle');
-  await page.getByRole('button', { name: 'Start', exact: true }).first().click();
-  await expect(page.getByRole('button', { name: /open a new search/i }).first()).toBeVisible();
+  await expect(page.getByRole('button', { name: /open a new search/i }).first()).toBeVisible({ timeout: 10000 });
 
   const search = await (await page.request.post('/api/searches', {
     data: { client: 'Printed City', position: 'City Manager', package: 'executive' }
@@ -159,10 +160,10 @@ test('printing a document drops the editing chrome and keeps the document', asyn
 });
 
 test('a populated workspace screen has no WCAG 2.1 AA violations, in either theme', async ({ page }) => {
+  await installClerk(page);
   await page.goto('/');
   await page.waitForLoadState('networkidle');
-  await page.getByRole('button', { name: 'Start', exact: true }).first().click();
-  await expect(page.getByRole('button', { name: /open a new search/i }).first()).toBeVisible();
+  await expect(page.getByRole('button', { name: /open a new search/i }).first()).toBeVisible({ timeout: 10000 });
 
   const search = await (await page.request.post('/api/searches', {
     data: { client: 'Scanned City', position: 'City Manager', package: 'executive' }

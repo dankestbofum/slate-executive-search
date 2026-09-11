@@ -13,6 +13,7 @@
 const assert = require('assert');
 const budget = require('../server/aibudget');
 const ai = require('../server/ai');
+const identity = require('./identity');
 
 const BASE = process.env.SLATE_URL || 'http://127.0.0.1:4173';
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
@@ -25,12 +26,9 @@ async function check(name, fn) {
 }
 
 (async () => {
-  const login = await fetch(BASE + '/api/login', {
-    method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ email: 'abe@slate.local', pin: '2468' })
-  });
-  const cookie = login.headers.getSetCookie().map(c => c.split(';')[0]).join('; ');
+  const auth = identity.signer().headers('abe@slate.local');
   const api = (path, { method = 'GET', body, revision } = {}) => {
-    const headers = { ...JSON_HEADERS, cookie };
+    const headers = { ...JSON_HEADERS, ...auth };
     if (revision !== undefined) headers['if-match'] = String(revision);
     return fetch(BASE + path, { method, headers, body: body ? JSON.stringify(body) : undefined });
   };

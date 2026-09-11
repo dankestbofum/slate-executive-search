@@ -9,6 +9,7 @@
 
 const assert = require('assert');
 const http = require('../server/http');
+const identity = require('./identity');
 
 const BASE = process.env.SLATE_URL || 'http://127.0.0.1:4173';
 let passed = 0;
@@ -19,25 +20,17 @@ async function check(name, fn) {
   catch (error) { failed += 1; console.error('FAIL  Security: ' + name + '\n      ' + error.message); }
 }
 
-async function login(email, pin) {
-  const res = await fetch(BASE + '/api/login', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, pin })
-  });
-  assert.strictEqual(res.status, 200, 'login for ' + email + ' returned ' + res.status);
-  return res.headers.getSetCookie().map(c => c.split(';')[0]).join('; ');
-}
+const sign = identity.signer();
 
 (async () => {
-  const cookie = await login('abe@slate.local', '2468');
+  const auth = sign.headers('abe@slate.local');
   const json = { 'Content-Type': 'application/json' };
 
   // Search mutations carry the revision they were made against, so these
   // helpers read it first rather than hard-coding a value that goes stale.
   async function newSearch(client) {
     const res = await fetch(BASE + '/api/searches', {
-      method: 'POST', headers: { ...json, cookie },
+      method: 'POST', headers: { ...json, ...auth },
       body: JSON.stringify({ client, position: 'County Administrator' })
     });
     assert.strictEqual(res.status, 200, 'could not create "' + client + '": ' + res.status);
@@ -48,11 +41,11 @@ async function login(email, pin) {
   }
 
   async function post(id, path, body) {
-    const current = await fetch(BASE + '/api/searches/' + id, { headers: { cookie } });
+    const current = await fetch(BASE + '/api/searches/' + id, { headers: auth });
     const revision = String((await current.json()).revision);
     return fetch(BASE + '/api/searches/' + id + path, {
       method: 'POST',
-      headers: { ...json, cookie, 'if-match': revision },
+      headers: { ...json, ...auth, 'if-match': revision },
       body: JSON.stringify(body)
     });
   }
@@ -68,15 +61,30 @@ async function login(email, pin) {
     assert.match(res.headers.get('permissions-policy') || '', /camera=\(\)/);
   });
 
-  await check('the policy allows no inline script, eval, or third-party origin', async () => {
+  // Identity is served from Clerk's own origin, so the workspace shell has to
+  // name it. That is the whole of the third-party allowance: no inline script,
+  // no eval, and nothing allow-listed that is not part of signing in.
+  await check('the workspace policy allows only Clerk, and no inline script or eval', async () => {
     const res = await fetch(BASE + '/');
     const csp = res.headers.get('content-security-policy') || '';
-    assert.doesNotMatch(csp, /unsafe-inline/, 'CSP permits inline code');
+    const directive = name => csp.split(';').map(d => d.trim()).find(d => d.startsWith(name + ' ')) || '';
+    assert.doesNotMatch(directive('script-src'), /unsafe-inline|unsafe-eval/, 'scripts may be inlined or evaluated');
     assert.doesNotMatch(csp, /unsafe-eval/, 'CSP permits eval');
-    assert.doesNotMatch(csp, /https?:\/\//, 'CSP allow-lists an external origin');
+    const origins = csp.match(/https?:[^ ;]+/g) || [];
+    assert.ok(origins.length, 'the shell should name the identity provider');
+    assert.ok(origins.every(o => /clerk|cloudflare/.test(o)), 'CSP allow-lists an unrelated origin: ' + origins.join(' '));
     assert.match(csp, /frame-ancestors 'none'/);
     assert.match(csp, /object-src 'none'/);
     assert.match(csp, /base-uri 'none'/);
+  });
+
+  // A candidate opens their questionnaire from a bearer link and never signs
+  // in, so that page keeps the strict policy with no third party on it at all.
+  await check('the candidate page allows no third-party origin', async () => {
+    const res = await fetch(BASE + '/apply/not-a-real-token');
+    const csp = res.headers.get('content-security-policy') || '';
+    assert.doesNotMatch(csp, /unsafe-inline/, 'the candidate page permits inline code');
+    assert.doesNotMatch(csp, /https?:/, 'the candidate page allow-lists an external origin');
   });
 
   await check('static pages are not framable and do not sniff', async () => {
@@ -147,7 +155,7 @@ async function login(email, pin) {
   await check('a cross-origin mutation is refused', async () => {
     const res = await fetch(BASE + '/api/searches', {
       method: 'POST',
-      headers: { ...json, cookie, Origin: 'https://evil.example' },
+      headers: { ...json, ...auth, Origin: 'https://evil.example' },
       body: JSON.stringify({ client: 'Cross Origin County', position: 'County Administrator' })
     });
     assert.strictEqual(res.status, 403, 'expected 403, got ' + res.status);
@@ -156,33 +164,37 @@ async function login(email, pin) {
   await check('a browser-labelled cross-site mutation is refused', async () => {
     const res = await fetch(BASE + '/api/searches', {
       method: 'POST',
-      headers: { ...json, cookie, 'Sec-Fetch-Site': 'cross-site' },
+      headers: { ...json, ...auth, 'Sec-Fetch-Site': 'cross-site' },
       body: JSON.stringify({ client: 'Sec Fetch County', position: 'County Administrator' })
     });
     assert.strictEqual(res.status, 403, 'expected 403, got ' + res.status);
   });
 
-  await check('login itself is protected from cross-origin submission', async () => {
-    const res = await fetch(BASE + '/api/login', {
-      method: 'POST',
-      headers: { ...json, Origin: 'https://evil.example' },
-      body: JSON.stringify({ email: 'abe@slate.local', pin: '2468' })
-    });
-    assert.strictEqual(res.status, 403, 'expected 403, got ' + res.status);
+  await check('Slate offers no sign-in of its own to attack', async () => {
+    for (const route of ['/api/login', '/api/logout', '/api/start']) {
+      const res = await fetch(BASE + route, { method: 'POST', headers: json, body: '{}' });
+      assert.strictEqual(res.status, 404, route + ' answered ' + res.status);
+    }
+  });
+
+  await check('a session token is refused once it has expired', async () => {
+    const stale = sign.headers('abe@slate.local', { exp: Math.floor(Date.now() / 1000) - 60 });
+    const res = await fetch(BASE + '/api/me', { headers: stale });
+    assert.strictEqual(res.status, 401, 'expected 401, got ' + res.status);
   });
 
   await check('a same-origin mutation still works', async () => {
     const origin = new URL(BASE).origin;
     const res = await fetch(BASE + '/api/searches', {
       method: 'POST',
-      headers: { ...json, cookie, Origin: origin, 'Sec-Fetch-Site': 'same-origin' },
+      headers: { ...json, ...auth, Origin: origin, 'Sec-Fetch-Site': 'same-origin' },
       body: JSON.stringify({ client: 'Same Origin County', position: 'County Administrator' })
     });
     assert.strictEqual(res.status, 200, 'expected 200, got ' + res.status);
   });
 
   await check('reads are not blocked by the origin check', async () => {
-    const res = await fetch(BASE + '/api/searches', { headers: { cookie, Origin: 'https://evil.example' } });
+    const res = await fetch(BASE + '/api/searches', { headers: { ...auth, Origin: 'https://evil.example' } });
     assert.strictEqual(res.status, 200);
   });
 
@@ -190,7 +202,7 @@ async function login(email, pin) {
 
   await check('malformed JSON returns a clear 400, not a stack trace', async () => {
     const res = await fetch(BASE + '/api/searches', {
-      method: 'POST', headers: { ...json, cookie }, body: '{"client": '
+      method: 'POST', headers: { ...json, ...auth }, body: '{"client": '
     });
     assert.strictEqual(res.status, 400);
     const body = await res.json();
@@ -202,7 +214,7 @@ async function login(email, pin) {
   await check('ordinary endpoints refuse an upload-sized body', async () => {
     const res = await fetch(BASE + '/api/searches', {
       method: 'POST',
-      headers: { ...json, cookie },
+      headers: { ...json, ...auth },
       body: JSON.stringify({ client: 'x'.repeat(400 * 1024), position: 'County Administrator' })
     });
     assert.strictEqual(res.status, 413, 'expected 413, got ' + res.status);
@@ -273,20 +285,20 @@ async function login(email, pin) {
 
   await check('media path traversal is refused', async () => {
     for (const file of ['..%2f..%2fslate.json', '....//slate.json', 'cover.jpg%00.txt']) {
-      const res = await fetch(BASE + '/media/s1/' + file, { headers: { cookie } });
+      const res = await fetch(BASE + '/media/s1/' + file, { headers: auth });
       assert.ok(res.status >= 400, file + ' returned ' + res.status);
     }
   });
 
   await check('an unknown api route does not return the app shell', async () => {
-    const res = await fetch(BASE + '/api/not-a-real-route', { headers: { cookie } });
+    const res = await fetch(BASE + '/api/not-a-real-route', { headers: auth });
     assert.ok(res.status >= 400, 'expected an error status, got ' + res.status);
     const body = await res.text();
     assert.doesNotMatch(body, /<div id="app">/, 'the SPA shell was served for an unknown API route');
   });
 
   await check('api responses are never stored by the browser', async () => {
-    const res = await fetch(BASE + '/api/searches', { headers: { cookie } });
+    const res = await fetch(BASE + '/api/searches', { headers: auth });
     assert.match(res.headers.get('cache-control') || '', /no-store/);
   });
 

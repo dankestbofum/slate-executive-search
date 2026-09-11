@@ -9,6 +9,7 @@
 
 const assert = require('assert');
 const candidates = require('../server/candidates');
+const identity = require('./identity');
 
 const BASE = process.env.SLATE_URL || 'http://127.0.0.1:4173';
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
@@ -20,17 +21,12 @@ async function check(name, fn) {
   catch (error) { failed += 1; console.error('FAIL  Candidates: ' + name + '\n      ' + error.message); }
 }
 
-async function login(email, pin) {
-  const res = await fetch(BASE + '/api/login', {
-    method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ email, pin })
-  });
-  assert.strictEqual(res.status, 200, 'login returned ' + res.status);
-  return res.headers.getSetCookie().map(c => c.split(';')[0]).join('; ');
-}
+// A Clerk session for one account. Slate links it to the Slate user with that
+// verified email, so seating someone is all it takes to sign in as them.
+const sign = identity.signer();
 
 (async () => {
-  const cookie = await login('abe@slate.local', '2468');
-  const staff = { ...JSON_HEADERS, cookie };
+  const staff = { ...JSON_HEADERS, ...sign.headers('abe@slate.local') };
 
   const api = (path, { method = 'GET', body, revision } = {}) => {
     const headers = { ...staff };
@@ -273,8 +269,8 @@ async function login(email, pin) {
       method: 'POST', revision: await revisionOf(id),
       body: { name: 'Rose Intake', email: 'rose-intake@example.com', seat: 'committee' }
     })).json();
-    const memberCookie = await login('rose-intake@example.com', seated.pin);
-    const res = await fetch(BASE + '/api/searches/' + id + '/follow-ups', { headers: { cookie: memberCookie } });
+    assert.ok(seated.email, 'seating did not return the member email');
+    const res = await fetch(BASE + '/api/searches/' + id + '/follow-ups', { headers: sign.headers('rose-intake@example.com') });
     assert.ok(res.status === 403 || res.status === 404, 'the committee could read the contact log: ' + res.status);
   });
 

@@ -6,25 +6,26 @@ const path = require('path');
 const vm = require('vm');
 const { spawnSync } = require('child_process');
 const backup = require('../server/backup');
+const identity = require('./identity');
 const base = process.env.SLATE_URL;
+const sign = identity.signer();
 let checks = 0;
 function check(name, fn) { fn(); checks += 1; console.log('PASS  Integrity: ' + name); }
-async function request(url, method = 'GET', body, cookie, revision) {
-  const headers = { 'content-type':'application/json' };
-  if (cookie) headers.cookie = cookie;
+async function request(url, method = 'GET', body, auth, revision) {
+  const headers = { 'content-type':'application/json', ...auth };
   const search = url.match(/^\/api\/searches\/(sr-[^/]+)/)?.[0];
-  if (method !== 'GET' && cookie && search && revision !== false) {
-    const current = await request(search, 'GET', undefined, cookie);
+  if (method !== 'GET' && auth && search && revision !== false) {
+    const current = await request(search, 'GET', undefined, auth);
     if (current.status === 200) headers['if-match'] = String(revision ?? current.body.revision);
   }
   const response = await fetch(base + url, { method, headers, body:body === undefined ? undefined : JSON.stringify(body) });
-  return { status:response.status, body:await response.json(), cookie:response.headers.get('set-cookie')?.split(';')[0] };
+  return { status:response.status, body:await response.json() };
 }
 
 (async () => {
-  const login = await request('/api/login', 'POST', { email:'abe@slate.local', pin:'2468' });
-  const auth = login.cookie;
-  assert.equal(login.status, 200);
+  const auth = sign.headers('abe@slate.local');
+  const login = await request('/api/me', 'GET', undefined, auth);
+  assert.equal(login.status, 200, 'the fixture Clerk session was refused');
   const fresh = await request('/api/searches', 'POST', { client:'Integrity Test', position:'Manager' }, auth);
   const p = '/api/searches/' + fresh.body.id;
   const read = async () => (await request(p, 'GET', undefined, auth)).body;
@@ -42,9 +43,8 @@ async function request(url, method = 'GET', body, cookie, revision) {
 
   await write('/profile', 'PUT', { criteria:[{ id:'S1', kind:'skill', label:'Budget management', weight:3 }] });
   const seated = await write('/members', 'POST', { name:'Integrity Member', email:'integrity@example.test' });
-  const memberLogin = await request('/api/login', 'POST', { email:'integrity@example.test', pin:seated.body.pin });
-  const member = memberLogin.cookie;
-  const memberId = memberLogin.body.user.id;
+  const member = sign.headers('integrity@example.test');
+  const memberId = (await request('/api/me', 'GET', undefined, member)).body.user.id;
   check('new committee accounts need only an email', () => { assert.equal(seated.body.email, 'integrity@example.test'); assert.equal(seated.body.pin, undefined); });
   await write('/candidates', 'POST', { name:'Synthetic Candidate' });
   let c = (await read()).candidates[0];
@@ -90,8 +90,8 @@ async function request(url, method = 'GET', body, cookie, revision) {
 
   await write('/scores/'+c.id, 'PUT', { scores:{ S1:5 }, note:'Budget evidence' });
   await write('/scores/'+c.id, 'PUT', { scores:{ S1:5 }, note:'Updated budget evidence' });
-  const colleague = await request('/api/login', 'POST', { email:'mike@slate.local', pin:'1357' });
-  const privateHistory = (await request(p+'/history', 'GET', undefined, colleague.cookie)).body.history;
+  const colleague = sign.headers('mike@slate.local');
+  const privateHistory = (await request(p+'/history', 'GET', undefined, colleague)).body.history;
   check('history preserves sealed score privacy between consultants', () => {
     for (const entry of privateHistory) if (entry.scores) assert.equal(entry.scores[login.body.user.id], undefined);
   });
@@ -194,19 +194,24 @@ async function request(url, method = 'GET', body, cookie, revision) {
   await vm.runInNewContext(navigationFunction+";go('person', {sel:'different'})", navigation);
   check('cancelled navigation cannot redirect scores to another candidate', () => assert.equal(navigation.state.sel, 'original'));
 
-  const archiveSeat = await write('/members', 'POST', { name:'Archive Member', email:'archive-integrity@example.test' });
-  const archiveLogin = await request('/api/login', 'POST', { email:'archive-integrity@example.test', pin:archiveSeat.body.pin });
+  await write('/members', 'POST', { name:'Archive Member', email:'archive-integrity@example.test' });
+  const archive = sign.headers('archive-integrity@example.test');
+  assert.equal((await request('/api/me', 'GET', undefined, archive)).status, 200);
   const liveInvite = (await read()).candidates[0].invite;
   assert.equal((await write('', 'DELETE')).status, 200);
   assert.equal((await request(p, 'GET', undefined, auth)).status, 404);
   assert.equal((await request('/api/apply/'+liveInvite)).status, 404);
-  assert.equal((await request('/api/me', 'GET', undefined, archiveLogin.cookie)).status, 401);
+  // Archiving retires the account the seat created. The person's Clerk identity
+  // is untouched, so what has to be gone is the Slate account behind it.
+  const archived = JSON.parse(fs.readFileSync(path.join(process.env.SLATE_TEST_DATA, 'slate.json'), 'utf8'));
+  check('archiving retires the committee account that seat created', () =>
+    assert.ok(!archived.users.some(u => u.email === 'archive-integrity@example.test')));
   assert.ok((await request('/api/archives', 'GET', undefined, auth)).body.some(a=>a.id===fresh.body.id));
   const restored = await request('/api/archives/'+fresh.body.id+'/restore', 'POST', {}, auth);
   check('archived searches restore responses, history and fresh links', () => {
     assert.equal(restored.status, 200); assert.notEqual(restored.body.candidates[0].invite, liveInvite); assert.equal(restored.body.artifacts.survey1.intro, 'Original');
   });
-  assert.equal((await request('/api/login', 'POST', { email:'archive-integrity@example.test' })).status, 200);
+  assert.equal((await request('/api/me', 'GET', undefined, archive)).status, 200);
   check('archive restoration recovers the committee roster and accounts', () => assert.ok(restored.body.roster.some(r=>r.email==='archive-integrity@example.test')));
 
   const backupRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'slate-backup-test-'));
@@ -219,7 +224,7 @@ async function request(url, method = 'GET', body, cookie, revision) {
   backup.restore(snapshotDir, restoredDir);
   const recovered = JSON.parse(fs.readFileSync(path.join(restoredDir, 'slate.json')));
   check('backup restore recovers data and media without resurrecting sessions', () => {
-    assert.ok(recovered.searches.some(s=>s.id===fresh.body.id)); assert.deepEqual(recovered.sessions, {});
+    assert.ok(recovered.searches.some(s=>s.id===fresh.body.id)); assert.equal(recovered.sessions, undefined);
     assert.equal(fs.readFileSync(path.join(restoredDir, 'media', fresh.body.id, 'cover.jpg'), 'utf8'), 'synthetic media');
     assert.throws(()=>backup.restore(snapshotDir, restoredDir), /empty destination/);
   });
@@ -260,12 +265,14 @@ async function request(url, method = 'GET', body, cookie, revision) {
     s.candidates=[{id:'C-legacy',name:'Legacy candidate',invite:'old-exposed-token',survey1:{at:'2025-01-01',answers:{q1:'Old answer'}}}];
     s.artifacts.survey1={questions:[{n:1,prompt:'Current question?'}]};
     db.db.searches.push(s); db.persist();
-    db.db.sessions.invalid={userId:db.db.users[0].id,at:'invalid'}; db.persist();
+    const raw=JSON.parse(fs.readFileSync(file,'utf8'));
+    raw.schemaVersion=2; raw.sessions={ stale:{userId:db.db.users[0].id,exp:Date.now()+60000} };
+    fs.writeFileSync(file,JSON.stringify(raw));
     delete require.cache[require.resolve('./server/db')];
     const migrated=require('./server/db');
     const c=migrated.findSearch(s.id).candidates[0];
     assert.notEqual(c.invite,'old-exposed-token'); assert.equal(c.inviteVersion,2);
-    assert.equal(c.survey1.legacySnapshot,true); assert.equal(migrated.db.sessions.invalid,undefined);
+    assert.equal(c.survey1.legacySnapshot,true); assert.equal(migrated.db.sessions,undefined);
     const token=c.invite;
     delete require.cache[require.resolve('./server/db')];
     assert.equal(require('./server/db').findSearch(s.id).candidates[0].invite,token);
@@ -274,11 +281,13 @@ async function request(url, method = 'GET', body, cookie, revision) {
   const migratedInvites = spawnSync(process.execPath, ['-e', migrationScript], { cwd:path.join(__dirname, '..'), env:{ ...process.env, DATA_DIR:legacyDirectory }, encoding:'utf8', windowsHide:true });
   check('legacy migration rotates exposed links once and labels uncertain question history', () => assert.equal(migratedInvites.status, 0, migratedInvites.stderr));
 
-  // End with lockout checks so intentional bad logins cannot affect other suites.
-  const attempt = async (ip, email='missing-integrity@example.test') => fetch(base+'/api/login', { method:'POST', headers:{'content-type':'application/json','x-forwarded-for':ip}, body:JSON.stringify({email,pin:'wrong'}) });
-  for (let i=0;i<8;i++) await attempt('198.51.100.10');
-  const blocked = await attempt('198.51.100.11');
-  check('changing forwarded IP headers cannot bypass the login limit', () => assert.equal(blocked.status, 429));
+  // There is no password to guess and no lockout to trip. What has to hold is
+  // that a session Slate did not receive from its own Clerk instance is refused
+  // however the request labels itself.
+  const stranger = identity.signer(identity.serverEnv().privateKey);
+  const forged = stranger.headers('abe@slate.local');
+  const spoofed = await fetch(base+'/api/me', { headers:{ ...forged, 'x-forwarded-for':'198.51.100.10' } });
+  check('a session signed by an untrusted key is refused whatever IP it claims', () => assert.equal(spoofed.status, 401));
   const unreachable = spawnSync(process.execPath, [path.join(__dirname, 'bughunt.js')], { cwd:path.join(__dirname, '..'), env:{ ...process.env, DATA_DIR:fs.mkdtempSync(path.join(os.tmpdir(),'slate-unreachable-')), SLATE_URL:'http://127.0.0.1:0' }, encoding:'utf8', windowsHide:true });
   check('the test command fails when its target server is unavailable', () => assert.equal(unreachable.status, 1));
   console.log(checks + ' integrity regression checks passed.');

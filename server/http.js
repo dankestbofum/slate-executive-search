@@ -35,13 +35,26 @@ const CSP_DIRECTIVES = [
 ];
 
 const CSP = CSP_DIRECTIVES.join('; ');
+const authConfig = require('./auth').configuration();
+const clerkOrigin = authConfig.configured ? 'https://' + authConfig.domain : '';
+const CLERK_CSP = clerkOrigin ? CSP_DIRECTIVES.map(directive => {
+  const name = directive.split(' ')[0];
+  const extra = {
+    'script-src': clerkOrigin + ' https://challenges.cloudflare.com https://*.protect.clerk.com',
+    'style-src': "'unsafe-inline'",
+    'connect-src': clerkOrigin + ' https://*.protect.clerk.com:* https://clerk-telemetry.com https://*.clerk-telemetry.com https://img.clerk.com',
+    'img-src': 'https://img.clerk.com',
+    'worker-src': 'blob:'
+  }[name];
+  return extra ? directive + ' ' + extra : directive;
+}).concat('frame-src ' + clerkOrigin + ' https://challenges.cloudflare.com https://*.protect.clerk.com').join('; ') : CSP;
 
 // Bearer-link pages are opened by members of the public. A referrer would
 // leak the candidate's token to any site they navigate to next.
 const BEARER_PATH = /^\/(api\/)?apply(\/|$)/;
 
 function securityHeaders(req, res, next) {
-  res.set('Content-Security-Policy', CSP);
+  res.set('Content-Security-Policy', BEARER_PATH.test(req.path) ? CSP : CLERK_CSP);
   res.set('X-Content-Type-Options', 'nosniff');
   // frame-ancestors covers modern browsers; this is the legacy companion.
   res.set('X-Frame-Options', 'DENY');

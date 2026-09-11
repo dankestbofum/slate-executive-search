@@ -13,9 +13,9 @@ if (process.env.NODE_ENV !== 'test' && process.env.NODE_ENV !== 'production') {
 const fs = require('fs');
 const path = require('path');
 const express = require('express');
-const cookieParser = require('cookie-parser');
 const crypto = require('crypto');
 const db = require('./db');
+const auth = require('./auth').createAuth(db);
 const ai = require('./ai');
 const committee = require('./committee');
 const integrity = require('./integrity');
@@ -36,13 +36,10 @@ const {
 const app = express();
 const PORT = Number(process.env.PORT || 4173);
 const HOST = process.env.HOST || '0.0.0.0';
-const COOKIE = 'slate_sid';
-const isProd = process.env.NODE_ENV === 'production';
 // Stamped into the image by CI (--build-arg SLATE_RELEASE). Lets an operator
 // confirm which commit a running container was built from, which is what makes
 // a rollback decision checkable rather than assumed.
 const RELEASE = String(process.env.SLATE_RELEASE || '').trim() || 'dev';
-const showDemoLogins = !isProd && process.env.SHOW_DEMO_LOGINS !== 'false';
 const NON_ARTIFACT_STEPS = new Set(['profile', 'screen', 'send2', 'finalists', ...db.STAFF_STEPS]);
 const ARTIFACTS = new Set(db.STEPS.map(s => s.key).filter(k => !NON_ARTIFACT_STEPS.has(k)));
 
@@ -99,7 +96,12 @@ const jsonMedia = express.json({ limit: '9mb' });
 app.use((req, res, next) => (req.method === 'POST' && MEDIA_UPLOAD.test(req.path)) ? jsonMedia(req, res, next) : next());
 app.use(express.json({ limit: '256kb' }));
 
-app.use(cookieParser());
+app.use((req, res, next) => {
+  // Candidate links and public configuration do not depend on Clerk availability.
+  if (/^\/api\/(config|health|ready|apply)(\/|$)/.test(req.path)) return next();
+  if (req.path.startsWith('/api/') || req.path.startsWith('/media/')) return auth.middleware(req, res, next);
+  next();
+});
 
 // Set by the SIGTERM handler at the foot of this file. Declared and read here
 // because the guard has to sit ahead of every route it protects.
@@ -115,8 +117,8 @@ app.use((req, res, next) => {
   return res.status(503).json({ error: 'Slate is restarting. Your work was not saved; try again in a moment.' });
 });
 
-// Refuse cookie-authenticated mutations that a browser did not initiate from
-// this origin. Registered before any route so it covers login and logout too.
+// Refuse session-authenticated mutations that a browser did not initiate from
+// this origin. Registered before any route so it covers every API call.
 app.use(http.sameOrigin);
 
 app.use(express.static(path.join(__dirname, '..', 'public'), {
@@ -154,41 +156,9 @@ const researchLimit = http.limiter({
   message: 'Too much research requested. Wait a few minutes.'
 });
 
-const SESSION_MS = db.SESSION_MS;
-const loginHits = new Map();
-
 function clientIp(req){
   return String(req.ip || req.socket?.remoteAddress || 'unknown');
 }
-
-function loginBlocked(ip){
-  const now = Date.now();
-  const row = loginHits.get(ip);
-  if (!row) return false;
-  if (row.until && now < row.until) return true;
-  if (row.until && now >= row.until) loginHits.delete(ip);
-  return false;
-}
-
-function loginFail(ip){
-  const now = Date.now();
-  const row = loginHits.get(ip) || { n: 0, until: 0, ts: now };
-  if (row.until && now >= row.until) { row.n = 0; row.until = 0; }
-  row.n += 1;
-  row.ts = now;
-  if (row.n >= 8) row.until = now + 15 * 60 * 1000;
-  loginHits.set(ip, row);
-}
-
-function loginOk(ip){ loginHits.delete(ip); }
-
-const LOGIN_HITS_IDLE_MS = 60 * 60 * 1000;
-setInterval(() => {
-  const now = Date.now();
-  for (const [ip, row] of loginHits) {
-    if (!row.until && now - row.ts > LOGIN_HITS_IDLE_MS) loginHits.delete(ip);
-  }
-}, 15 * 60 * 1000).unref();
 
 /**
  * Consensus is only assembled for people entitled to read the room.
@@ -239,44 +209,10 @@ function claudeFail(err){
   return { status: 500, error: err.message || 'Request failed.' };
 }
 
-function sid(){ return crypto.randomBytes(24).toString('hex'); }
-
-function cookieOpts(){
-  return {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: isProd,
-    path: '/',
-    maxAge: SESSION_MS
-  };
-}
-
-function currentUser(req){
-  const id = req.cookies[COOKIE];
-  const sess = id && db.db.sessions[id];
-  if (!sess) return null;
-  if (!Number.isFinite(sess.exp) || Date.now() > sess.exp) {
-    delete db.db.sessions[id];
-    db.persist();
-    return null;
-  }
-  const user = db.findUserById(sess.userId);
-  // Disabling revokes sessions, but this is checked on every request as well:
-  // a session restored from a backup, or written by an older release, must not
-  // outlive the decision to withdraw someone's access.
-  if (!user || db.isDisabled(user)) {
-    delete db.db.sessions[id];
-    db.persist();
-    return null;
-  }
-  return user;
-}
-
+// Clerk is the only way into the workspace. Identity is proven by the request's
+// Clerk session; Slate resolves it to the account that holds the roles and seats.
 function requireUser(req, res, next){
-  const u = currentUser(req);
-  if (!u) return res.status(401).json({ error:'Select Start to open the workspace.' });
-  req.user = u;
-  next();
+  return auth.requireUser(req, res, next);
 }
 
 function clampWeight(w){
@@ -445,7 +381,7 @@ function watchAlerts(){
 
 app.get('/api/config', (_req, res) => {
   const body = {
-    demoLogins: showDemoLogins,
+    auth: auth.publicConfig,
     jurisdictionTypes: Object.values(jurisdictions.TYPES),
     communityFields: { place: PLACE_FIELDS, gov: GOV_FIELDS },
     packThemes: PACK_THEMES,
@@ -458,57 +394,7 @@ app.get('/api/config', (_req, res) => {
     compare: db.COMPARE,
     compareBands: db.COMPARE_BANDS
   };
-  if (showDemoLogins) {
-    // Only list the firm's own seats in local demo mode.
-    body.accounts = db.db.users.filter(u => u.role === 'consultant').map(u => ({
-      email: u.email, name: u.name, title: u.title
-    }));
-  }
   res.json(body);
-});
-
-function openSession(res, user){
-  const id = sid();
-  db.db.sessions[id] = { userId: user.id, at: db.now(), exp: Date.now() + SESSION_MS };
-  db.persist();
-  res.cookie(COOKIE, id, cookieOpts());
-  res.json({ user: db.publicUser(user) });
-}
-
-// Temporary open access: Start enters the shared workspace without credentials.
-app.post('/api/start', (req, res) => {
-  const team = db.findUserById('u0');
-  if (!team || db.isDisabled(team)) {
-    return res.status(503).json({ error:'The shared workspace is unavailable.' });
-  }
-  if (currentUser(req)?.id === team.id) return res.json({ user: db.publicUser(team) });
-  openSession(res, team);
-});
-
-app.post('/api/login', (req, res) => {
-  const ip = clientIp(req);
-  const { email } = req.body || {};
-  const account = 'account:' + String(email || '').trim().toLowerCase().slice(0, 254);
-  if (loginBlocked(ip) || loginBlocked(account)) {
-    return res.status(429).json({ error:'Too many sign-in attempts. Wait a few minutes.' });
-  }
-  const u = db.findUserByEmail(email);
-  if (!u || db.isDisabled(u)) {
-    loginFail(ip);
-    loginFail(account);
-    return res.status(401).json({ error:'No active account matches that email.' });
-  }
-  loginOk(ip);
-  loginOk(account);
-  openSession(res, u);
-});
-
-app.post('/api/logout', (req, res) => {
-  const id = req.cookies[COOKIE];
-  if (id) delete db.db.sessions[id];
-  db.persist();
-  res.clearCookie(COOKIE, { httpOnly: true, sameSite: 'lax', secure: isProd, path: '/' });
-  res.json({ ok: true });
 });
 
 // The directory a viewer needs to put names to ids. Consultants work across the

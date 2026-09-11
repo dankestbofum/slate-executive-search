@@ -103,19 +103,31 @@ search whenever that person is unavailable. Everything else the manager does
 whoever holds the seat.
 
 Consultant accounts come from the environment. Committee accounts are created
-per search and retired automatically, sessions included, when the last seat
-holding them goes away.
+per search and retired automatically when the last seat holding them goes away.
 
 ### Opening the workspace
 
-Select **Start** on the landing page to open the workspace immediately as
-**Slate Team**. No email, PIN, or login form is required. Anyone with the site
-URL can enter with the shared account's consultant access, and work is
-attributed to Slate Team. **Leave workspace** returns to the landing page.
+Select **Sign in** or **Sign up** on the landing page. Clerk verifies identity;
+the profile menu manages the account and signs out. Slate keeps its existing
+consultant roles, committee seats, and attribution history. On first sign-in,
+a verified primary email links to the matching Slate account; subsequent
+requests use its persisted Clerk user ID. Disabled accounts remain blocked.
 
-The shared account is ensured on every boot. Existing named accounts and search
-memberships remain in the store. The email-only API remains available for
-existing integrations, but the web interface uses Start.
+New sign-ups receive committee access and see only searches they are seated on.
+`SLATE_CLERK_ADMIN_EMAILS` may designate verified emails for initial consultant
+provisioning. It applies only when creating a new Slate account; it never
+promotes or re-enables existing accounts. Additional consultants can be created
+with `node scripts/accounts.js create "Full Name" email@example.com "Title"`.
+
+Clerk is the only way in. Slate issues no credential, keeps no session table
+and has no sign-in route of its own; identity is proven on every request and
+resolved to the account that holds the roles and seats. Missing Clerk
+configuration blocks workspace access rather than restoring open access.
+
+The regression suite signs its own Clerk sessions with a throwaway key the test
+server verifies for real (`tests/identity.js`), so it exercises that same path
+offline. `SLATE_CLERK_FIXTURE` reads the account's email from the session
+subject in place of a Clerk directory; it is ignored unless `NODE_ENV=test`.
 
 Optional `SLATE_EMAIL_TEAM`, `SLATE_EMAIL_ABE`, and `SLATE_EMAIL_MIKE` variables
 customize account emails. No `SLATE_PIN_*` variables are used.
@@ -139,6 +151,9 @@ Node 20 is end of life and no longer receives security patches.
 cp .env.example .env
 # add ANTHROPIC_API_KEY
 npm ci        # lockfile install, same as CI and the image
+clerk auth login
+clerk init --app app_3JCIQzCE9yeVbFBkzQF0qP4LRfS
+# Set SLATE_CLERK_ADMIN_EMAILS to your first consultant's verified email.
 npm start
 ```
 
@@ -146,7 +161,18 @@ npm start
 environment is authoritative, so a file that slipped into an image cannot
 quietly replace deployed configuration.
 
-Open http://127.0.0.1:4173 and select **Start**.
+Open http://localhost:4173 and select **Sign up** (or **Sign in**).
+
+Clerk requires `CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY`; the CLI writes
+them to the ignored `.env`. Only the publishable key reaches the browser.
+Set `CLERK_AUTHORIZED_PARTIES` to a comma-separated list of trusted app origins
+when deploying, and configure production Clerk keys on the hosting platform.
+The linked development instance is not a production deployment.
+
+Run `clerk doctor --json` to check the link and keys. With the development app
+running, `node tests/clerk-browser.js` checks the real sign-in and sign-up forms
+without submitting an account or sending email. Complete first-account signup
+manually to verify email delivery and the signed-in profile.
 
 `npm test` starts its own local server and temporary data stores. It never reads
 your `.env`, contacts Claude, or changes live searches. Failed checks exit nonzero.
@@ -514,12 +540,12 @@ administration, that is a new role and a new decision, not a flag.
 
 **Disabling keeps the record.** History attributes decisions to accounts, and a
 search must stay readable after someone leaves, so a disabled account retains
-its identity and loses its access. Sessions are revoked immediately, and every
-request re-checks the flag, so a session restored from a backup cannot outlive
-the decision to withdraw access.
+its identity and loses its access. There is no session to revoke: every request
+resolves the Clerk identity back to the account and re-checks the flag, so
+access ends on the next request rather than whenever a cookie lapses.
 
-**Sessions** last `SLATE_SESSION_DAYS` (default 14), capped at 30 by the
-server. Configuration cannot raise the ceiling.
+**Session length** belongs to Clerk, and so does signing out. Slate stores no
+session, which is also why a restored backup cannot bring one back.
 
 **Still an owner decision:** MFA/SSO. If the county requires it, it should come
 from an established identity provider rather than a bespoke implementation
@@ -533,9 +559,11 @@ Implemented in `server/http.js` and covered by `tests/security.js`.
 candidate pages, carries a Content-Security-Policy, `nosniff`,
 `X-Frame-Options: DENY`, `Cross-Origin-Opener-Policy`,
 `Cross-Origin-Resource-Policy`, and a `Permissions-Policy`. HSTS is added in
-production only. The policy needs no `unsafe-inline`, no `unsafe-eval`, and no
-third-party origin, because the front end has no inline scripts or style
-attributes and fonts are served from this origin.
+production only. Candidate pages retain the strict first-party-only policy.
+The staff workspace allows the configured Clerk domain, Clerk profile images,
+telemetry and abuse protection, and Cloudflare bot protection. Clerk's runtime
+styles require `style-src 'unsafe-inline'`; inline scripts and eval remain
+blocked. Fonts continue to be served from this origin.
 
 **Fonts are vendored.** `public/fonts/` is generated by
 `node scripts/vendor-fonts.js`. Candidate questionnaire pages are opened by
@@ -617,7 +645,7 @@ must contact the candidate and share the link.
 **Archive** replaces permanent search deletion. Archived searches and their media
 can be restored from **Archived searches**. Their candidate links stop working
 while archived and are replaced on restoration. Committee accounts with no active
-seats are retired with their sessions; roster accounts are recovered on restoration.
+seats are retired; roster accounts are recovered on restoration.
 If an email was reassigned to a different account, restoration stops for that
 conflict to be resolved. No permanent purge is exposed in the app.
 
@@ -653,7 +681,7 @@ node scripts/backup.js verify /safe-backups/slate-2026-09-06
 node scripts/backup.js restore /safe-backups/slate-2026-09-06 /data-restored
 ```
 
-Restore refuses a nonempty destination and clears old login sessions. Stop the app,
+Restore refuses a nonempty destination and drops any pre-Clerk session table. Stop the app,
 point `DATA_DIR` at the restored directory, restart, sign in, and check a search,
 candidate response, and brochure photo. Keep the original directory until that
 check succeeds. The isolated regression suite exercises data/media restoration,
@@ -662,12 +690,14 @@ write. Automatic snapshots publish only after verification.
 
 ## Sign-in and deployment changes
 
-Start opens the shared workspace without credentials. Legacy PINs and PIN hashes are removed
-from the active store on startup. Production never lists demo accounts, even if
-`SHOW_DEMO_LOGINS=true`.
-Prefer named consultant accounts for attributable approvals; the shared firm
-account remains available for the existing team workflow. Use strong consultant
-secrets in production.
+Clerk authentication replaces shared credential-free access and email-only login.
+Existing accounts, search memberships, and history stay in place. The old `start`,
+`login` and `logout` routes are gone, along with the session table behind them;
+a store carrying one loses it on the schema 2 to 3 migration. Legacy PINs and PIN
+hashes were already removed from the active store on startup, and the public
+config lists no accounts. Provision consultant emails before inviting staff,
+configure production Clerk keys, and use each person's verified identity for
+attributable approvals.
 
 The privacy migration replaces legacy candidate invitation links once because
 they were previously included in committee API responses. **After updating, share

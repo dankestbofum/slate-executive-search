@@ -3,12 +3,17 @@
 // Does a real browser accept the Content-Security-Policy, and does the app
 // still work under it?
 //
-// DEP-03 shipped a strict CSP with no unsafe- keyword and no third-party
-// origin, verified only by asserting on the header. A header is a claim. The
-// browser is what enforces it, and a policy that blocks the application's own
-// stylesheet is worse than no policy: it looks secure and is broken.
+// DEP-03 shipped a strict CSP, verified only by asserting on the header. A
+// header is a claim. The browser is what enforces it, and a policy that blocks
+// the application's own stylesheet, or the identity provider it now has to
+// load, is worse than no policy: it looks secure and is broken.
 
 const { test, expect } = require('@playwright/test');
+const { installClerk, ORIGIN: IDENTITY_ORIGIN } = require('./clerk');
+
+// The identity script is served from Clerk's origin, which the policy for the
+// workspace shell allows and these tests have to load for the app to boot.
+test.beforeEach(async ({ page }) => { await installClerk(page); });
 
 /** Collect anything the browser refused to load or execute. */
 function watchViolations(page) {
@@ -27,7 +32,7 @@ function watchViolations(page) {
   return violations;
 }
 
-test('the sign-in page loads with no CSP violation', async ({ page }) => {
+test('the landing page loads with no CSP violation', async ({ page }) => {
   const violations = watchViolations(page);
   await page.goto('/');
   await page.waitForLoadState('networkidle');
@@ -53,20 +58,23 @@ test('stylesheets are applied, not blocked', async ({ page }) => {
   expect(styled.family, 'no font stack applied; style-src may have blocked the CSS').not.toBe('');
 });
 
-test('the vendored fonts load from this origin and nothing is fetched off-site', async ({ page }, testInfo) => {
+test('the vendored fonts load from this origin and only identity is fetched off-site', async ({ page }, testInfo) => {
   // Compare against the configured base URL. page.url() is empty when the
   // first request fires, which would make the app's own origin look external.
   const ownOrigin = new URL(testInfo.project.use.baseURL).origin;
   const external = [];
   page.on('request', request => {
     const url = new URL(request.url());
-    if (url.origin !== ownOrigin && url.protocol !== 'data:') external.push(request.url());
+    if (url.origin === ownOrigin || url.protocol === 'data:') return;
+    // Signing in is the one third party, and it is the provider's own origin.
+    if (url.origin === IDENTITY_ORIGIN) return;
+    external.push(request.url());
   });
 
   await page.goto('/');
   await page.waitForLoadState('networkidle');
 
-  expect(external, 'the page contacted a third party').toEqual([]);
+  expect(external, 'the page contacted a third party other than identity').toEqual([]);
 
   const fonts = await page.evaluate(() => document.fonts.size);
   expect(fonts, 'no @font-face rules were registered').toBeGreaterThan(0);

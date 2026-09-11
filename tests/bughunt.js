@@ -10,8 +10,10 @@ const { normalizeResearch, researchGaps, generate } = require('../server/ai');
 const desk = require('../server/desk');
 const { assembleBrochure } = require('../server/brochure');
 const db = require('../server/db');
+const identity = require('./identity');
 
 const BASE = process.env.SLATE_URL || 'http://127.0.0.1:4173';
+const sign = identity.signer();
 const results = [];
 
 function record(name, ok, detail){
@@ -20,12 +22,11 @@ function record(name, ok, detail){
   console.log(`${mark}  ${name}${detail ? ' — ' + detail : ''}`);
 }
 
-async function req(path, { method='GET', body, cookie, expect }={}){
-  const headers = { 'content-type': 'application/json' };
-  if (cookie) headers.cookie = cookie;
+async function req(path, { method='GET', body, auth, expect }={}){
+  const headers = { 'content-type': 'application/json', ...auth };
   const searchPath = path.match(/^\/api\/searches\/(sr-[^/]+)/)?.[0];
-  if (cookie && method !== 'GET' && searchPath) {
-    const current = await fetch(BASE + searchPath, { headers: { cookie } });
+  if (auth && method !== 'GET' && searchPath) {
+    const current = await fetch(BASE + searchPath, { headers: auth });
     if (current.ok) headers['if-match'] = String((await current.json()).revision);
   }
   if (method === 'POST' && path.startsWith('/api/apply/') && body) {
@@ -43,15 +44,14 @@ async function req(path, { method='GET', body, cookie, expect }={}){
   if (expect != null && res.status !== expect) {
     throw new Error(`${path} expected ${expect}, got ${res.status}: ${text.slice(0,200)}`);
   }
-  const set = res.headers.getSetCookie ? res.headers.getSetCookie() : [];
-  const sid = (set.join(';').match(/slate_sid=([^;]+)/) || [])[1];
-  return { status: res.status, json, cookie: sid ? 'slate_sid='+sid : cookie };
+  return { status: res.status, json, auth };
 }
 
-async function login(email, pin){
-  const out = await req('/api/login', { method:'POST', body:{ email, pin }, expect:200 });
-  assert.ok(out.cookie, 'login did not set cookie');
-  return out;
+// Signing in is holding a Clerk session for that email. There is no other door.
+async function login(email){
+  const auth = sign.headers(email);
+  const out = await req('/api/me', { auth, expect:200 });
+  return { ...out, auth };
 }
 
 async function run(){
@@ -97,7 +97,7 @@ async function run(){
 
   try {
     const cfg = await req('/api/config', { expect:200 });
-    record('GET /api/config', typeof cfg.json.demoLogins === 'boolean');
+    record('GET /api/config', cfg.json.auth.provider === 'clerk' && cfg.json.auth.configured === true);
     const pk = cfg.json.packages || [];
     record('Config lists the three service packages',
       pk.map(p => p.key).join(',') === 'basic,enhanced,executive' && pk.every(p => p.label && p.fee && Array.isArray(p.services)),
@@ -152,9 +152,12 @@ async function run(){
 
   // --- auth ---
   try {
-    const bad = await req('/api/login', { method:'POST', body:{ email:'unknown@slate.local' }, expect:401 });
-    record('Login rejects unknown email', bad.json.error && bad.status===401);
-  } catch (err) { record('Login rejects unknown email', false, err.message); }
+    const token = sign.token('abe@slate.local');
+    const tampered = await req('/api/me', { auth:{ authorization:'Bearer ' + token.slice(0, -12) + 'tampered1234' }, expect:401 });
+    record('A tampered session token is refused', tampered.status===401);
+    const expired = await req('/api/me', { auth: sign.headers('abe@slate.local', { exp: Math.floor(Date.now()/1000) - 60 }), expect:401 });
+    record('An expired session token is refused', expired.status===401);
+  } catch (err) { record('Session tokens are verified', false, err.message); }
 
   try {
     await req('/api/me', { expect:401 });
@@ -163,23 +166,23 @@ async function run(){
 
   let abe, mike;
   try {
-    abe = await login('abe@slate.local', '2468');
+    abe = await login('abe@slate.local');
     record('Abe can sign in', abe.json.user && abe.json.user.role==='consultant', abe.json.user.name);
   } catch (err) { record('Abe can sign in', false, err.message); return; }
 
   try {
-    mike = await login('mike@slate.local', '1357');
+    mike = await login('mike@slate.local');
     record('Mike can sign in', mike.json.user && mike.json.user.name==='Mike Letcher');
   } catch (err) { record('Mike can sign in', false, err.message); }
 
   try {
-    const me = await req('/api/me', { cookie: abe.cookie, expect:200 });
+    const me = await req('/api/me', { auth: abe.auth, expect:200 });
     record('GET /api/me after login', me.json.user.email==='abe@slate.local');
   } catch (err) { record('GET /api/me after login', false, err.message); }
 
   // --- create search: empty required fields ---
   try {
-    const empty = await req('/api/searches', { method:'POST', cookie: abe.cookie, body:{}, expect:400 });
+    const empty = await req('/api/searches', { method:'POST', auth: abe.auth, body:{}, expect:400 });
     record('Create search requires client and position', empty.status===400, empty.json.error);
   } catch (err) {
     record('Create search requires client and position', false, err.message);
@@ -189,7 +192,7 @@ async function run(){
   let search;
   try {
     const created = await req('/api/searches', {
-      method:'POST', cookie: abe.cookie, expect:200,
+      method:'POST', auth: abe.auth, expect:200,
       body:{ client:'Test Town of Bughunt', position:'Town Manager', state:'Colorado', website:'https://example.com' }
     });
     search = created.json;
@@ -202,11 +205,11 @@ async function run(){
   let basicSearch;
   try {
     const bad = await req('/api/searches', {
-      method:'POST', cookie: abe.cookie, body:{ client:'Basic Town', position:'Clerk', package:'gold' }
+      method:'POST', auth: abe.auth, body:{ client:'Basic Town', position:'Clerk', package:'gold' }
     });
     record('Create search rejects an unknown package', bad.status===400, 'status='+bad.status);
     const created = await req('/api/searches', {
-      method:'POST', cookie: abe.cookie, expect:200,
+      method:'POST', auth: abe.auth, expect:200,
       body:{ client:'Test Basic Town', position:'Finance Director', package:'basic' }
     });
     basicSearch = created.json;
@@ -215,7 +218,7 @@ async function run(){
       basicSearch.package==='basic' && basicSearch.progress.total===8 && !keys.includes('brochure') && !keys.includes('community') && !keys.includes('contract'),
       keys.join(','));
     record('Basic search still starts on the committee', basicSearch.progress.next?.key==='team', 'next='+basicSearch.progress.next?.key);
-    const list = await req('/api/searches', { cookie: abe.cookie, expect:200 });
+    const list = await req('/api/searches', { auth: abe.auth, expect:200 });
     const row = list.json.find(s => s.id===basicSearch.id);
     record('Search list carries the package label', row && row.package==='basic' && row.packageLabel==='Basic');
   } catch (err) { record('Basic package search', false, err.message); }
@@ -223,38 +226,38 @@ async function run(){
   if (basicSearch) {
     try {
       const put = await req('/api/searches/'+basicSearch.id+'/artifact/brochure', {
-        method:'PUT', cookie: abe.cookie, body:{ body:{ lede:'x' } }
+        method:'PUT', auth: abe.auth, body:{ body:{ lede:'x' } }
       });
       record('Basic refuses a brochure save (not in package)', put.status===400 && /Basic package/.test(put.json.error||''), put.json.error);
       const gen = await req('/api/searches/'+basicSearch.id+'/generate', {
-        method:'POST', cookie: abe.cookie, body:{ kind:'contract' }
+        method:'POST', auth: abe.auth, body:{ kind:'contract' }
       });
       record('Basic refuses a contract draft (not in package)', gen.status===400 && /Executive/.test(gen.json.error||''), gen.json.error);
       const asm = await req('/api/searches/'+basicSearch.id+'/assemble', {
-        method:'POST', cookie: abe.cookie, body:{ kind:'brochure' }
+        method:'POST', auth: abe.auth, body:{ kind:'brochure' }
       });
       record('Basic refuses assembling a brochure', asm.status===400, 'status='+asm.status);
       const send = await req('/api/searches/'+basicSearch.id+'/send2', {
-        method:'POST', cookie: abe.cookie, body:{}
+        method:'POST', auth: abe.auth, body:{}
       });
       record('Basic refuses the semifinalist send', send.status===400 && /package/.test(send.json.error||''), send.json.error);
       const ok = await req('/api/searches/'+basicSearch.id+'/artifact/plan', {
-        method:'PUT', cookie: abe.cookie, expect:200, body:{ body:{ rows:[] } }
+        method:'PUT', auth: abe.auth, expect:200, body:{ body:{ rows:[] } }
       });
       record('Basic accepts an ad plan save (in package)', Boolean(ok.json.artifacts.plan));
       const staff = await req('/api/searches/'+basicSearch.id+'/staff/sourcing/log', {
-        method:'POST', cookie: abe.cookie, body:{ text:'Called someone.' }
+        method:'POST', auth: abe.auth, body:{ text:'Called someone.' }
       });
       record('Basic refuses a sourcing log (staff step not in package)', staff.status===400 && /Enhanced/.test(staff.json.error||''), staff.json.error);
     } catch (err) { record('Basic package gating', false, err.message); }
 
     try {
       const badPatch = await req('/api/searches/'+basicSearch.id, {
-        method:'PATCH', cookie: abe.cookie, body:{ package:'platinum' }
+        method:'PATCH', auth: abe.auth, body:{ package:'platinum' }
       });
       record('PATCH rejects an unknown package', badPatch.status===400, 'status='+badPatch.status);
       const up = await req('/api/searches/'+basicSearch.id, {
-        method:'PATCH', cookie: abe.cookie, expect:200, body:{ package:'enhanced' }
+        method:'PATCH', auth: abe.auth, expect:200, body:{ package:'enhanced' }
       });
       const keys = up.json.steps.map(s => s.key);
       record('Moving to Enhanced puts the brochure and finalist week on the file',
@@ -268,15 +271,15 @@ async function run(){
     // --- staff steps on the (now Enhanced) file ---
     try {
       const sid = basicSearch.id;
-      const empty = await req('/api/searches/'+sid+'/staff/sourcing/complete', { method:'POST', cookie: abe.cookie, body:{ done:true } });
+      const empty = await req('/api/searches/'+sid+'/staff/sourcing/complete', { method:'POST', auth: abe.auth, body:{ done:true } });
       record('An empty staff step cannot be marked complete', empty.status===400, empty.json.error);
-      const blank = await req('/api/searches/'+sid+'/staff/sourcing/log', { method:'POST', cookie: abe.cookie, body:{ text:'   ' } });
+      const blank = await req('/api/searches/'+sid+'/staff/sourcing/log', { method:'POST', auth: abe.auth, body:{ text:'   ' } });
       record('Staff log refuses an empty entry', blank.status===400);
-      const notStaff = await req('/api/searches/'+sid+'/staff/plan/log', { method:'POST', cookie: abe.cookie, body:{ text:'x' } });
+      const notStaff = await req('/api/searches/'+sid+'/staff/plan/log', { method:'POST', auth: abe.auth, body:{ text:'x' } });
       record('Staff routes refuse desk steps', notStaff.status===400 && /not staff work/.test(notStaff.json.error||''));
 
       let got = await req('/api/searches/'+sid+'/staff/sourcing/log', {
-        method:'POST', cookie: abe.cookie, expect:200, body:{ text:'Called J. Rivera. Interested.' }
+        method:'POST', auth: abe.auth, expect:200, body:{ text:'Called J. Rivera. Interested.' }
       });
       let sourcing = got.json.steps.find(s => s.key==='sourcing');
       const entry = got.json.staff.sourcing.log[0];
@@ -284,80 +287,80 @@ async function run(){
         entry && entry.text==='Called J. Rivera. Interested.' && entry.byName==='Abe Macy' && entry.at && sourcing.status==='now',
         'status='+sourcing.status);
       const tagged = await req('/api/searches/'+sid+'/staff/sourcing/log', {
-        method:'POST', cookie: abe.cookie, body:{ text:'x', candidateId:'C-nope' }
+        method:'POST', auth: abe.auth, body:{ text:'x', candidateId:'C-nope' }
       });
       record('Sourcing entries take no candidate', tagged.status===400, tagged.json.error);
 
-      got = await req('/api/searches/'+sid+'/staff/sourcing', { method:'PUT', cookie: abe.cookie, expect:200, body:{ notes:'Pool is set.' } });
+      got = await req('/api/searches/'+sid+'/staff/sourcing', { method:'PUT', auth: abe.auth, expect:200, body:{ notes:'Pool is set.' } });
       record('Staff notes save', got.json.staff.sourcing.notes==='Pool is set.');
 
-      got = await req('/api/searches/'+sid+'/staff/sourcing/complete', { method:'POST', cookie: abe.cookie, expect:200, body:{ done:true } });
+      got = await req('/api/searches/'+sid+'/staff/sourcing/complete', { method:'POST', auth: abe.auth, expect:200, body:{ done:true } });
       sourcing = got.json.steps.find(s => s.key==='sourcing');
       record('Consultant marks a staff step complete', sourcing.status==='done' && got.json.staff.sourcing.doneByName==='Abe Macy' && (got.json.activity||[]).some(a => /completed source and recruit/.test(a.x)));
 
-      got = await req('/api/searches/'+sid+'/staff/sourcing/log', { method:'POST', cookie: abe.cookie, expect:200, body:{ text:'One more call.' } });
+      got = await req('/api/searches/'+sid+'/staff/sourcing/log', { method:'POST', auth: abe.auth, expect:200, body:{ text:'One more call.' } });
       sourcing = got.json.steps.find(s => s.key==='sourcing');
       record('New work reopens a completed staff step', sourcing.status!=='done' && !got.json.staff.sourcing.doneAt);
 
-      got = await req('/api/searches/'+sid+'/staff/sourcing/log/'+entry.id, { method:'DELETE', cookie: abe.cookie, expect:200, body:{} });
+      got = await req('/api/searches/'+sid+'/staff/sourcing/log/'+entry.id, { method:'DELETE', auth: abe.auth, expect:200, body:{} });
       record('A staff log entry can be removed', !got.json.staff.sourcing.log.some(e => e.id===entry.id));
-      const gone = await req('/api/searches/'+sid+'/staff/sourcing/log/'+entry.id, { method:'DELETE', cookie: abe.cookie, body:{} });
+      const gone = await req('/api/searches/'+sid+'/staff/sourcing/log/'+entry.id, { method:'DELETE', auth: abe.auth, body:{} });
       record('Removing a missing log entry is 404', gone.status===404);
     } catch (err) { record('Staff step log', false, err.message); }
 
     // --- video interviews and reference checks are tied to candidates ---
     try {
       const sid = basicSearch.id;
-      let got = await req('/api/searches/'+sid+'/candidates', { method:'POST', cookie: abe.cookie, expect:200, body:{ name:'Pat Finalist' } });
+      let got = await req('/api/searches/'+sid+'/candidates', { method:'POST', auth: abe.auth, expect:200, body:{ name:'Pat Finalist' } });
       const cand = got.json.candidates.find(c => c.name==='Pat Finalist');
-      const early = await req('/api/searches/'+sid+'/staff/video/log', { method:'POST', cookie: abe.cookie, body:{ text:'x', candidateId: cand.id } });
+      const early = await req('/api/searches/'+sid+'/staff/video/log', { method:'POST', auth: abe.auth, body:{ text:'x', candidateId: cand.id } });
       record('Video log refuses an applicant who is not a semifinalist', early.status===400 && /semifinalist/.test(early.json.error||''), early.json.error);
-      await req('/api/searches/'+sid+'/candidates/'+cand.id, { method:'PATCH', cookie: abe.cookie, expect:200, body:{ stage:'semifinalist' } });
-      got = await req('/api/searches/'+sid+'/staff/video/log', { method:'POST', cookie: abe.cookie, expect:200, body:{ text:'Strong on S1.', candidateId: cand.id } });
+      await req('/api/searches/'+sid+'/candidates/'+cand.id, { method:'PATCH', auth: abe.auth, expect:200, body:{ stage:'semifinalist' } });
+      got = await req('/api/searches/'+sid+'/staff/video/log', { method:'POST', auth: abe.auth, expect:200, body:{ text:'Strong on S1.', candidateId: cand.id } });
       record('Video log entry names the semifinalist', got.json.staff.video.log[0].candidateName==='Pat Finalist');
 
-      const refsOnEnhanced = await req('/api/searches/'+sid+'/staff/references/log', { method:'POST', cookie: abe.cookie, body:{ text:'x' } });
+      const refsOnEnhanced = await req('/api/searches/'+sid+'/staff/references/log', { method:'POST', auth: abe.auth, body:{ text:'x' } });
       record('Enhanced refuses reference checks (Executive only)', refsOnEnhanced.status===400 && /Executive/.test(refsOnEnhanced.json.error||''));
-      await req('/api/searches/'+sid, { method:'PATCH', cookie: abe.cookie, expect:200, body:{ package:'executive' } });
+      await req('/api/searches/'+sid, { method:'PATCH', auth: abe.auth, expect:200, body:{ package:'executive' } });
 
-      const notFinal = await req('/api/searches/'+sid+'/staff/references/log', { method:'POST', cookie: abe.cookie, body:{ text:'x', candidateId: cand.id } });
+      const notFinal = await req('/api/searches/'+sid+'/staff/references/log', { method:'POST', auth: abe.auth, body:{ text:'x', candidateId: cand.id } });
       record('Reference log refuses a semifinalist', notFinal.status===400 && /finalist/.test(notFinal.json.error||''));
-      await req('/api/searches/'+sid+'/candidates/'+cand.id, { method:'PATCH', cookie: abe.cookie, expect:200, body:{ stage:'finalist' } });
-      const noConsent = await req('/api/searches/'+sid+'/staff/references/log', { method:'POST', cookie: abe.cookie, body:{ text:'Spoke with former mayor.', candidateId: cand.id } });
+      await req('/api/searches/'+sid+'/candidates/'+cand.id, { method:'PATCH', auth: abe.auth, expect:200, body:{ stage:'finalist' } });
+      const noConsent = await req('/api/searches/'+sid+'/staff/references/log', { method:'POST', auth: abe.auth, body:{ text:'Spoke with former mayor.', candidateId: cand.id } });
       record('Reference log refuses a finalist without recorded consent', noConsent.status===400 && /consent/.test(noConsent.json.error||''), noConsent.json.error);
-      got = await req('/api/searches/'+sid+'/candidates/'+cand.id+'/consent', { method:'POST', cookie: abe.cookie, expect:200, body:{ consent:true } });
+      got = await req('/api/searches/'+sid+'/candidates/'+cand.id+'/consent', { method:'POST', auth: abe.auth, expect:200, body:{ consent:true } });
       const c2 = got.json.candidates.find(c => c.id===cand.id);
       record('Consent is recorded on the candidate', Boolean(c2.referenceConsentAt) && c2.referenceConsentBy==='Abe Macy');
-      got = await req('/api/searches/'+sid+'/staff/references/log', { method:'POST', cookie: abe.cookie, expect:200, body:{ text:'Spoke with former mayor.', candidateId: cand.id } });
+      got = await req('/api/searches/'+sid+'/staff/references/log', { method:'POST', auth: abe.auth, expect:200, body:{ text:'Spoke with former mayor.', candidateId: cand.id } });
       record('Reference log accepts a consenting finalist', got.json.staff.references.log[0].candidateId===cand.id);
 
       // A committee member seated on this file reads it without the staff log.
       const seated = await req('/api/searches/'+sid+'/members', {
-        method:'POST', cookie: abe.cookie, expect:200,
+        method:'POST', auth: abe.auth, expect:200,
         body:{ name:'Staff Test Member', email:'staff-test-member@example.com', seat:'committee' }
       });
       if (seated.json.email) {
-        const member = await login('staff-test-member@example.com', seated.json.pin);
-        const view = await req('/api/searches/'+sid, { cookie: member.cookie, expect:200 });
+        const member = await login('staff-test-member@example.com');
+        const view = await req('/api/searches/'+sid, { auth: member.auth, expect:200 });
         record('Committee member does not see staff logs', view.json.staff && Object.keys(view.json.staff).length===0,
           'staff keys='+Object.keys(view.json.staff||{}).join(','));
-        const denied = await req('/api/searches/'+sid+'/staff/references/log', { method:'POST', cookie: member.cookie, body:{ text:'x' } });
+        const denied = await req('/api/searches/'+sid+'/staff/references/log', { method:'POST', auth: member.auth, body:{ text:'x' } });
         record('Committee member cannot write to a staff log', denied.status===403, 'status='+denied.status);
       } else {
         record('Committee member does not see staff logs', false, 'no email returned for a fresh member');
       }
-      await req('/api/searches/'+sid, { method:'DELETE', cookie: abe.cookie, expect:200 });
+      await req('/api/searches/'+sid, { method:'DELETE', auth: abe.auth, expect:200 });
     } catch (err) { record('Video and reference staff steps', false, err.message); }
   }
 
   try {
-    const list = await req('/api/searches', { cookie: abe.cookie, expect:200 });
+    const list = await req('/api/searches', { auth: abe.auth, expect:200 });
     record('List searches includes new file', list.json.some(s => s.id===search.id));
   } catch (err) { record('List searches includes new file', false, err.message); }
 
   try {
     const patched = await req('/api/searches/'+search.id, {
-      method:'PATCH', cookie: abe.cookie, expect:200,
+      method:'PATCH', auth: abe.auth, expect:200,
       body:{ population:'12,000', budget:'$20M', fog:'Council–Manager', firstReview:'1 Sep 2026' }
     });
     record('PATCH search facts (incl. firstReview)', patched.json.population==='12,000' && patched.json.firstReview==='1 Sep 2026');
@@ -365,31 +368,31 @@ async function run(){
 
   try {
     await req('/api/searches/'+search.id, {
-      method:'PATCH', cookie: abe.cookie, expect:200,
+      method:'PATCH', auth: abe.auth, expect:200,
       body:{ website:'https://www.example.com' }
     });
-    const got = await req('/api/searches/'+search.id, { cookie: abe.cookie, expect:200 });
+    const got = await req('/api/searches/'+search.id, { auth: abe.auth, expect:200 });
     record('PATCH persists website', got.json.website==='https://www.example.com');
   } catch (err) { record('PATCH persists website', false, err.message); }
 
   try {
-    await req('/api/searches/no-such-id', { cookie: abe.cookie, expect:404 });
+    await req('/api/searches/no-such-id', { auth: abe.auth, expect:404 });
     record('Unknown search is 404', true);
   } catch (err) { record('Unknown search is 404', false, err.message); }
 
   try {
-    const empty = await req('/api/searches/bulk-delete', { method:'POST', cookie: abe.cookie, body:{ ids:[] } });
+    const empty = await req('/api/searches/bulk-delete', { method:'POST', auth: abe.auth, body:{ ids:[] } });
     record('Bulk delete requires at least one id', empty.status===400, empty.json.error);
-    const a = await req('/api/searches', { method:'POST', cookie: abe.cookie, expect:200, body:{ client:'Bughunt Bulk A', position:'Clerk', package:'basic' } });
-    const b = await req('/api/searches', { method:'POST', cookie: abe.cookie, expect:200, body:{ client:'Bughunt Bulk B', position:'Clerk', package:'basic' } });
+    const a = await req('/api/searches', { method:'POST', auth: abe.auth, expect:200, body:{ client:'Bughunt Bulk A', position:'Clerk', package:'basic' } });
+    const b = await req('/api/searches', { method:'POST', auth: abe.auth, expect:200, body:{ client:'Bughunt Bulk B', position:'Clerk', package:'basic' } });
     const out = await req('/api/searches/bulk-delete', {
-      method:'POST', cookie: abe.cookie, expect:200, body:{ ids:[a.json.id, b.json.id, a.json.id] }
+      method:'POST', auth: abe.auth, expect:200, body:{ ids:[a.json.id, b.json.id, a.json.id] }
     });
-    const list = await req('/api/searches', { cookie: abe.cookie, expect:200 });
+    const list = await req('/api/searches', { auth: abe.auth, expect:200 });
     record('Bulk delete removes every selected search',
       out.json.deleted===2 && !list.json.some(s => s.id===a.json.id || s.id===b.json.id),
       'deleted='+out.json.deleted);
-    const gone = await req('/api/searches/bulk-delete', { method:'POST', cookie: abe.cookie, body:{ ids:['sr-nope'] } });
+    const gone = await req('/api/searches/bulk-delete', { method:'POST', auth: abe.auth, body:{ ids:['sr-nope'] } });
     record('Bulk delete of unknown ids is 404', gone.status===404);
   } catch (err) { record('Bulk delete removes every selected search', false, err.message); }
 
@@ -416,10 +419,10 @@ async function run(){
       basic: { path:'/artifact/community', method:'PUT', body:{ body:{ lede:'x' } } },
       enhanced: { path:'/staff/references/log', method:'POST', body:{ text:'Called a reference.' } }
     };
-    const leftover = await req('/api/searches', { cookie: abe.cookie, expect:200 });
+    const leftover = await req('/api/searches', { auth: abe.auth, expect:200 });
     for (const row of leftover.json) {
       if (/^Bughunt · /.test(row.client||'')) {
-        await req('/api/searches/'+row.id, { method:'DELETE', cookie: abe.cookie });
+        await req('/api/searches/'+row.id, { method:'DELETE', auth: abe.auth });
       }
     }
     const misses = [];
@@ -427,7 +430,7 @@ async function run(){
     for (const city of cities) {
       for (const pkg of pkgs) {
         const created = await req('/api/searches', {
-          method:'POST', cookie: abe.cookie, expect:200,
+          method:'POST', auth: abe.auth, expect:200,
           body:{ ...city, client:'Bughunt · '+city.client, package:pkg }
         });
         opened++;
@@ -440,13 +443,13 @@ async function run(){
         if (s.progress?.next?.key !== 'team') misses.push(s.no+' next='+(s.progress?.next?.key||''));
         const probe = gated[pkg];
         if (probe) {
-          const off = await req('/api/searches/'+s.id+probe.path, { method:probe.method, cookie: abe.cookie, body:probe.body });
+          const off = await req('/api/searches/'+s.id+probe.path, { method:probe.method, auth: abe.auth, body:probe.body });
           if (off.status !== 400 || !/package/.test(off.json.error||'')) misses.push(s.no+' gating '+pkg);
         }
-        await req('/api/searches/'+s.id, { method:'DELETE', cookie: abe.cookie, expect:200 });
+        await req('/api/searches/'+s.id, { method:'DELETE', auth: abe.auth, expect:200 });
       }
     }
-    const after = await req('/api/searches', { cookie: abe.cookie, expect:200 });
+    const after = await req('/api/searches', { auth: abe.auth, expect:200 });
     const leaked = after.json.filter(row => /^Bughunt · /.test(row.client||''));
     record('City book: 10 jurisdictions × 3 packages persist FOG, steps, and gating',
       opened===30 && !misses.length && !leaked.length,
@@ -455,7 +458,7 @@ async function run(){
 
   // --- profile / steps ---
   try {
-    const got = await req('/api/searches/'+search.id, { cookie: abe.cookie, expect:200 });
+    const got = await req('/api/searches/'+search.id, { auth: abe.auth, expect:200 });
     const profile = got.json.steps.find(s=>s.key==='profile');
     const community = got.json.steps.find(s=>s.key==='community');
     const brochure = got.json.steps.find(s=>s.key==='brochure');
@@ -475,7 +478,7 @@ async function run(){
 
   try {
     const saved = await req('/api/searches/'+search.id+'/profile', {
-      method:'PUT', cookie: abe.cookie, expect:200,
+      method:'PUT', auth: abe.auth, expect:200,
       body:{ criteria:[
         { id:'S1', kind:'skill', label:'Budget', weight:5, note:'n' },
         { id:'S2', kind:'skill', label:'Hiring', weight:4, note:'n' },
@@ -501,25 +504,25 @@ async function run(){
 
   try {
     await req('/api/searches/'+search.id+'/artifact/community', {
-      method:'PUT', cookie: abe.cookie, expect:200,
+      method:'PUT', auth: abe.auth, expect:200,
       body:{ body:{ lede:'A mountain town.', facts:[{k:'Pop',v:'12,000'}], government:'CM', community:'x', organization:'y', why:'z' } }
     });
-    const got = await req('/api/searches/'+search.id, { cookie: abe.cookie, expect:200 });
+    const got = await req('/api/searches/'+search.id, { auth: abe.auth, expect:200 });
     record('Save community artifact', Boolean(got.json.artifacts.community && got.json.artifacts.community.lede));
     const brochure = got.json.steps.find(s=>s.key==='brochure');
     record('Brochure still waits on the ad plan after community', brochure.blocked===true, 'blocked='+brochure.blocked);
     await req('/api/searches/'+search.id+'/artifact/plan', {
-      method:'PUT', cookie: abe.cookie, expect:200,
+      method:'PUT', auth: abe.auth, expect:200,
       body:{ body:{ rows:[{ outlet:'ICMA', audience:'managers', format:'full', when:'week 1', cost:'', who:'Abe', status:'planned' }] } }
     });
-    const afterPlan = await req('/api/searches/'+search.id, { cookie: abe.cookie, expect:200 });
+    const afterPlan = await req('/api/searches/'+search.id, { auth: abe.auth, expect:200 });
     const brochure2 = afterPlan.json.steps.find(s=>s.key==='brochure');
     record('Brochure unlocks after the ad plan', brochure2.blocked===false, 'blocked='+brochure2.blocked);
   } catch (err) { record('Save community / brochure unlock', false, err.message); }
 
   try {
     const assembled = await req('/api/searches/'+search.id+'/assemble', {
-      method:'POST', cookie: abe.cookie, expect:200, body:{ kind:'brochure' }
+      method:'POST', auth: abe.auth, expect:200, body:{ kind:'brochure' }
     });
     const b = assembled.json.artifacts && assembled.json.artifacts.brochure;
     record('Assemble brochure from community without Claude', Boolean(b && b.lede==='A mountain town.' && b.thePlace && b.theme==='photo'), b ? ('lede='+b.lede+' theme='+b.theme) : 'no brochure');
@@ -527,7 +530,7 @@ async function run(){
 
   try {
     const bad = await req('/api/searches/'+search.id+'/assemble', {
-      method:'POST', cookie: abe.cookie, body:{ kind:'ads' }
+      method:'POST', auth: abe.auth, body:{ kind:'ads' }
     });
     record('Assemble rejects non-brochure kinds', bad.status===400, 'status='+bad.status);
   } catch (err) { record('Assemble rejects non-brochure kinds', false, err.message); }
@@ -535,12 +538,12 @@ async function run(){
   // A drafted brochure is not a finished brochure. It stays 'now' until a
   // consultant signs off, and any later edit reopens it.
   try {
-    const got = await req('/api/searches/'+search.id, { cookie: abe.cookie, expect:200 });
+    const got = await req('/api/searches/'+search.id, { auth: abe.auth, expect:200 });
     const b = got.json.steps.find(s=>s.key==='brochure');
     record('Drafted brochure waits on review, not done', b.status==='now', 'status='+b.status);
 
     const ok = await req('/api/searches/'+search.id+'/artifact/brochure/review', {
-      method:'POST', cookie: abe.cookie, expect:200, body:{ approve:true }
+      method:'POST', auth: abe.auth, expect:200, body:{ approve:true }
     });
     const after = ok.json.steps.find(s=>s.key==='brochure');
     const rec = ok.json.reviews && ok.json.reviews.brochure;
@@ -548,7 +551,7 @@ async function run(){
       'status='+after.status);
 
     const edited = await req('/api/searches/'+search.id+'/artifact/brochure', {
-      method:'PUT', cookie: abe.cookie, expect:200,
+      method:'PUT', auth: abe.auth, expect:200,
       body:{ body:{ ...got.json.artifacts.brochure, lede:'Reworded after review.' } }
     });
     const reopened = edited.json.steps.find(s=>s.key==='brochure');
@@ -558,7 +561,7 @@ async function run(){
 
   try {
     const nope = await req('/api/searches/'+search.id+'/artifact/survey1/review', {
-      method:'POST', cookie: abe.cookie, body:{ approve:true }
+      method:'POST', auth: abe.auth, body:{ approve:true }
     });
     record('Review is refused on steps that do not take one', nope.status===400, 'status='+nope.status);
     const unauth = await req('/api/searches/'+search.id+'/artifact/brochure/review', {
@@ -574,13 +577,13 @@ async function run(){
 
   try {
     const media = await req('/api/searches/'+search.id+'/media', {
-      method:'POST', cookie: abe.cookie, body:{ slot:'hero', data:'nope' }
+      method:'POST', auth: abe.auth, body:{ slot:'hero', data:'nope' }
     });
     record('Media rejects unknown photo slot', media.status===400, 'status='+media.status);
   } catch (err) { record('Media rejects unknown photo slot', false, err.message); }
 
   // --- generate / research ---
-  const me = await req('/api/me', { cookie: abe.cookie, expect:200 });
+  const me = await req('/api/me', { auth: abe.auth, expect:200 });
   const hasKey = Boolean(me.json.health && me.json.health.hasKey);
 
   if (hasKey) {
@@ -588,14 +591,14 @@ async function run(){
   } else {
     try {
       const gen = await req('/api/searches/'+search.id+'/generate', {
-        method:'POST', cookie: abe.cookie, body:{ kind:'ads' }
+        method:'POST', auth: abe.auth, body:{ kind:'ads' }
       });
       record('Generate without API key returns 503', gen.status===503, 'status='+gen.status+' '+ (gen.json.error||''));
     } catch (err) { record('Generate without API key returns 503', false, err.message); }
 
     try {
       const r = await req('/api/searches/'+search.id+'/research', {
-        method:'POST', cookie: abe.cookie, body:{ city:'Test Town', website:'https://example.com' }
+        method:'POST', auth: abe.auth, body:{ city:'Test Town', website:'https://example.com' }
       });
       record('Research without API key returns 503', r.status===503, 'status='+r.status+' '+(r.json.error||''));
     } catch (err) { record('Research without API key returns 503', false, err.message); }
@@ -603,28 +606,28 @@ async function run(){
 
   try {
     const gen = await req('/api/searches/'+search.id+'/generate', {
-      method:'POST', cookie: abe.cookie, body:{ kind:'not-a-kind' }
+      method:'POST', auth: abe.auth, body:{ kind:'not-a-kind' }
     });
     record('Unknown generate kind is an error', gen.status>=400, 'status='+gen.status);
   } catch (err) { record('Unknown generate kind is an error', false, err.message); }
 
   try {
     const r = await req('/api/searches/'+search.id+'/research', {
-      method:'POST', cookie: abe.cookie, body:{ city:'Test Town', website:'' }
+      method:'POST', auth: abe.auth, body:{ city:'Test Town', website:'' }
     });
     record('Research without website returns 400', r.status===400);
   } catch (err) { record('Research without website returns 400', false, err.message); }
 
   try {
     const r = await req('/api/searches/'+search.id+'/research', {
-      method:'POST', cookie: abe.cookie, body:{ city:'Test Town', website:'http://127.0.0.1/' }
+      method:'POST', auth: abe.auth, body:{ city:'Test Town', website:'http://127.0.0.1/' }
     });
     record('Research rejects localhost (SSRF)', r.status===400, 'status='+r.status+' '+(r.json.error||''));
   } catch (err) { record('Research rejects localhost (SSRF)', false, err.message); }
 
   try {
     const r = await req('/api/searches/'+search.id+'/research', {
-      method:'POST', cookie: abe.cookie, body:{ city:'Test Town', website:'http://192.168.1.1/' }
+      method:'POST', auth: abe.auth, body:{ city:'Test Town', website:'http://192.168.1.1/' }
     });
     record('Research rejects private IP', r.status===400, 'status='+r.status+' '+(r.json.error||''));
   } catch (err) { record('Research rejects private IP', false, err.message); }
@@ -633,20 +636,20 @@ async function run(){
   let cand;
   try {
     const unnamed = await req('/api/searches/'+search.id+'/candidates', {
-      method:'POST', cookie: abe.cookie, body:{ name:'' }
+      method:'POST', auth: abe.auth, body:{ name:'' }
     });
     record('Candidate requires a name', unnamed.status===400);
   } catch (err) { record('Candidate requires a name', false, err.message); }
 
   try {
     const added = await req('/api/searches/'+search.id+'/candidates', {
-      method:'POST', cookie: abe.cookie, expect:200,
+      method:'POST', auth: abe.auth, expect:200,
       body:{ name:'Ilene Test', cur:'Deputy', org:'Nearby City', email:'ilene@example.com' }
     });
     cand = added.json.candidates.find(c=>c.name==='Ilene Test');
     record('Add candidate and invite token', Boolean(cand && cand.invite), cand && cand.invite);
     const sneaky = await req('/api/searches/'+search.id+'/candidates', {
-      method:'POST', cookie: abe.cookie, expect:200,
+      method:'POST', auth: abe.auth, expect:200,
       body:{ name:'Skip Stage', stage:'finalist' }
     });
     const planted = sneaky.json.candidates.find(c=>c.name==='Skip Stage');
@@ -679,7 +682,7 @@ async function run(){
 
   try {
     await req('/api/searches/'+search.id+'/artifact/survey1', {
-      method:'PUT', cookie: abe.cookie, expect:200,
+      method:'PUT', auth: abe.auth, expect:200,
       body:{ body:{ name:'Initial', questions:[{ n:1, prompt:'Why this job?', type:'long', required:true }] } }
     });
     const posted = await req('/api/apply/'+cand.invite, {
@@ -691,7 +694,7 @@ async function run(){
   }
 
   try {
-    const got = await req('/api/searches/'+search.id, { cookie: abe.cookie, expect:200 });
+    const got = await req('/api/searches/'+search.id, { auth: abe.auth, expect:200 });
     const person = got.json.candidates.find(c=>c.id===cand.id);
     record('Survey 1 does not auto-promote to semifinalist', person && person.stage==='applicant', person && person.stage);
   } catch (err) { record('Survey 1 does not auto-promote to semifinalist', false, err.message); }
@@ -707,7 +710,7 @@ async function run(){
 
   try {
     await req('/api/searches/'+search.id+'/artifact/survey2', {
-      method:'PUT', cookie: abe.cookie, expect:200,
+      method:'PUT', auth: abe.auth, expect:200,
       body:{ body:{ name:'Semi', questions:[{ n:1, prompt:'Describe a hard problem.', type:'are', required:true, crit:['C1'] }] } }
     });
     const tooSoon = await req('/api/apply/'+cand.invite, {
@@ -720,27 +723,27 @@ async function run(){
 
   try {
     const sendEarly = await req('/api/searches/'+search.id+'/candidates/'+cand.id+'/send2', {
-      method:'POST', cookie: abe.cookie, body:{ deadline:'12 Sep 2026' }
+      method:'POST', auth: abe.auth, body:{ deadline:'12 Sep 2026' }
     });
     record('Cannot send survey 2 before semifinalist', sendEarly.status===400, 'status='+sendEarly.status);
   } catch (err) { record('Cannot send survey 2 before semifinalist', false, err.message); }
 
   try {
     await req('/api/searches/'+search.id+'/scores/'+cand.id, {
-      method:'PUT', cookie: abe.cookie, expect:200,
+      method:'PUT', auth: abe.auth, expect:200,
       body:{ scores:{ S1:4, T1:5 }, note:'Strong on budget.' }
     });
-    const got = await req('/api/searches/'+search.id, { cookie: abe.cookie, expect:200 });
+    const got = await req('/api/searches/'+search.id, { auth: abe.auth, expect:200 });
     const screen = got.json.steps.find(s=>s.key==='screen');
     record('Scoring a candidate moves screening to now', screen.status==='now', 'status='+screen.status);
-    const mikes = await req('/api/searches/'+search.id, { cookie: mike.cookie, expect:200 });
+    const mikes = await req('/api/searches/'+search.id, { auth: mike.auth, expect:200 });
     const ids = Object.keys(mikes.json.scores || {});
     record('Sealed scores hide other raters from Mike', ids.every(id => id === mike.json.user.id), 'keys='+ids.join(','));
   } catch (err) { record('Scoring a candidate moves screening to now', false, err.message); }
 
   try {
     const semi = await req('/api/searches/'+search.id+'/candidates/'+cand.id, {
-      method:'PATCH', cookie: abe.cookie, expect:200, body:{ stage:'semifinalist' }
+      method:'PATCH', auth: abe.auth, expect:200, body:{ stage:'semifinalist' }
     });
     const person = semi.json.candidates.find(c=>c.id===cand.id);
     record('Advance candidate to semifinalist', person.stage==='semifinalist');
@@ -748,16 +751,16 @@ async function run(){
 
   try {
     await req('/api/searches/'+search.id, {
-      method:'PATCH', cookie: abe.cookie, expect:200, body:{ released:true }
+      method:'PATCH', auth: abe.auth, expect:200, body:{ released:true }
     });
-    const got = await req('/api/searches/'+search.id, { cookie: abe.cookie, expect:200 });
+    const got = await req('/api/searches/'+search.id, { auth: abe.auth, expect:200 });
     const screen = got.json.steps.find(s=>s.key==='screen');
     record('Screening is done after a semifinalist and released scores', screen.status==='done', 'status='+screen.status);
   } catch (err) { record('Screening is done after a semifinalist and released scores', false, err.message); }
 
   try {
     const sent = await req('/api/searches/'+search.id+'/candidates/'+cand.id+'/send2', {
-      method:'POST', cookie: abe.cookie, expect:200, body:{ deadline:'12 Sep 2026' }
+      method:'POST', auth: abe.auth, expect:200, body:{ deadline:'12 Sep 2026' }
     });
     const person = sent.json.candidates.find(c=>c.id===cand.id);
     record('Send semifinalist survey stores sent-at', Boolean(person.survey2SentAt), person && person.survey2Deadline);
@@ -770,25 +773,25 @@ async function run(){
       method:'POST', body:{ which:'survey2', answers:{ q1:'I inherited a deficit and closed it.' } }, expect:200
     });
     record('Survey 2 submit succeeds after send', posted.json.ok===true);
-    const got = await req('/api/searches/'+search.id, { cookie: abe.cookie, expect:200 });
+    const got = await req('/api/searches/'+search.id, { auth: abe.auth, expect:200 });
     const send2 = got.json.steps.find(s=>s.key==='send2');
     record('Sending and receiving survey 2 completes Step 10', send2.status==='done', 'status='+send2.status);
   } catch (err) { record('Survey 2 submit succeeds after send', false, err.message); }
 
   try {
     const adv = await req('/api/searches/'+search.id+'/candidates/'+cand.id, {
-      method:'PATCH', cookie: abe.cookie, expect:200, body:{ stage:'finalist' }
+      method:'PATCH', auth: abe.auth, expect:200, body:{ stage:'finalist' }
     });
     const person = adv.json.candidates.find(c=>c.id===cand.id);
     record('Advance candidate to finalist', person.stage==='finalist');
-    const got = await req('/api/searches/'+search.id, { cookie: abe.cookie, expect:200 });
+    const got = await req('/api/searches/'+search.id, { auth: abe.auth, expect:200 });
     const finals = got.json.steps.find(s=>s.key==='finalists');
     record('Selecting a finalist completes Step 11', finals.status==='done', 'status='+finals.status);
   } catch (err) { record('Advance candidate to finalist', false, err.message); }
 
   // Mike can open Abe's search (no ACL between consultants)
   try {
-    const got = await req('/api/searches/'+search.id, { cookie: mike.cookie, expect:200 });
+    const got = await req('/api/searches/'+search.id, { auth: mike.auth, expect:200 });
     record('Any signed-in consultant can open any search (no per-search ACL)', got.json.id===search.id);
   } catch (err) { record('Any signed-in consultant can open any search (no per-search ACL)', false, err.message); }
 
@@ -797,39 +800,40 @@ async function run(){
   // which named consultant you are. It must be able to pick up a search it was
   // never seated on, which is the case that used to dead-end.
   try {
-    const team = await login(process.env.SLATE_EMAIL_TEAM || 'team@slate.local', process.env.SLATE_PIN_TEAM || '1234');
-    record('The shared team account signs in', Boolean(team.cookie));
+    const teamEmail = process.env.SLATE_EMAIL_TEAM || 'team@slate.local';
+    const team = await login(teamEmail);
+    record('The shared team account signs in', team.json.user.email === teamEmail);
     record('The shared team account is a consultant', team.json.user.role === 'consultant', team.json.user.role);
 
-    const seen = await req('/api/searches', { cookie: team.cookie, expect:200 });
+    const seen = await req('/api/searches', { auth: team.auth, expect:200 });
     record('The shared account sees the whole book', seen.json.some(s => s.id === search.id));
 
-    const before = await req('/api/searches/'+search.id, { cookie: team.cookie, expect:200 });
+    const before = await req('/api/searches/'+search.id, { auth: team.auth, expect:200 });
     record('An unseated consultant can read and edit but does not hold the account',
       before.json.you.canEdit===true && before.json.you.canManage===false && before.json.you.member===false,
       JSON.stringify(before.json.you));
 
-    const joined = await req('/api/searches/'+search.id+'/members/self', { method:'POST', cookie: team.cookie, expect:200, body:{} });
+    const joined = await req('/api/searches/'+search.id+'/members/self', { method:'POST', auth: team.auth, expect:200, body:{} });
     record('A consultant can put themselves on a search', joined.json.search.you.seat==='consultant');
-    await req('/api/searches/'+search.id+'/members/self', { method:'POST', cookie: team.cookie, expect:409, body:{} });
+    await req('/api/searches/'+search.id+'/members/self', { method:'POST', auth: team.auth, expect:409, body:{} });
     record('Joining a search twice is refused', true);
 
     const took = await req('/api/searches/'+search.id+'/members/'+team.json.user.id, {
-      method:'PATCH', cookie: team.cookie, expect:200, body:{ seat:'manager' }
+      method:'PATCH', auth: team.auth, expect:200, body:{ seat:'manager' }
     });
     record('Any consultant can take an account rather than being stranded by it',
       took.json.search.accountManager.userId===team.json.user.id);
     record('The outgoing manager keeps a consultant seat',
       took.json.roster.find(m => m.userId===abe.json.user.id).seat==='consultant');
-    await req('/api/searches/'+search.id+'/team/confirm', { method:'POST', cookie: team.cookie, expect:200, body:{ confirmed:true } });
+    await req('/api/searches/'+search.id+'/team/confirm', { method:'POST', auth: team.auth, expect:200, body:{ confirmed:true } });
     record('Taking the account carries the powers that go with it', true);
 
     // Hand it back so later assertions see the search as they expect.
     await req('/api/searches/'+search.id+'/members/'+abe.json.user.id, {
-      method:'PATCH', cookie: team.cookie, expect:200, body:{ seat:'manager' }
+      method:'PATCH', auth: team.auth, expect:200, body:{ seat:'manager' }
     });
     await req('/api/searches/'+search.id+'/members/'+team.json.user.id, {
-      method:'DELETE', cookie: abe.cookie, expect:200
+      method:'DELETE', auth: abe.auth, expect:200
     });
   } catch (err) { record('Shared team sign-in', false, err.message); }
 
@@ -839,7 +843,7 @@ async function run(){
   let cm = null;
   try {
     const opened = await req('/api/searches', {
-      method:'POST', cookie: abe.cookie, expect:200,
+      method:'POST', auth: abe.auth, expect:200,
       body:{ client:'City of Quorum', position:'City Manager', state:'Nevada' }
     });
     cm = { id: opened.json.id };
@@ -853,7 +857,7 @@ async function run(){
       { name:'Tia Novak', email:'tia@quorum.test', title:'Council member' }
     ]) {
       const out = await req('/api/searches/'+cm.id+'/members', {
-        method:'POST', cookie: abe.cookie, expect:200, body:{ ...who, seat:'committee' }
+        method:'POST', auth: abe.auth, expect:200, body:{ ...who, seat:'committee' }
       });
       seated.push({ ...who, returnedEmail: out.json.email, hasPin: Object.hasOwn(out.json, "pin") });
     }
@@ -861,46 +865,46 @@ async function run(){
       seated.length===3 && seated.every(x => x.returnedEmail === x.email && !x.hasPin));
 
     await req('/api/searches/'+cm.id+'/members', {
-      method:'POST', cookie: abe.cookie, expect:400, body:{ name:'Bad Email', email:'not-an-email' }
+      method:'POST', auth: abe.auth, expect:400, body:{ name:'Bad Email', email:'not-an-email' }
     });
     record('A member needs a real email to sign in with', true);
 
-    const rosa = await login(seated[0].email, seated[0].pin);
-    const ben = await login(seated[1].email, seated[1].pin);
-    const tia = await login(seated[2].email, seated[2].pin);
+    const rosa = await login(seated[0].email);
+    const ben = await login(seated[1].email);
+    const tia = await login(seated[2].email);
 
-    const mine = await req('/api/searches', { cookie: rosa.cookie, expect:200 });
+    const mine = await req('/api/searches', { auth: rosa.auth, expect:200 });
     record('A committee member sees only the searches they are seated on',
       mine.json.length===1 && mine.json[0].id===cm.id, 'saw '+mine.json.length);
 
-    await req('/api/searches/'+search.id, { cookie: rosa.cookie, expect:404 });
+    await req('/api/searches/'+search.id, { auth: rosa.auth, expect:404 });
     record('A search they are not seated on reads as not found', true);
 
-    await req('/api/searches/'+cm.id, { method:'PATCH', cookie: rosa.cookie, expect:403, body:{ notes:'x' } });
+    await req('/api/searches/'+cm.id, { method:'PATCH', auth: rosa.auth, expect:403, body:{ notes:'x' } });
     record('A committee member cannot edit the search file', true);
 
     await req('/api/searches/'+cm.id+'/intake/status', {
-      method:'POST', cookie: abe.cookie, expect:400, body:{ status:'open' }
+      method:'POST', auth: abe.auth, expect:400, body:{ status:'open' }
     });
     record('Intake will not open until the roster is confirmed', true);
 
     const confirmed = await req('/api/searches/'+cm.id+'/team/confirm', {
-      method:'POST', cookie: abe.cookie, expect:200, body:{ confirmed:true }
+      method:'POST', auth: abe.auth, expect:200, body:{ confirmed:true }
     });
     record('Confirming the roster completes the committee step',
       confirmed.json.steps.find(s=>s.key==='team').status==='done');
 
     await req('/api/searches/'+cm.id+'/intake/status', {
-      method:'POST', cookie: abe.cookie, expect:200, body:{ status:'open', dueBy:'12 Sep 2026' }
+      method:'POST', auth: abe.auth, expect:200, body:{ status:'open', dueBy:'12 Sep 2026' }
     });
     await req('/api/searches/'+cm.id+'/intake/status', {
-      method:'POST', cookie: mike.cookie, expect:403, body:{ status:'closed' }
+      method:'POST', auth: mike.auth, expect:403, body:{ status:'closed' }
     });
     record('Only the account manager runs the intake window', true);
 
     // Three members, three spellings of the same priority, one real split.
     await req('/api/searches/'+cm.id+'/intake', {
-      method:'PUT', cookie: rosa.cookie, expect:200,
+      method:'PUT', auth: rosa.auth, expect:200,
       body:{ submitted:true, mustHave:'Someone who answers the phone.', items:[
         { kind:'skill', label:'Financial management', weight:5, note:'Structural deficit.' },
         { kind:'trait', label:'Approachable', weight:5 },
@@ -908,7 +912,7 @@ async function run(){
       ]}
     });
     await req('/api/searches/'+cm.id+'/intake', {
-      method:'PUT', cookie: ben.cookie, expect:200,
+      method:'PUT', auth: ben.auth, expect:200,
       body:{ submitted:true, items:[
         { kind:'skill', label:'financial management skills', weight:4 },
         { kind:'trait', label:'approachable', weight:2 },
@@ -916,7 +920,7 @@ async function run(){
       ]}
     });
     await req('/api/searches/'+cm.id+'/intake', {
-      method:'PUT', cookie: tia.cookie, expect:200,
+      method:'PUT', auth: tia.auth, expect:200,
       body:{ submitted:true, items:[
         { kind:'skill', label:'The financial management', weight:5 },
         { kind:'trait', label:'Decisive', weight:4 },
@@ -924,13 +928,13 @@ async function run(){
       ]}
     });
 
-    const midway = await req('/api/searches/'+cm.id, { cookie: ben.cookie, expect:200 });
+    const midway = await req('/api/searches/'+cm.id, { auth: ben.auth, expect:200 });
     record('While intake is open a member sees only their own answers',
       Object.keys(midway.json.intake.submissions).length===1);
     record('While intake is open a member sees no running tally',
       midway.json.consensus===null);
 
-    const facing = await req('/api/searches/'+cm.id, { cookie: abe.cookie, expect:200 });
+    const facing = await req('/api/searches/'+cm.id, { auth: abe.auth, expect:200 });
     const agg = facing.json.consensus;
     record('The account manager sees the tally as answers arrive', agg && agg.submitted===3, 'submitted='+(agg&&agg.submitted));
     const money = agg.byKind.skill[0];
@@ -944,7 +948,7 @@ async function run(){
       agg.pending.some(p => p.name==='Abe Macy'));
 
     const adopted = await req('/api/searches/'+cm.id+'/intake/adopt', {
-      method:'POST', cookie: abe.cookie, expect:200, body:{}
+      method:'POST', auth: abe.auth, expect:200, body:{}
     });
     const crit = adopted.json.search.criteria;
     const top = crit.find(c => c.label==='Financial management');
@@ -956,50 +960,47 @@ async function run(){
       Array.isArray(adopted.json.gaps) && adopted.json.gaps.some(g => g.kind==='opp'));
 
     const closed = await req('/api/searches/'+cm.id+'/intake/status', {
-      method:'POST', cookie: abe.cookie, expect:200, body:{ status:'closed' }
+      method:'POST', auth: abe.auth, expect:200, body:{ status:'closed' }
     });
     record('Closing the window completes the intake step',
       closed.json.steps.find(s=>s.key==='intake').status==='done');
 
-    const after = await req('/api/searches/'+cm.id, { cookie: ben.cookie, expect:200 });
+    const after = await req('/api/searches/'+cm.id, { auth: ben.auth, expect:200 });
     record('Once closed the committee can read the room',
       after.json.consensus && after.json.consensus.submitted===3 &&
       Object.keys(after.json.intake.submissions).length===3);
 
     await req('/api/searches/'+cm.id+'/intake', {
-      method:'PUT', cookie: ben.cookie, expect:400, body:{ submitted:true, items:[{ kind:'skill', label:'Late', weight:5 }] }
+      method:'PUT', auth: ben.auth, expect:400, body:{ submitted:true, items:[{ kind:'skill', label:'Late', weight:5 }] }
     });
     record('A closed window does not take late answers', true);
 
-    const roster = (await req('/api/searches/'+cm.id, { cookie: abe.cookie, expect:200 })).json.roster;
+    const roster = (await req('/api/searches/'+cm.id, { auth: abe.auth, expect:200 })).json.roster;
     const rosaId = roster.find(m => m.email===seated[0].email).userId;
     await req('/api/searches/'+cm.id+'/members/'+rosaId, {
-      method:'PATCH', cookie: abe.cookie, expect:400, body:{ seat:'manager' }
+      method:'PATCH', auth: abe.auth, expect:400, body:{ seat:'manager' }
     });
     record('The account manager must be a consultant at the firm', true);
 
     const removed = await req('/api/searches/'+cm.id+'/members/'+rosaId, {
-      method:'DELETE', cookie: abe.cookie, expect:200
+      method:'DELETE', auth: abe.auth, expect:200
     });
     record('Removing a member takes their answers out of the tally',
       removed.json.search.consensus.submitted===2, 'submitted='+removed.json.search.consensus.submitted);
-    // The account existed only for this seat. Removing them retires it, which
-    // kills the open session as well as the sign-in, rather than leaving a
-    // live PIN pointed at nothing.
-    await req('/api/searches/'+cm.id, { cookie: rosa.cookie, expect:401 });
-    record('Removing a member ends their open session', true);
-    const relog = await req('/api/login', {
-      method:'POST', expect:401, body:{ email: seated[0].email, pin: seated[0].pin }
-    });
-    record('An unseated member can no longer sign in', relog.status===401);
+    // The account existed only for this seat. Removing them retires it, so the
+    // file stops existing as far as they can tell, even though their Clerk
+    // identity is untouched and still opens the front door.
+    await req('/api/searches/'+cm.id, { auth: rosa.auth, expect:404 });
+    record('A removed member can no longer open the search', true);
+    const relog = await req('/api/searches', { auth: rosa.auth, expect:200 });
+    record('A removed member is left with no searches', relog.json.length===0, 'saw '+relog.json.length);
 
     const cfg = await req('/api/config', { expect:200 });
-    record('Demo sign-ins never list committee PINs',
-      (cfg.json.accounts||[]).every(a => !String(a.email).endsWith('@quorum.test')));
+    record('The public config lists no accounts at all', cfg.json.accounts === undefined);
   } catch (err) {
     record('Search committee flow', false, err.message);
   } finally {
-    if (cm) { try { await req('/api/searches/'+cm.id, { method:'DELETE', cookie: abe.cookie }); } catch {} }
+    if (cm) { try { await req('/api/searches/'+cm.id, { method:'DELETE', auth: abe.auth }); } catch {} }
   }
 
   // --- unit: consensus folding ---
@@ -1244,14 +1245,16 @@ async function run(){
   record('Schema examples do not model the dashes the desk rejects', schemaBlock.length > 0 && !/[\u2013\u2014]/.test(schemaBlock));
   record('Generate route returns the desk review to the client', /desk: out\.desk/.test(fs.readFileSync(path.join(__dirname, '..', 'server', 'index.js'), 'utf8')) && /function deskNote/.test(appJs) && /deskNote\(out\.desk\)/.test(appJs));
 
-  // The landing page says what the product does and offers Start. Fees are not
+  // The landing page says what the product does and offers sign-in. Fees are not
   // on it; the pay-level breakdown lives in the Packages view, which is where
   // it is shown to a client deliberately.
-  record('Unsigned home explains the product and opens the workspace',
-    /function vGate/.test(appJs) && /data-act="start"/.test(appJs) && /A guided executive search/.test(appJs)
-      && !/function vGate[\s\S]*?packageMatrix\(\)[\s\S]*?\n\}/.test(appJs));
+  record('Unsigned home explains the product and offers Clerk sign-in',
+    /function vGate/.test(appJs) && /A guided executive search/.test(appJs)
+      && appJs.includes('data-act="sign-in"') && appJs.includes('data-act="sign-up"'));
 
-  record('Start opens the workspace without a login form', appJs.includes('data-act="start">Start') && !/function vLogin/.test(appJs) && !appJs.includes('name="pin"'));
+  record('The client carries no sign-in form of its own',
+    !/function vLogin/.test(appJs) && !appJs.includes('name="pin"')
+      && !appJs.includes('/api/login') && !appJs.includes('/api/start'));
 
   // Home is the portfolio, not a greeting: the page names the book of business
   // and the rail still returns to it from anywhere.
@@ -1364,12 +1367,16 @@ async function run(){
 
   record('Client JS does not hardcode demo PINs', !/\b2468\b/.test(appJs) && !/\b1357\b/.test(appJs));
 
-  // logout
+  // sign-out
   try {
-    await req('/api/logout', { method:'POST', cookie: abe.cookie, expect:200, body:{} });
-    await req('/api/me', { cookie: abe.cookie, expect:401 });
-    record('Logout clears the session', true);
-  } catch (err) { record('Logout clears the session', false, err.message); }
+    // Signing out happens at Clerk. Slate keeps no session of its own to end,
+    // so the old endpoints must not be there to be found.
+    for (const route of ['/api/login', '/api/logout', '/api/start']) {
+      const gone = await req(route, { method:'POST', body:{} });
+      assert.equal(gone.status, 404, route + ' answered ' + gone.status);
+    }
+    record('Slate keeps no sign-in of its own', true);
+  } catch (err) { record('Slate keeps no sign-in of its own', false, err.message); }
 
   const failed = results.filter(r => !r.ok);
   const passed = results.filter(r => r.ok);

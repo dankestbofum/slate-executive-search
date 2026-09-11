@@ -16,6 +16,7 @@
 const { chromium } = require('@playwright/test');
 const AxeBuilder = require('@axe-core/playwright').default;
 const { spawn } = require('child_process');
+const { serverEnv, installClerk } = require('./identity.cjs');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -32,8 +33,9 @@ function startServer() {
     env: {
       ...process.env,
       NODE_ENV: 'test', PORT: String(PORT), HOST: '127.0.0.1',
-      DATA_DIR: dataDir, ANTHROPIC_API_KEY: '', SHOW_DEMO_LOGINS: 'true',
-      SLATE_SUPPORT_EMAIL: 'recruitment@example.gov'
+      DATA_DIR: dataDir, ANTHROPIC_API_KEY: '',
+      SLATE_SUPPORT_EMAIL: 'recruitment@example.gov',
+      ...serverEnv
     },
     stdio: 'ignore', windowsHide: true
   });
@@ -55,7 +57,7 @@ const KINDS = ['skill', 'trait', 'chall', 'opp'];
 const STAGES = ['applicant', 'semifinalist', 'finalist', 'declined'];
 
 async function fixture(request) {
-  const started = await (await request.post(BASE + '/api/start', { data: {} })).json();
+  const me = await (await request.get(BASE + '/api/me')).json();
   const search = await (await request.post(BASE + '/api/searches', {
     data: { client: 'City of Ridgeline', position: 'City Manager', state: 'Colorado', package: 'executive' }
   })).json();
@@ -153,7 +155,7 @@ async function fixture(request) {
   }
 
   const loaded = await (await request.get(BASE + '/api/searches/' + search.id)).json();
-  return { user: started.user, search: loaded, second, candidate: loaded.candidates[0] };
+  return { user: me.user, search: loaded, second, candidate: loaded.candidates[0] };
 }
 
 const VIEWPORTS = QUICK
@@ -214,6 +216,7 @@ async function measure(page) {
     await waitForServer();
     browser = await chromium.launch();
     const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+    await installClerk(context);
     const built = await fixture(context.request);
     const id = built.search.id;
     const page = await context.newPage();
@@ -295,7 +298,7 @@ async function measure(page) {
     const roles = {};
     if (!QUICK) {
       const member = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
-      await member.request.post(BASE + '/api/login', { data: { email: 'rosalind@example.gov' } });
+      await installClerk(member, { email: 'rosalind@example.gov' });
       const mp = await member.newPage();
       for (const [name, route] of Object.entries({
         'committee-home': '/#/home',

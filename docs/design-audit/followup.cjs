@@ -3,10 +3,12 @@ const { chromium } = require('@playwright/test');
 const AxeBuilder = require('@axe-core/playwright').default;
 const fs = require('fs');
 const path = require('path');
+const { installClerk } = require('./identity.cjs');
 const out=path.join(__dirname,'evidence');
 (async()=>{
  const browser=await chromium.launch();
  const context=await browser.newContext({viewport:{width:1440,height:1000},colorScheme:'light'});
+ await installClerk(context);
  const page=await context.newPage();
  const metrics=[];
  const snap=async(name,axe=true)=>{
@@ -49,7 +51,7 @@ const out=path.join(__dirname,'evidence');
  await page.locator('textarea').nth(1).fill('Listen to staff, council, and residents, then agree on near-term priorities.');
  await page.getByRole('button',{name:'Submit questionnaire'}).click();await page.getByRole('heading',{name:'Received',exact:true}).waitFor();await snap('candidate-receipt');
  await page.reload();await page.waitForLoadState('networkidle');await snap('candidate-receipt-reload',false);
- await context.request.post('http://127.0.0.1:4190/api/login',{data:{email:'dana-audit@example.gov'}});
+ await installClerk(context,{email:'dana-audit@example.gov'});
  await page.setViewportSize({width:1440,height:1000});await page.goto('http://127.0.0.1:4190');await page.waitForLoadState('networkidle');await snap('committee-home');
  await page.locator('[data-open]').first().click();await page.locator('[data-go="intake"]').first().waitFor();await nav('intake');await snap('committee-intake');
  await page.setViewportSize({width:390,height:844});await snap('committee-intake-mobile');

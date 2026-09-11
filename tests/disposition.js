@@ -8,6 +8,7 @@
 
 const assert = require('assert');
 const disposition = require('../server/disposition');
+const identity = require('./identity');
 
 const BASE = process.env.SLATE_URL || 'http://127.0.0.1:4173';
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
@@ -19,19 +20,13 @@ async function check(name, fn) {
   catch (error) { failed += 1; console.error('FAIL  Disposition: ' + name + '\n      ' + error.message); }
 }
 
-async function login(email, pin) {
-  const res = await fetch(BASE + '/api/login', {
-    method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ email, pin })
-  });
-  assert.strictEqual(res.status, 200, 'login returned ' + res.status);
-  return res.headers.getSetCookie().map(c => c.split(';')[0]).join('; ');
-}
+const sign = identity.signer();
 
 (async () => {
-  const cookie = await login('abe@slate.local', '2468');
+  const auth = sign.headers('abe@slate.local');
 
   const api = (path, { method = 'GET', body, revision } = {}) => {
-    const headers = { ...JSON_HEADERS, cookie };
+    const headers = { ...JSON_HEADERS, ...auth };
     if (revision !== undefined) headers['if-match'] = String(revision);
     return fetch(BASE + path, { method, headers, body: body ? JSON.stringify(body) : undefined });
   };
