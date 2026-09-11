@@ -137,7 +137,7 @@ Files: server/backup.js, scripts/backup.js; add deployment-specific scheduling/c
 - Copy only fully published verified snapshots; verify the downloaded independent copy before calling backup successful. Record age and outcome without logging record contents.
 - Set retention with the owner and records officer, including legal holds. Separate short operational backup rotation from the official records retention policy. No automatic destructive retention job until that policy is approved.
 - Move expensive backups off the health/request path. Define degraded behavior for backup failure, disk exhaustion, and overdue independent copies; alert an operator rather than turning every API request into an opaque error.
-- Configure platform volume backups as an additional layer where available. Railway documents [volume backups](https://docs.railway.com/volumes/backups) and [volume deployment constraints](https://docs.railway.com/volumes/reference); verify the selected account's configuration instead of assuming defaults.
+- Configure platform volume backups as an additional layer where available. Render documents [persistent disks](https://render.com/docs/disks), including their snapshot behaviour and the constraints a disk places on a service; verify the selected account's configuration instead of assuming defaults.
 
 Acceptance: restore an independently downloaded snapshot into an empty environment. Verify a search, its committee access, candidate answers and original questions, scores/history, and brochure images; old login sessions must remain invalid. Record elapsed recovery time and recoverable snapshot age. No off-volume restore evidence means no live pilot.
 

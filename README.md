@@ -180,27 +180,42 @@ your `.env`, contacts Claude, or changes live searches. Failed checks exit nonze
 `SLATE_URL` (default `http://127.0.0.1:4173`) and creates test records there.
 External website checks are opt-in with `SLATE_NETWORK_TESTS=true`.
 
-## Railway (or similar)
+## Render
 
-1. New service from this repo. Start command is `npm start`. Health check: `/api/health`.
-2. Variables:
-   - `ANTHROPIC_API_KEY` (required for drafts and city research)
-   - `CLAUDE_MODEL` / `CLAUDE_MODEL_PREMIUM` (optional)
-   - `NODE_ENV=production` (Railway sets this)
-   - `CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY` (required: without them every
-     workspace request answers 503 rather than falling back to open access)
-   - `CLERK_AUTHORIZED_PARTIES` set to the deployed origin, and
-     `SLATE_CLERK_ADMIN_EMAILS` for initial consultant provisioning
-3. Attach a **volume** and set `DATA_DIR` to the mount path (for example `/data`). Production will not start without this.
-4. Optionally set `SLATE_EMAIL_TEAM`, `SLATE_EMAIL_ABE`, and `SLATE_EMAIL_MIKE` to customize sign-in emails. No PIN configuration is required.
-5. Keep a **single replica**. The store is one JSON file; two instances will overwrite each other.
+`render.yaml` is a blueprint for the whole service: one Docker web service, one
+disk, one instance. Point Render at this repository and it reads that file;
+everything below is what the blueprint sets and what it deliberately leaves for
+you to supply.
 
-The app binds `0.0.0.0` and uses `PORT` from the platform. Slate sets no cookie of
-its own; the session belongs to Clerk.
+1. **Storage.** The blueprint mounts a disk at `/data` and sets `DATA_DIR` to
+   match. Production refuses to start without it, which is what stops records
+   from being written into the container filesystem and lost on the next
+   deploy. A disk needs a paid instance type; a free instance has no
+   persistent storage.
+2. **One instance.** The store is one JSON file with one writer, so two
+   instances would overwrite each other. Render also holds a service with a
+   disk to a single instance, and replaces it rather than running old and new
+   side by side, which is the behaviour this app needs.
+3. **Secrets**, prompted once by Render and never written into the repository:
+   - `CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY`. Without them every
+     workspace request answers 503 rather than falling back to open access.
+   - `CLERK_AUTHORIZED_PARTIES`, set to the service's own origin once it has
+     one, and `SLATE_CLERK_ADMIN_EMAILS` for initial consultant provisioning.
+   - `ANTHROPIC_API_KEY` for drafts and city research. The app serves without
+     it; those two features stop.
+   - `SLATE_SUPPORT_EMAIL`, shown to candidates who cannot proceed alone.
+4. **Optional:** `CLAUDE_MODEL` / `CLAUDE_MODEL_PREMIUM`, and
+   `SLATE_EMAIL_TEAM` / `SLATE_EMAIL_ABE` / `SLATE_EMAIL_MIKE` to change which
+   verified emails sign in as the seeded consultant accounts.
 
-The image is built from `Dockerfile` (`railway.json` selects the `DOCKERFILE`
-builder). There is no second build path: the former `nixpacks.toml` was removed
-so the runtime cannot drift between build methods.
+The app binds `0.0.0.0` and listens on `PORT` from the platform. Slate sets no
+cookie of its own; the session belongs to Clerk. On a deploy it drains in-flight
+requests and releases its write lock within ten seconds of SIGTERM, well inside
+the platform's termination allowance, so a replacement never finds a lock it has
+to treat as stale.
+
+The image is built from `Dockerfile`. There is no second build path: the former
+`nixpacks.toml` was removed so the runtime cannot drift between build methods.
 
 ### Container volume permissions
 

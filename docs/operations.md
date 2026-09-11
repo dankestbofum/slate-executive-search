@@ -171,11 +171,13 @@ metrics report space.
 ## 7. Platform volume backups
 
 Configure these as an additional layer that does not depend on Slate running
-correctly. Railway documents
-[volume backups](https://docs.railway.com/volumes/backups) and
-[volume constraints](https://docs.railway.com/volumes/reference).
+correctly. Render documents
+[persistent disks](https://render.com/docs/disks), including their snapshot
+behaviour and the constraints they place on a service.
 
-Verify what the account is actually set to rather than assuming a default.
+Verify what the account is actually set to rather than assuming a default. A
+platform snapshot is not a substitute for the off-volume copy in §4: a disk
+snapshot lives with the disk.
 
 ## 8. Incidents
 
