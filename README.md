@@ -187,11 +187,16 @@ External website checks are opt-in with `SLATE_NETWORK_TESTS=true`.
    - `ANTHROPIC_API_KEY` (required for drafts and city research)
    - `CLAUDE_MODEL` / `CLAUDE_MODEL_PREMIUM` (optional)
    - `NODE_ENV=production` (Railway sets this)
+   - `CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY` (required: without them every
+     workspace request answers 503 rather than falling back to open access)
+   - `CLERK_AUTHORIZED_PARTIES` set to the deployed origin, and
+     `SLATE_CLERK_ADMIN_EMAILS` for initial consultant provisioning
 3. Attach a **volume** and set `DATA_DIR` to the mount path (for example `/data`). Production will not start without this.
 4. Optionally set `SLATE_EMAIL_TEAM`, `SLATE_EMAIL_ABE`, and `SLATE_EMAIL_MIKE` to customize sign-in emails. No PIN configuration is required.
 5. Keep a **single replica**. The store is one JSON file; two instances will overwrite each other.
 
-The app binds `0.0.0.0` and uses `PORT` from the platform. Session cookies are `Secure` in production.
+The app binds `0.0.0.0` and uses `PORT` from the platform. Slate sets no cookie of
+its own; the session belongs to Clerk.
 
 The image is built from `Dockerfile` (`railway.json` selects the `DOCKERFILE`
 builder). There is no second build path: the former `nixpacks.toml` was removed
