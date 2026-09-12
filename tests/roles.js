@@ -276,6 +276,44 @@ async function revisionOf(id, auth) {
     assert.notStrictEqual(opened.who, 'Mike Letcher');
   });
 
+  /* ---------------- Starting fresh ---------------- */
+
+  await check('starting fresh rejects unauthenticated and committee requests', async () => {
+    assert.strictEqual((await api('/api/account/start-fresh', { method:'POST', body:{ ids:[own] } })).status, 401);
+    assert.strictEqual((await api('/api/account/start-fresh', { auth:member, method:'POST', body:{ ids:[own] } })).status, 403);
+  });
+
+  await check('starting fresh requires the exact managed searches and preserves the login and archives', async () => {
+    const before = await (await api('/api/me', { auth:abe })).json();
+    const list = await (await api('/api/searches', { auth:abe })).json();
+    const ids = list.filter(s => s.seat === 'manager').map(s => s.id);
+    const reset = body => api('/api/account/start-fresh', { auth:abe, method:'POST', body });
+    assert.strictEqual((await reset({})).status, 400);
+    assert.strictEqual((await reset({ ids:[...ids, ids[0]] })).status, 400);
+    assert.strictEqual((await reset({ ids:[...ids, other] })).status, 409, 'another manager was included');
+    const added = await mk(abe, 'Newly Assigned County');
+    assert.strictEqual((await reset({ ids })).status, 409, 'stale confirmation was accepted');
+    assert.strictEqual((await api('/api/searches/' + own, { auth:abe })).status, 200, 'failed confirmation partially archived searches');
+    ids.push(added);
+    const res = await reset({ ids });
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual((await res.json()).archived, ids.length);
+    const remaining = await (await api('/api/searches', { auth:abe })).json();
+    assert.ok(remaining.every(s => !ids.includes(s.id)));
+    assert.ok(remaining.some(s => s.id === other), 'another manager lost a search');
+    assert.deepStrictEqual((await (await api('/api/me', { auth:abe })).json()).user, before.user, 'the account changed');
+    assert.strictEqual((await api('/api/searches/' + own, { auth:member })).status, 404);
+    const archives = await (await api('/api/archives', { auth:abe })).json();
+    assert.ok(ids.every(id => archives.some(s => s.id === id)));
+    await mk(abe, 'Fresh Start County');
+    for (const id of ids) {
+      assert.strictEqual((await api('/api/archives/' + id + '/restore', { auth:abe, method:'POST', body:{} })).status, 200);
+    }
+    const restored = await (await api('/api/searches/' + own, { auth:abe })).json();
+    assert.ok(restored.activity.some(a => a.x === 'archived the search to start fresh'));
+    assert.strictEqual((await api('/api/searches/' + own, { auth:member })).status, 200, 'restoring did not restore committee access');
+  });
+
   /* ---------------- Credential and account policy ----------------
    *
    * Account administration is a CLI, not an HTTP route (see

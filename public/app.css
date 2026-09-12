@@ -70,6 +70,7 @@
 }
 .login__brand{display:flex; align-items:center; gap:10px}
 .auth-profile{display:flex; align-items:center; gap:12px; min-height:40px}
+.acct__avatar{flex:0 0 32px; min-height:32px; display:grid; place-items:center}
 .accounts{font-size:13px; color:var(--ink-2); line-height:1.6}
 .accounts b{color:var(--ink); font-family:"IBM Plex Mono",monospace; font-size:12px; font-weight:500}
 

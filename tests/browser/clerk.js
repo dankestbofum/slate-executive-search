@@ -44,7 +44,20 @@ function clerkStub(token, email, signedInByDefault) {
     openSignIn() { remember(true); emit(); },
     openSignUp() { remember(true); emit(); },
     async signOut() { remember(false); emit(); },
-    mountUserButton(element) { element.textContent = 'Account'; },
+    mountUserButton(element) {
+      const account = document.createElement('button');
+      account.type = 'button';
+      account.textContent = 'AM';
+      account.setAttribute('aria-label', 'Open account menu');
+      account.setAttribute('aria-expanded', 'false');
+      const signOut = document.createElement('button');
+      signOut.type = 'button';
+      signOut.textContent = 'Sign out';
+      signOut.hidden = true;
+      account.onclick = () => { signOut.hidden = !signOut.hidden; account.setAttribute('aria-expanded', String(!signOut.hidden)); };
+      signOut.onclick = () => window.Clerk.signOut();
+      element.replaceChildren(account, signOut);
+    },
     unmountUserButton() {}
   };
 })();`;

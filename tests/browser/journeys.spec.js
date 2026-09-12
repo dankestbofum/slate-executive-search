@@ -46,7 +46,8 @@ test('a session opens the workspace, survives reload, and ends on sign-out', asy
   // request after signing out would be authenticated by the harness rather
   // than by the browser, which is not what this is about.
   await page.context().setExtraHTTPHeaders({});
-  await page.getByRole('button', { name: 'Sign out', exact: true }).first().click();
+  await page.getByRole('button', { name: 'Open account menu', exact: true }).click();
+  await page.getByRole('button', { name: 'Sign out', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Sign in', exact: true }).first()).toBeVisible();
   await page.getByRole('button', { name: 'Sign in', exact: true }).first().click();
   await expect(page.getByRole('button', { name: /open a new search/i }).first()).toBeVisible({ timeout: 10000 });
@@ -58,6 +59,38 @@ test('signing in is reachable with the keyboard alone', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Sign in', exact: true }).first()).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(page.getByRole('button', { name: /open a new search/i }).first()).toBeVisible({ timeout: 10000 });
+});
+
+test('starting fresh can be cancelled, archives managed searches, and keeps the session', async ({ page }) => {
+  await installClerk(page, { email:'mike@slate.local' });
+  const response = await page.request.post('/api/searches', { data:{ client:'Fresh Start Browser County', position:'County Administrator' } });
+  expect(response.ok()).toBe(true);
+  const created = await response.json();
+  await page.goto('/');
+  const start = page.getByRole('button', { name:'Start fresh', exact:true });
+  await expect(start).toBeVisible();
+  const ids = (await (await page.request.get('/api/searches')).json()).filter(s => s.seat === 'manager').map(s => s.id);
+  try {
+    page.once('dialog', dialog => dialog.dismiss());
+    await start.click();
+    expect((await page.request.get('/api/searches/'+created.id)).status()).toBe(200);
+    await expect(start).toBeVisible();
+    let confirmation = '';
+    page.once('dialog', async dialog => { confirmation = dialog.message(); await dialog.accept(); });
+    await start.click();
+    await expect(page.locator('#newsearch')).toBeVisible();
+    expect(confirmation).toContain('Fresh Start Browser County');
+    expect(confirmation).toContain('Your Clerk login stays active');
+    expect((await page.request.get('/api/me')).status()).toBe(200);
+    expect((await page.request.get('/api/searches/'+created.id)).status()).toBe(404);
+    await page.reload();
+    await expect(page.locator('#newsearch')).toBeVisible();
+    await openNav(page);
+    await expect(page.locator('[data-clerk-user]')).toHaveCount(1);
+    await expect(page.getByRole('button', { name:'New search', exact:true })).toBeVisible();
+  } finally {
+    for (const id of ids) await page.request.post('/api/archives/'+id+'/restore', { data:{} });
+  }
 });
 
 test('every focusable control shows a visible focus indicator', async ({ page }) => {
