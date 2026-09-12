@@ -7,6 +7,7 @@
 // the *right* reason, and that withdrawing access takes effect at once.
 
 const assert = require('assert');
+const identity = require('./identity');
 
 const BASE = process.env.SLATE_URL || 'http://127.0.0.1:4173';
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
@@ -18,34 +19,29 @@ async function check(name, fn) {
   catch (error) { failed += 1; console.error('FAIL  Roles: ' + name + '\n      ' + error.message); }
 }
 
-async function login(email, pin) {
-  const res = await fetch(BASE + '/api/login', {
-    method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ email, pin })
-  });
-  assert.strictEqual(res.status, 200, 'login for ' + email + ' returned ' + res.status);
-  return res.headers.getSetCookie().map(c => c.split(';')[0]).join('; ');
-}
+// An identity is a Clerk session for one email. Slate resolves it to the
+// account that holds the seats, which is what these rows are about.
+const sign = identity.signer();
 
-function api(path, { cookie, method = 'GET', body, revision } = {}) {
-  const headers = { ...JSON_HEADERS };
-  if (cookie) headers.cookie = cookie;
+function api(path, { auth, method = 'GET', body, revision } = {}) {
+  const headers = { ...JSON_HEADERS, ...auth };
   if (revision !== undefined) headers['if-match'] = String(revision);
   return fetch(BASE + path, { method, headers, body: body ? JSON.stringify(body) : undefined });
 }
 
-async function revisionOf(id, cookie) {
-  return String((await (await api('/api/searches/' + id, { cookie })).json()).revision);
+async function revisionOf(id, auth) {
+  return String((await (await api('/api/searches/' + id, { auth })).json()).revision);
 }
 
 (async () => {
-  const abe = await login('abe@slate.local', '2468');
-  const mike = await login('mike@slate.local', '1357');
+  const abe = sign.headers('abe@slate.local');
+  const mike = sign.headers('mike@slate.local');
 
   // Two searches, each managed by a different consultant, so "manager of this
   // search" can be told apart from "consultant at the firm".
-  const mk = async (cookie, client) => {
+  const mk = async (auth, client) => {
     const res = await api('/api/searches', {
-      cookie, method: 'POST', body: { client, position: 'County Administrator', jurisdictionType: 'county' }
+      auth, method: 'POST', body: { client, position: 'County Administrator', jurisdictionType: 'county' }
     });
     assert.strictEqual(res.status, 200, 'could not create ' + client);
     return (await res.json()).id;
@@ -53,22 +49,26 @@ async function revisionOf(id, cookie) {
   const own = await mk(abe, 'Roles County');
   const other = await mk(mike, 'Other Roles County');
 
-  // Returns the one-time PIN and the account id, both of which only appear on
-  // the seating response; a later search read does not carry the roster.
-  const seat = async (searchId, cookie, name, email) => {
+  // Returns the account id, which only appears on the seating response; a later
+  // search read does not carry the roster. Seating issues no credential of its
+  // own: the person signs in with the email on their invitation.
+  const seat = async (searchId, auth, name, email) => {
     const res = await api('/api/searches/' + searchId + '/members', {
-      cookie, method: 'POST', revision: await revisionOf(searchId, cookie),
+      auth, method: 'POST', revision: await revisionOf(searchId, auth),
       body: { name, email, seat: 'committee' }
     });
     assert.strictEqual(res.status, 200, 'seating ' + email + ' returned ' + res.status);
     const body = await res.json();
     const row = (body.roster || []).find(m => m.email === email.toLowerCase());
     assert.ok(row, 'seated member ' + email + ' was not in the returned roster');
-    return { pin: body.pin, userId: row.userId };
+    assert.ok(!Object.hasOwn(body, 'pin'), 'seating handed back a credential of its own');
+    return { userId: row.userId };
   };
 
-  const member = await login('rose-roles@example.com', (await seat(own, abe, 'Rose Committee', 'rose-roles@example.com')).pin);
-  const outsider = await login('sam-roles@example.com', (await seat(other, mike, 'Sam Outsider', 'sam-roles@example.com')).pin);
+  await seat(own, abe, 'Rose Committee', 'rose-roles@example.com');
+  await seat(other, mike, 'Sam Outsider', 'sam-roles@example.com');
+  const member = sign.headers('rose-roles@example.com');
+  const outsider = sign.headers('sam-roles@example.com');
 
   /* ---------------- Reading a search ---------------- */
 
@@ -80,15 +80,15 @@ async function revisionOf(id, cookie) {
 
   await check('a consultant reads the whole book of business', async () => {
     // Deliberate: firm-wide access is how this practice works.
-    assert.strictEqual((await api('/api/searches/' + other, { cookie: abe })).status, 200);
+    assert.strictEqual((await api('/api/searches/' + other, { auth: abe })).status, 200);
   });
 
   await check('a seated committee member reads only their own search', async () => {
-    assert.strictEqual((await api('/api/searches/' + own, { cookie: member })).status, 200);
+    assert.strictEqual((await api('/api/searches/' + own, { auth: member })).status, 200);
   });
 
   await check('an unrelated committee member cannot tell the search exists', async () => {
-    const res = await api('/api/searches/' + own, { cookie: outsider });
+    const res = await api('/api/searches/' + own, { auth: outsider });
     // 404 not 403: a 403 would confirm the id is real.
     assert.strictEqual(res.status, 404, 'expected 404, got ' + res.status);
   });
@@ -102,18 +102,18 @@ async function revisionOf(id, cookie) {
   await check('the search index carries candidate counts and no candidate detail', async () => {
     for (const person of ['Amita Rosewood-Fenn', 'Bo Nakagawa']) {
       const res = await api('/api/searches/' + own + '/candidates', {
-        cookie: abe, method: 'POST', revision: await revisionOf(own, abe),
+        auth: abe, method: 'POST', revision: await revisionOf(own, abe),
         body: { name: person, cur: 'Deputy Administrator', org: 'A Neighbouring County', email: person.split(' ')[0].toLowerCase() + '@example.com' }
       });
       assert.strictEqual(res.status, 200, 'could not add ' + person);
     }
-    const loaded = await (await api('/api/searches/' + own, { cookie: abe })).json();
+    const loaded = await (await api('/api/searches/' + own, { auth: abe })).json();
     const bo = loaded.candidates.find(c => c.name === 'Bo Nakagawa');
     await api('/api/searches/' + own + '/candidates/' + bo.id, {
-      cookie: abe, method: 'PATCH', revision: await revisionOf(own, abe), body: { stage: 'semifinalist' }
+      auth: abe, method: 'PATCH', revision: await revisionOf(own, abe), body: { stage: 'semifinalist' }
     });
 
-    const index = await (await api('/api/searches', { cookie: abe })).json();
+    const index = await (await api('/api/searches', { auth: abe })).json();
     const row = index.find(s => s.id === own);
     assert.ok(row, 'the search was missing from the index');
     assert.deepStrictEqual(row.candidateCounts,
@@ -127,10 +127,10 @@ async function revisionOf(id, cookie) {
   });
 
   await check('the index never summarises a search the reader cannot open', async () => {
-    const index = await (await api('/api/searches', { cookie: outsider })).json();
+    const index = await (await api('/api/searches', { auth: outsider })).json();
     assert.ok(Array.isArray(index));
     assert.ok(!index.some(s => s.id === own), 'an unrelated search appeared in the index');
-    const seen = await (await api('/api/searches', { cookie: member })).json();
+    const seen = await (await api('/api/searches', { auth: member })).json();
     const mine = seen.find(s => s.id === own);
     assert.ok(mine, 'a seated member could not see their own search');
     // A seated member takes part in screening, so the count is theirs to see;
@@ -143,7 +143,7 @@ async function revisionOf(id, cookie) {
 
   await check('a committee member cannot edit search facts', async () => {
     const res = await api('/api/searches/' + own, {
-      cookie: member, method: 'PUT', revision: await revisionOf(own, member),
+      auth: member, method: 'PUT', revision: await revisionOf(own, member),
       body: { client: 'Renamed By Committee' }
     });
     assert.ok(res.status === 403 || res.status === 404, 'expected refusal, got ' + res.status);
@@ -151,7 +151,7 @@ async function revisionOf(id, cookie) {
 
   await check('a committee member cannot seat other members', async () => {
     const res = await api('/api/searches/' + own + '/members', {
-      cookie: member, method: 'POST', revision: await revisionOf(own, member),
+      auth: member, method: 'POST', revision: await revisionOf(own, member),
       body: { name: 'Snuck In', email: 'snuck@example.com', seat: 'committee' }
     });
     assert.ok(res.status === 403 || res.status === 404, 'expected refusal, got ' + res.status);
@@ -160,7 +160,7 @@ async function revisionOf(id, cookie) {
   await check('a non-manager consultant cannot take manager-only actions', async () => {
     // Mike is a consultant and can read this search, but Abe manages it.
     const res = await api('/api/searches/' + own + '/members', {
-      cookie: mike, method: 'POST', revision: await revisionOf(own, mike),
+      auth: mike, method: 'POST', revision: await revisionOf(own, mike),
       body: { name: 'Wrong Manager', email: 'wrong-manager@example.com', seat: 'committee' }
     });
     assert.strictEqual(res.status, 403, 'expected 403, got ' + res.status);
@@ -168,7 +168,7 @@ async function revisionOf(id, cookie) {
 
   await check('an unrelated committee member cannot write to another search', async () => {
     const res = await api('/api/searches/' + own + '/candidates', {
-      cookie: outsider, method: 'POST', revision: '1', body: { name: 'Ghost' }
+      auth: outsider, method: 'POST', revision: '1', body: { name: 'Ghost' }
     });
     assert.strictEqual(res.status, 404, 'expected 404, got ' + res.status);
   });
@@ -178,31 +178,31 @@ async function revisionOf(id, cookie) {
   await check('a committee member never receives invitation tokens', async () => {
     const rev = await revisionOf(own, abe);
     await api('/api/searches/' + own + '/candidates', {
-      cookie: abe, method: 'POST', revision: rev, body: { name: 'Private Candidate' }
+      auth: abe, method: 'POST', revision: rev, body: { name: 'Private Candidate' }
     });
-    const body = await (await api('/api/searches/' + own, { cookie: member })).text();
+    const body = await (await api('/api/searches/' + own, { auth: member })).text();
     assert.doesNotMatch(body, /"invite"\s*:\s*"[a-f0-9]{20,}"/, 'a bearer token reached the committee view');
   });
 
   await check('history is not readable by the committee', async () => {
-    const res = await api('/api/searches/' + own + '/history', { cookie: member });
+    const res = await api('/api/searches/' + own + '/history', { auth: member });
     assert.ok(res.status === 403 || res.status === 404, 'expected refusal, got ' + res.status);
   });
 
   await check('private media is refused to an unrelated committee member', async () => {
-    const res = await api('/media/' + own + '/cover.jpg', { cookie: outsider });
+    const res = await api('/media/' + own + '/cover.jpg', { auth: outsider });
     assert.ok(res.status >= 400, 'expected refusal, got ' + res.status);
   });
 
   // The export column of the matrix. Left open in DEP-02 because the export
   // did not exist yet; it does now (DEP-10).
   await check('the records export is refused to the committee', async () => {
-    const res = await api('/api/searches/' + own + '/export', { cookie: member });
+    const res = await api('/api/searches/' + own + '/export', { auth: member });
     assert.ok(res.status === 403 || res.status === 404, 'expected refusal, got ' + res.status);
   });
 
   await check('the records export is refused to an unrelated committee member', async () => {
-    const res = await api('/api/searches/' + own + '/export', { cookie: outsider });
+    const res = await api('/api/searches/' + own + '/export', { auth: outsider });
     assert.strictEqual(res.status, 404, 'expected 404, got ' + res.status);
   });
 
@@ -212,7 +212,7 @@ async function revisionOf(id, cookie) {
 
   await check('archive actions are refused to the committee', async () => {
     const res = await api('/api/searches/' + own, {
-      cookie: member, method: 'DELETE', revision: await revisionOf(own, member)
+      auth: member, method: 'DELETE', revision: await revisionOf(own, member)
     });
     assert.ok(res.status === 403 || res.status === 404, 'expected refusal, got ' + res.status);
   });
@@ -232,35 +232,41 @@ async function revisionOf(id, cookie) {
 
   /* ---------------- Withdrawal of access ---------------- */
 
-  await check('a revoked session stops working immediately', async () => {
-    const { pin } = await seat(own, abe, 'Temp Member', 'temp-roles@example.com');
-    const temp = await login('temp-roles@example.com', pin);
-    assert.strictEqual((await api('/api/searches/' + own, { cookie: temp })).status, 200);
+  await check('withdrawing a seat ends access on the next request', async () => {
+    const { userId } = await seat(own, abe, 'Temp Member', 'temp-roles@example.com');
+    const temp = sign.headers('temp-roles@example.com');
+    assert.strictEqual((await api('/api/searches/' + own, { auth: temp })).status, 200);
 
-    const res = await api('/api/logout', { cookie: temp, method: 'POST' });
-    assert.ok(res.status < 400, 'logout failed: ' + res.status);
-    assert.strictEqual((await api('/api/searches/' + own, { cookie: temp })).status, 401,
-      'the session outlived its logout');
+    const res = await api('/api/searches/' + own + '/members/' + userId, {
+      auth: abe, method: 'DELETE', revision: await revisionOf(own, abe)
+    });
+    assert.strictEqual(res.status, 200, 'the seat could not be withdrawn: ' + res.status);
+    // The same session token, one request later. Nothing had to expire.
+    assert.strictEqual((await api('/api/searches/' + own, { auth: temp })).status, 404,
+      'access outlived the seat');
   });
 
-  await check('removing a committee member retires their sessions and sign-in', async () => {
+  // Slate retires the account, not the person's identity at Clerk: they can
+  // still sign in, and what they find is an empty workspace rather than a door
+  // that silently stopped opening.
+  await check('a removed member is left with no searches at all', async () => {
     const { userId } = await seat(own, abe, 'Remove Member', 'remove-roles@example.com');
-    const member = await login('remove-roles@example.com');
+    const removed = sign.headers('remove-roles@example.com');
+    assert.strictEqual((await api('/api/searches/' + own, { auth: removed })).status, 200);
     const res = await api('/api/searches/' + own + '/members/' + userId, {
-      cookie: abe, method: 'DELETE', revision: await revisionOf(own, abe)
+      auth: abe, method: 'DELETE', revision: await revisionOf(own, abe)
     });
     assert.strictEqual(res.status, 200);
-    assert.strictEqual((await api('/api/searches/' + own, { cookie: member })).status, 401);
-    const denied = await api('/api/login', { method: 'POST', body: { email: 'remove-roles@example.com' } });
-    assert.strictEqual(denied.status, 401);
+    assert.deepStrictEqual(await (await api('/api/searches', { auth: removed })).json(), [],
+      'a removed member could still list searches');
   });
 
   /* ---------------- Attribution ---------------- */
 
   await check('shared-account work is attributed to the shared account', async () => {
-    const team = await login('team@slate.local', '1234');
+    const team = sign.headers('team@slate.local');
     const id = await mk(team, 'Attribution County');
-    const search = await (await api('/api/searches/' + id, { cookie: team })).json();
+    const search = await (await api('/api/searches/' + id, { auth: team })).json();
     const opened = (search.activity || []).find(a => /opened/.test(a.x || ''));
     assert.ok(opened, 'no activity recorded');
     // The shared sign-in must never be recorded as a named individual, or the
@@ -278,32 +284,35 @@ async function revisionOf(id, cookie) {
 
   const store = require('../server/db');
 
-  await check('disabling an account revokes its sessions and blocks it', () => {
+  const { resolveUser } = require('../server/auth');
+
+  await check('disabling an account blocks it without deleting it', async () => {
     const { user } = store.createUser({ name: 'Disabled Person', email: 'disabled@example.com', role: 'consultant' });
-    store.db.sessions['unit-session-a'] = { userId: user.id, exp: Date.now() + 60000 };
-    store.db.sessions['unit-session-b'] = { userId: user.id, exp: Date.now() + 60000 };
-    store.db.sessions['unit-session-other'] = { userId: 'u1', exp: Date.now() + 60000 };
+    const profile = async () => ({
+      primaryEmailAddressId: 'primary',
+      emailAddresses: [{ id: 'primary', emailAddress: 'disabled@example.com', verification: { status: 'verified' } }]
+    });
+    assert.strictEqual((await resolveUser(store, 'clerk-disabled', profile)).id, user.id);
 
     store.setDisabled(user, true, 'test');
     assert.ok(store.isDisabled(user), 'the account was not marked disabled');
     assert.ok(user.disabledAt, 'no disabled timestamp was recorded');
-    assert.strictEqual(store.db.sessions['unit-session-a'], undefined, 'a session survived disabling');
-    assert.strictEqual(store.db.sessions['unit-session-b'], undefined, 'a session survived disabling');
-    assert.ok(store.db.sessions['unit-session-other'], 'another account\'s session was revoked');
+    // There is no session to revoke. Every request resolves the identity again,
+    // and a disabled account is refused there.
+    assert.strictEqual(await resolveUser(store, 'clerk-disabled', profile), null,
+      'a disabled account still resolved to a user');
 
     // Disabling must not delete the account: history attributes decisions to it.
     assert.ok(store.findUserById(user.id), 'the account was removed rather than disabled');
 
     store.setDisabled(user, false, 'test');
     assert.strictEqual(store.isDisabled(user), false, 'the account could not be restored');
-    delete store.db.sessions['unit-session-other'];
+    assert.strictEqual((await resolveUser(store, 'clerk-disabled', profile)).id, user.id);
   });
 
-  await check('session length is configurable but capped', () => {
-    assert.ok(store.SESSION_DAYS >= 1, 'session length fell below a day');
-    assert.ok(store.SESSION_DAYS <= store.SESSION_MAX_DAYS,
-      'configuration raised the session length past its ceiling');
-    assert.strictEqual(store.SESSION_MS, store.SESSION_DAYS * 24 * 60 * 60 * 1000);
+  await check('Slate keeps no session of its own to outlive a decision', () => {
+    assert.ok(!('sessions' in store.db), 'the store still carries a session table');
+    assert.strictEqual(store.revokeSessions, undefined, 'session revocation still exists to be called');
   });
 
   console.log(passed + ' role checks passed' + (failed ? ', ' + failed + ' failed' : '') + '.');

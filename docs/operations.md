@@ -138,7 +138,8 @@ Verify, and write down what you found:
 - [ ] Candidate answers are present **with the original question text**
 - [ ] Scores and history are intact
 - [ ] Brochure images render
-- [ ] **Old sessions do not work** — everyone must sign in again
+- [ ] **The restored store carries no session of its own** — signing in still
+      goes through Clerk
 - [ ] Elapsed time from starting to a working instance: __________
 - [ ] Age of the snapshot you restored: __________
 
@@ -146,8 +147,8 @@ The last two are the actual recovery point and recovery time. Compare them to
 the proposed one hour / four hours and record the gap if there is one.
 
 `tests/recovery.js` runs this whole path automatically against synthetic data
-on every CI run, including the off-volume copy and the assertion that sessions
-do not come back. That proves the mechanism. **It does not substitute for the
+on every CI run, including the off-volume copy and the assertion that a
+pre-Clerk session table does not come back. That proves the mechanism. **It does not substitute for the
 manual drill against real infrastructure**, which is what proves the operator
 can do it under pressure.
 
@@ -170,11 +171,13 @@ metrics report space.
 ## 7. Platform volume backups
 
 Configure these as an additional layer that does not depend on Slate running
-correctly. Railway documents
-[volume backups](https://docs.railway.com/volumes/backups) and
-[volume constraints](https://docs.railway.com/volumes/reference).
+correctly. Render documents
+[persistent disks](https://render.com/docs/disks), including their snapshot
+behaviour and the constraints they place on a service.
 
-Verify what the account is actually set to rather than assuming a default.
+Verify what the account is actually set to rather than assuming a default. A
+platform snapshot is not a substitute for the off-volume copy in §4: a disk
+snapshot lives with the disk.
 
 ## 8. Incidents
 
@@ -187,15 +190,17 @@ tool expired. Fix, then confirm `overdue` clears.
 committed state, so nothing is corrupted, but new work is not being saved. Free
 space or grow the volume, then verify the most recent snapshot.
 
-**Volume lost.** Restore per §5 into a new volume, deploy the release that
+**Volume lost.** Restore per §5 into a new volume and deploy the release that
 matches the snapshot's schema version (a store from a newer release is refused
-rather than downgraded), and require everyone to sign in again. Reconcile any
+rather than downgraded). Nobody has to sign in again: their session is Clerk's,
+and the restored store only has to still hold their account. Reconcile any
 candidate submissions made after the snapshot before asking anyone to resubmit
 — check whether the original committed first.
 
-**Suspected credential exposure.** `node scripts/accounts.js reset <id>`
-revokes that account's sessions and issues a new PIN. See the account
-administration section in README.
+**Suspected account compromise.** `node scripts/accounts.js disable <id>`
+withdraws that account's access on its next request. Slate holds no credential
+to rotate, so revoke or reset the person's identity at Clerk as well. See the
+account administration section in README.
 
 ## 9. What is not covered here
 

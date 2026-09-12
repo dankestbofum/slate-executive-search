@@ -13,17 +13,13 @@ The `evidence/recruiting-redesign/` directory holds the redesign's own screensho
 
 The `evidence/` directory contains screenshots of synthetic local data, baseline scans (`metrics.json`), the later package/candidate/committee scans (`followup-metrics.json`), and focused layout/theme measurements (`verified-measurements.json`). Screenshots are captured at different stages of fixture setup; an empty screen and a populated screen are deliberately different states.
 
-The audit server used a temporary store and no AI credentials. Capture helpers are one-off audit tools, not additions to the application test suite. To reproduce in a **fresh** temporary store, start the server in one PowerShell terminal:
+The audit server used a temporary store and no AI credentials. Capture helpers are one-off audit tools, not additions to the application test suite. To reproduce in a **fresh** temporary store, start the server in one terminal:
 
 ```powershell
-$env:NODE_ENV='test'
-$env:PORT='4190'
-$env:HOST='127.0.0.1'
-$env:DATA_DIR=Join-Path $env:TEMP ('slate-design-audit-'+[guid]::NewGuid())
-$env:ANTHROPIC_API_KEY=''
-$env:SLATE_SUPPORT_EMAIL='recruitment@example.gov'
-node server/index.js
+node docs/design-audit/server.cjs
 ```
+
+It picks a throwaway store, prints it, and runs with the fixture identity the capture tools sign in with. Set `DATA_DIR` first to reuse an earlier audit store.
 
 Then run these sequentially from the repository root in a second terminal:
 

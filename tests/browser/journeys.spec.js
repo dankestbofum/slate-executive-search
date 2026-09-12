@@ -3,22 +3,26 @@
 // The critical journeys, in a real browser.
 //
 // The server suites prove the API behaves. These prove a person can actually
-// reach that behaviour: that Start works with a keyboard, that a
+// reach that behaviour: that signing in works with a keyboard, that a
 // county search can be opened, and that a candidate on a phone can read and
 // submit a questionnaire.
 
 const { test, expect } = require('@playwright/test');
+const { installClerk } = require('./clerk');
 
-async function openStart(page) {
+// The door: Clerk's own script is stubbed, and the page starts signed out.
+async function openLanding(page) {
+  await installClerk(page, { signedIn: false });
   await page.goto('/');
   await page.waitForLoadState('networkidle');
-  await expect(page.getByRole('button', { name: 'Start', exact: true }).first()).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Sign in', exact: true }).first()).toBeVisible();
   await expect(page.locator('#login')).toHaveCount(0);
 }
 
 async function startWorkspace(page) {
-  await openStart(page);
-  await page.getByRole('button', { name: 'Start', exact: true }).first().click();
+  await installClerk(page);
+  await page.goto('/');
+  await page.waitForLoadState('networkidle');
   await expect(page.getByRole('button', { name: /open a new search/i }).first()).toBeVisible({ timeout: 10000 });
 }
 
@@ -33,28 +37,32 @@ async function openNav(page) {
   }
 }
 
-test('Start opens the workspace without credentials and survives reload', async ({ page }) => {
+test('a session opens the workspace, survives reload, and ends on sign-out', async ({ page }) => {
   await startWorkspace(page);
   await page.reload();
   await expect(page.getByRole('button', { name: /open a new search/i }).first()).toBeVisible();
   await openNav(page);
-  await page.getByRole('button', { name: 'Leave workspace', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Start', exact: true })).toHaveCount(2);
-  await page.getByRole('button', { name: 'Start', exact: true }).last().click();
-  await expect(page.getByRole('button', { name: /open a new search/i }).first()).toBeVisible();
+  // The harness holds the same session the page does. Drop it first, or the
+  // request after signing out would be authenticated by the harness rather
+  // than by the browser, which is not what this is about.
+  await page.context().setExtraHTTPHeaders({});
+  await page.getByRole('button', { name: 'Sign out', exact: true }).first().click();
+  await expect(page.getByRole('button', { name: 'Sign in', exact: true }).first()).toBeVisible();
+  await page.getByRole('button', { name: 'Sign in', exact: true }).first().click();
+  await expect(page.getByRole('button', { name: /open a new search/i }).first()).toBeVisible({ timeout: 10000 });
 });
 
-test('Start is reachable with the keyboard alone', async ({ page }) => {
-  await openStart(page);
+test('signing in is reachable with the keyboard alone', async ({ page }) => {
+  await openLanding(page);
   await page.keyboard.press('Tab');
-  await expect(page.getByRole('button', { name: 'Start', exact: true }).first()).toBeFocused();
+  await expect(page.getByRole('button', { name: 'Sign in', exact: true }).first()).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(page.getByRole('button', { name: /open a new search/i }).first()).toBeVisible({ timeout: 10000 });
 });
 
 test('every focusable control shows a visible focus indicator', async ({ page }) => {
-  await openStart(page);
-  const button = page.getByRole('button', { name: 'Start', exact: true }).first();
+  await openLanding(page);
+  const button = page.getByRole('button', { name: 'Sign in', exact: true }).first();
   await button.focus();
   const outline = await button.evaluate(el => {
     const style = getComputedStyle(el);
@@ -88,26 +96,25 @@ test('a county search can be opened and reloads with its type intact', async ({ 
   await expect(page.getByText('Browser County').filter({ visible: true }).first()).toBeVisible({ timeout: 10000 });
 });
 
-test('the candidate questionnaire is usable and states its support contact', async ({ page, request }) => {
+test('the candidate questionnaire is usable and states its support contact', async ({ page }) => {
   // Set up through the API so the browser test is about the candidate page,
   // not about every consultant screen leading to it.
-  const login = await request.post('/api/login', { data: { email: 'abe@slate.local', pin: '2468' } });
-  expect(login.ok()).toBeTruthy();
+  await installClerk(page);
 
-  const created = await (await request.post('/api/searches', {
+  const created = await (await page.request.post('/api/searches', {
     data: { client: 'Applicant County', position: 'County Administrator', jurisdictionType: 'county' }
   })).json();
 
-  const revision = async () => String((await (await request.get('/api/searches/' + created.id)).json()).revision);
+  const revision = async () => String((await (await page.request.get('/api/searches/' + created.id)).json()).revision);
 
-  await request.put('/api/searches/' + created.id + '/artifact/survey1', {
+  await page.request.put('/api/searches/' + created.id + '/artifact/survey1', {
     headers: { 'if-match': await revision() },
     data: { body: { intro: 'Tell us about your experience.', questions: [
       { n: 1, prompt: 'Describe your county budget experience.', required: true }
     ] } }
   });
 
-  const withCandidate = await (await request.post('/api/searches/' + created.id + '/candidates', {
+  const withCandidate = await (await page.request.post('/api/searches/' + created.id + '/candidates', {
     headers: { 'if-match': await revision() },
     data: { name: 'Browser Candidate' }
   })).json();
@@ -124,20 +131,19 @@ test('the candidate questionnaire is usable and states its support contact', asy
   await expect(page.getByText(/recruitment@example\.gov/i)).toBeVisible();
 });
 
-test('a candidate can submit and sees a receipt afterwards', async ({ page, request }) => {
-  const login = await request.post('/api/login', { data: { email: 'abe@slate.local', pin: '2468' } });
-  expect(login.ok()).toBeTruthy();
+test('a candidate can submit and sees a receipt afterwards', async ({ page }) => {
+  await installClerk(page);
 
-  const created = await (await request.post('/api/searches', {
+  const created = await (await page.request.post('/api/searches', {
     data: { client: 'Receipt County', position: 'County Administrator', jurisdictionType: 'county' }
   })).json();
-  const revision = async () => String((await (await request.get('/api/searches/' + created.id)).json()).revision);
+  const revision = async () => String((await (await page.request.get('/api/searches/' + created.id)).json()).revision);
 
-  await request.put('/api/searches/' + created.id + '/artifact/survey1', {
+  await page.request.put('/api/searches/' + created.id + '/artifact/survey1', {
     headers: { 'if-match': await revision() },
     data: { body: { intro: 'One question.', questions: [{ n: 1, prompt: 'Why this county?', required: true }] } }
   });
-  const withCandidate = await (await request.post('/api/searches/' + created.id + '/candidates', {
+  const withCandidate = await (await page.request.post('/api/searches/' + created.id + '/candidates', {
     headers: { 'if-match': await revision() },
     data: { name: 'Receipt Candidate' }
   })).json();
@@ -166,20 +172,19 @@ test('a candidate can submit and sees a receipt afterwards', async ({ page, requ
   ).toBeVisible({ timeout: 10000 });
 });
 
-test('touch targets on the candidate page are large enough to hit', async ({ page, request }, testInfo) => {
+test('touch targets on the candidate page are large enough to hit', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'mobile-chrome', 'touch sizing is a mobile concern');
 
-  const login = await request.post('/api/login', { data: { email: 'abe@slate.local', pin: '2468' } });
-  expect(login.ok()).toBeTruthy();
-  const created = await (await request.post('/api/searches', {
+  await installClerk(page);
+  const created = await (await page.request.post('/api/searches', {
     data: { client: 'Touch County', position: 'County Administrator' }
   })).json();
-  const revision = async () => String((await (await request.get('/api/searches/' + created.id)).json()).revision);
-  await request.put('/api/searches/' + created.id + '/artifact/survey1', {
+  const revision = async () => String((await (await page.request.get('/api/searches/' + created.id)).json()).revision);
+  await page.request.put('/api/searches/' + created.id + '/artifact/survey1', {
     headers: { 'if-match': await revision() },
     data: { body: { intro: 'One question.', questions: [{ n: 1, prompt: 'Why this county?', required: true }] } }
   });
-  const withCandidate = await (await request.post('/api/searches/' + created.id + '/candidates', {
+  const withCandidate = await (await page.request.post('/api/searches/' + created.id + '/candidates', {
     headers: { 'if-match': await revision() }, data: { name: 'Touch Candidate' }
   })).json();
 

@@ -6,20 +6,18 @@ const vm = require('vm');
 const jurisdictions = require('../server/jurisdictions');
 const { generate } = require('../server/ai');
 const { reconcile } = require('../server/integrity');
+const identity = require('./identity');
 let checks = 0;
 function check(name, fn) { fn(); checks++; console.log('PASS  County: ' + name); }
-let cookie;
+const auth = identity.signer().headers('abe@slate.local');
 async function request(url, method='GET', body) {
-  const headers = { 'content-type':'application/json' };
-  if (cookie) headers.cookie = cookie;
+  const headers = { 'content-type':'application/json', ...auth };
   if (method === 'PATCH') headers['if-match'] = String((await request(url)).body.revision);
   const response = await fetch(process.env.SLATE_URL + url, { method, headers, body:body === undefined ? undefined : JSON.stringify(body) });
-  return { status:response.status, body:await response.json(), cookie:response.headers.get('set-cookie')?.split(';')[0] };
+  return { status:response.status, body:await response.json() };
 }
 (async () => {
-  const login = await request('/api/login', 'POST', { email:'abe@slate.local', pin:'2468' });
-  assert.equal(login.status, 200);
-  cookie = login.cookie;
+  assert.equal((await request('/api/me')).status, 200, 'the fixture Clerk session was refused');
   const config = (await request('/api/config')).body;
   check('setup offers city/town and county', () => assert.deepEqual(config.jurisdictionTypes.map(t=>t.key), ['municipality','county']));
   const created = await request('/api/searches', 'POST', { client:'Example County', jurisdictionType:'county', position:'County Administrator', state:'AZ' });
@@ -195,7 +193,7 @@ async function request(url, method='GET', body) {
     const revision = String((await request(url)).body.revision);
     const response = await fetch(process.env.SLATE_URL + verifyUrl, {
       method: 'PUT',
-      headers: { 'content-type':'application/json', cookie, 'if-match': revision },
+      headers: { 'content-type':'application/json', ...auth, 'if-match': revision },
       body: JSON.stringify(body)
     });
     return { status: response.status, body: await response.json() };

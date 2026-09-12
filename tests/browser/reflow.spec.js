@@ -8,11 +8,15 @@
 // need a phone in someone's hand and a person listening.
 
 const { test, expect } = require('@playwright/test');
+const { installClerk } = require('./clerk');
+
+// Every test here works as a signed-in consultant. The session is a real one
+// as far as the server is concerned; only Clerk's own script is stubbed.
+test.beforeEach(async ({ page }) => { await installClerk(page); });
 
 async function workspace(page) {
   await page.goto('/');
   await page.waitForLoadState('networkidle');
-  await page.getByRole('button', { name: 'Start', exact: true }).first().click();
   await expect(page.getByRole('button', { name: /open a new search/i }).first()).toBeVisible({ timeout: 10000 });
 }
 async function makeSearch(page, data) {
@@ -114,11 +118,10 @@ test('a committee member is shown their own steps and nothing else', async ({ pa
   });
   expect(seated.ok()).toBeTruthy();
 
-  // Sign the seat in on its own context before the first page load, so the
-  // deep link is the first navigation the app boots on.
+  // Give the seat its own session on its own context before the first page
+  // load, so the deep link is the first navigation the app boots on.
   const context = await browser.newContext();
-  const login = await context.request.post('/api/login', { data: { email } });
-  expect(login.ok()).toBeTruthy();
+  await installClerk(context, { email });
   const member = await context.newPage();
 
   await member.goto('/#/s/' + search.id);

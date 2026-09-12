@@ -3,11 +3,14 @@ const { chromium } = require('@playwright/test');
 const AxeBuilder = require('@axe-core/playwright').default;
 const fs = require('fs');
 const path = require('path');
+const { installClerk } = require('./identity.cjs');
 const out = path.join(__dirname, 'evidence');
 fs.mkdirSync(out, { recursive: true });
 (async () => {
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, colorScheme: 'light' });
+  // The landing page is one of the screenshots, so this starts at the door.
+  await installClerk(context, { signedIn: false });
   const page = await context.newPage();
   const metrics = [];
   const errors = [];
@@ -43,7 +46,9 @@ fs.mkdirSync(out, { recursive: true });
   await page.goto('http://127.0.0.1:4190');
   await page.waitForLoadState('networkidle');
   await snap('01-landing-desktop',true);
-  await page.locator('[data-act="start"]').first().click();
+  await page.locator('[data-act="sign-in"]').first().click();
+  // Signed in now, so the tool's own API calls carry the session too.
+  await installClerk(context);
   await page.locator('[data-go="new"]').first().waitFor();
   await snap('02-home-empty',true);
   await nav('new');

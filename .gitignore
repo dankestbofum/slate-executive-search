@@ -1,6 +1,9 @@
 node_modules/
 data/
 .env
+.env.*
+!.env.example
+.clerk/
 *.tmp
 .DS_Store
 .claude/

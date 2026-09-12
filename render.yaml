@@ -1,0 +1,58 @@
+# Render blueprint.
+#
+# One web service, built from the Dockerfile, with a disk. The store is a
+# single JSON file with one writer, so this deliberately runs a single
+# instance: two would overwrite each other's records.
+#
+# Secrets are marked `sync: false`, which means Render prompts for them once
+# and never reads them from this file. Nothing secret belongs in the repo.
+
+services:
+  - type: web
+    name: slate
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    # A disk needs a paid instance type; free instances have no persistent
+    # storage, and production refuses to start without one.
+    plan: starter
+    region: oregon
+    healthCheckPath: /api/health
+    numInstances: 1
+
+    # Production will not start without DATA_DIR pointing at real storage.
+    # That guard is what stops records from being written into the container
+    # filesystem and lost on the next deploy.
+    disk:
+      name: slate-store
+      mountPath: /data
+      sizeGB: 1
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATA_DIR
+        value: /data
+
+      # Identity. Without these every workspace request answers 503; there is
+      # no fallback to open access.
+      - key: CLERK_PUBLISHABLE_KEY
+        sync: false
+      - key: CLERK_SECRET_KEY
+        sync: false
+      # The deployed origin, e.g. https://slate.onrender.com or the custom
+      # domain. Set it once the service has a URL.
+      - key: CLERK_AUTHORIZED_PARTIES
+        sync: false
+      # Verified emails eligible for NEW consultant accounts, comma-separated.
+      # It never promotes or re-enables an existing account.
+      - key: SLATE_CLERK_ADMIN_EMAILS
+        sync: false
+
+      # Drafting and city research. The app serves without it; only those two
+      # features stop.
+      - key: ANTHROPIC_API_KEY
+        sync: false
+
+      # Shown to candidates who cannot proceed on their own.
+      - key: SLATE_SUPPORT_EMAIL
+        sync: false

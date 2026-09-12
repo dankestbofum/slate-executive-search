@@ -12,16 +12,6 @@ const DATA_DIR = process.env.DATA_DIR
   || process.env.RAILWAY_VOLUME_MOUNT_PATH
   || path.join(__dirname, '..', 'data');
 const DATA_FILE = path.join(DATA_DIR, 'slate.json');
-// Session length. Configurable so the county can set its own, with a ceiling
-// that cannot be raised by configuration: a cookie that outlives the
-// engagement is not a session, it is a standing key.
-const SESSION_MAX_DAYS = 30;
-const SESSION_DAYS = Math.min(
-  Math.max(Number(process.env.SLATE_SESSION_DAYS) || 14, 1),
-  SESSION_MAX_DAYS
-);
-const SESSION_MS = SESSION_DAYS * 24 * 60 * 60 * 1000;
-
 if (isProd && !process.env.DATA_DIR && !process.env.RAILWAY_VOLUME_MOUNT_PATH) {
   console.error('Slate: production needs a persistent disk. Set DATA_DIR or attach a volume.');
   process.exit(1);
@@ -186,7 +176,7 @@ function releaseWriterLock(){
  * newer release is refused outright: rolling the application back onto a store
  * it does not understand is how a rollback turns into data loss.
  * ------------------------------------------------------------------ */
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 function removeLegacyPins(store){
   const users = [...(store.users || []),
@@ -204,7 +194,10 @@ const MIGRATIONS = [
   store => { store.archivedSearches ||= []; },
   // 1 -> 2: email-only accounts. The version prevents older PIN-based builds
   // from opening a store whose credentials have been removed.
-  removeLegacyPins
+  removeLegacyPins,
+  // 2 -> 3: Clerk holds the session. Slate's own session table is dropped, so
+  // an older build cannot open this store and honour a cookie nobody issues.
+  store => { delete store.sessions; }
 ];
 
 function runMigrations(store){
@@ -246,21 +239,15 @@ function load(){
   requireWritableDataDir();
   claimWriterLock();
   if (!fs.existsSync(DATA_FILE)) {
-    const db = { schemaVersion: SCHEMA_VERSION, users: seedUsers(), sessions: {}, searches: [], seq: 0 };
+    const db = { schemaVersion: SCHEMA_VERSION, users: seedUsers(), searches: [], seq: 0 };
     // A fresh store goes through the same path as an existing one, so the
-    // shared team sign-in is never a first-boot-only accident.
+    // backfills below are never a first-boot-only accident.
     migrate(db);
     save(db);
     return db;
   }
   backup.ensureDaily(DATA_DIR);
   const loaded = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
-  // Backfill sessions written before `exp` existed, so every session object
-  // always carries it and callers never need a per-request fallback.
-  for (const [id, sess] of Object.entries(loaded.sessions || {})) {
-    if (!sess.exp) sess.exp = Date.parse(sess.at || '') + SESSION_MS;
-    if (!Number.isFinite(sess.exp) || sess.exp <= Date.now()) delete loaded.sessions[id];
-  }
   runMigrations(loaded);
   migrate(loaded);
   save(loaded);
@@ -422,9 +409,6 @@ function pruneOrphanCommittee(){
   );
   if (!orphans.size) return 0;
   db.users = db.users.filter(u => !orphans.has(u.id));
-  for (const [sid, sess] of Object.entries(db.sessions)) {
-    if (orphans.has(sess.userId)) delete db.sessions[sid];
-  }
   return orphans.size;
 }
 
@@ -638,27 +622,13 @@ function findUserByEmail(email){
 }
 
 /**
- * Sessions belonging to one account.
- *
- * Every path that weakens or withdraws an account's authority calls this.
- * Disabling an account has to take effect now, not
- * whenever a fourteen-day cookie happens to lapse.
- */
-function revokeSessions(userId){
-  let n = 0;
-  for (const [id, sess] of Object.entries(db.sessions || {})) {
-    if (sess.userId === userId) { delete db.sessions[id]; n += 1; }
-  }
-  return n;
-}
-
-/**
  * Disable or restore an account without deleting it.
  *
  * Deleting would break attribution: history records who made each decision,
  * and a search record has to stay readable after someone leaves. A disabled
- * account keeps its identity, loses its access immediately, and can be
- * restored if the person returns.
+ * account keeps its identity and can be restored if the person returns. Access
+ * ends on the next request: every one of them resolves the Clerk identity back
+ * to this account, and a disabled account is refused there.
  */
 function setDisabled(user, disabled, actor){
   if (!user) return null;
@@ -666,7 +636,6 @@ function setDisabled(user, disabled, actor){
     user.disabled = true;
     user.disabledAt = now();
     user.disabledBy = actor || 'operator';
-    revokeSessions(user.id);
   } else {
     delete user.disabled;
     delete user.disabledAt;
@@ -696,7 +665,7 @@ function createUser({ name, email, title, role }){
 module.exports = {
   PHASES, STEPS, STAFF_STEPS, STAFF_STAGES, PACKAGES, PACKAGE_ORDER, DEFAULT_PACKAGE, COMPARE, COMPARE_BANDS, packageOf, stepsOf,
   staffRecord,
-  REVIEW_STEPS, reviewed, nid, now, persist, DATA_DIR, SESSION_MS, SESSION_DAYS, SESSION_MAX_DAYS,
+  REVIEW_STEPS, reviewed, nid, now, persist, DATA_DIR,
   get db(){ return db; },
   publicUser,
   decorate,
@@ -708,7 +677,6 @@ module.exports = {
   runMigrations,
   releaseWriterLock,
   LOCK_FILE,
-  revokeSessions,
   setDisabled,
   isDisabled,
   initials,

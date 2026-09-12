@@ -8,6 +8,7 @@
 
 const assert = require('assert');
 const exporter = require('../server/export');
+const identity = require('./identity');
 
 const BASE = process.env.SLATE_URL || 'http://127.0.0.1:4173';
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
@@ -19,48 +20,41 @@ async function check(name, fn) {
   catch (error) { failed += 1; console.error('FAIL  Export: ' + name + '\n      ' + error.message); }
 }
 
-async function login(email, pin) {
-  const res = await fetch(BASE + '/api/login', {
-    method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ email, pin })
-  });
-  assert.strictEqual(res.status, 200, 'login for ' + email + ' returned ' + res.status);
-  return res.headers.getSetCookie().map(c => c.split(';')[0]).join('; ');
-}
+const sign = identity.signer();
 
-function api(path, { cookie, method = 'GET', body, revision } = {}) {
-  const headers = { ...JSON_HEADERS };
-  if (cookie) headers.cookie = cookie;
+function api(path, { auth, method = 'GET', body, revision } = {}) {
+  const headers = { ...JSON_HEADERS, ...auth };
   if (revision !== undefined) headers['if-match'] = String(revision);
   return fetch(BASE + path, { method, headers, body: body ? JSON.stringify(body) : undefined });
 }
 
-const revisionOf = async (id, cookie) =>
-  String((await (await api('/api/searches/' + id, { cookie })).json()).revision);
+const revisionOf = async (id, auth) =>
+  String((await (await api('/api/searches/' + id, { auth })).json()).revision);
 
 (async () => {
-  const abe = await login('abe@slate.local', '2468');
+  const abe = sign.headers('abe@slate.local');
 
   // A search with enough on it to be worth exporting.
   const search = await (await api('/api/searches', {
-    cookie: abe, method: 'POST',
+    auth: abe, method: 'POST',
     body: { client: 'Export County', position: 'County Administrator', jurisdictionType: 'county', state: 'AZ' }
   })).json();
   const id = search.id;
 
   const withCandidate = await (await api('/api/searches/' + id + '/candidates', {
-    cookie: abe, method: 'POST', revision: await revisionOf(id, abe),
+    auth: abe, method: 'POST', revision: await revisionOf(id, abe),
     body: { name: 'Dana Ruiz', org: 'Example County', email: 'dana@example.gov', yrs: 12 }
   })).json();
   const inviteToken = withCandidate.candidates[0].invite;
 
-  const memberResponse = await (await api('/api/searches/' + id + '/members', {
-    cookie: abe, method: 'POST', revision: await revisionOf(id, abe),
+  await api('/api/searches/' + id + '/members', {
+    auth: abe, method: 'POST', revision: await revisionOf(id, abe),
     body: { name: 'Rose Committee', email: 'rose-export@example.com', seat: 'committee' }
-  })).json();
-  const member = await login('rose-export@example.com', memberResponse.pin);
+  });
+  const member = sign.headers('rose-export@example.com');
 
-  const bundleOf = async (cookie = abe) => {
-    const res = await api('/api/searches/' + id + '/export', { cookie });
+  const bundleOf = async (auth = abe) => {
+    const res = await api('/api/searches/' + id + '/export', { auth });
     assert.strictEqual(res.status, 200, 'export returned ' + res.status);
     return res.json();
   };
@@ -72,12 +66,12 @@ const revisionOf = async (id, cookie) =>
   });
 
   await check('a committee member cannot export a search they sit on', async () => {
-    const res = await api('/api/searches/' + id + '/export', { cookie: member });
+    const res = await api('/api/searches/' + id + '/export', { auth: member });
     assert.ok(res.status === 403 || res.status === 404, 'expected refusal, got ' + res.status);
   });
 
   await check('a consultant can export', async () => {
-    const res = await api('/api/searches/' + id + '/export', { cookie: abe });
+    const res = await api('/api/searches/' + id + '/export', { auth: abe });
     assert.strictEqual(res.status, 200);
     assert.match(res.headers.get('content-disposition') || '', /attachment/);
   });
@@ -110,7 +104,7 @@ const revisionOf = async (id, cookie) =>
 
   await check('the export contains no other search', async () => {
     const other = await (await api('/api/searches', {
-      cookie: abe, method: 'POST', body: { client: 'Unrelated Export County', position: 'County Administrator' }
+      auth: abe, method: 'POST', body: { client: 'Unrelated Export County', position: 'County Administrator' }
     })).json();
     const text = JSON.stringify(await bundleOf());
     assert.ok(!text.includes(other.id), 'an unrelated search id appeared in the export');
@@ -141,7 +135,7 @@ const revisionOf = async (id, cookie) =>
   /* ---------------- It reconciles to the search ---------------- */
 
   await check('the export reconciles to the live search', async () => {
-    const live = await (await api('/api/searches/' + id, { cookie: abe })).json();
+    const live = await (await api('/api/searches/' + id, { auth: abe })).json();
     const bundle = await bundleOf();
 
     assert.strictEqual(bundle.search.id, live.id);
@@ -210,7 +204,7 @@ const revisionOf = async (id, cookie) =>
   /* ---------------- Readable without the app ---------------- */
 
   await check('the text report is self-contained and readable', async () => {
-    const res = await api('/api/searches/' + id + '/export?format=text', { cookie: abe });
+    const res = await api('/api/searches/' + id + '/export?format=text', { auth: abe });
     assert.strictEqual(res.status, 200);
     assert.match(res.headers.get('content-type') || '', /text\/plain/);
     const text = await res.text();

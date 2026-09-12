@@ -15,9 +15,18 @@ const os = require('os');
 const path = require('path');
 const fs = require('fs');
 const { defineConfig, devices } = require('@playwright/test');
+const identity = require('./tests/identity');
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slate-browser-'));
 const PORT = 4188;
+
+// The suite signs its own Clerk sessions, which the server verifies for real.
+// The runner and its workers each load this file in their own process, so the
+// throwaway key pair is written once and read back rather than regenerated.
+const keyFile = path.join(os.tmpdir(), 'slate-browser-clerk-v1.json');
+if (!fs.existsSync(keyFile)) fs.writeFileSync(keyFile, JSON.stringify(identity.serverEnv()));
+const fixture = JSON.parse(fs.readFileSync(keyFile, 'utf8'));
+process.env.SLATE_TEST_CLERK_KEY = fixture.privateKey;
 
 module.exports = defineConfig({
   testDir: './tests/browser',
@@ -50,11 +59,11 @@ module.exports = defineConfig({
     timeout: 30000,
     env: {
       NODE_ENV: 'test',
+      ...fixture.server,
       PORT: String(PORT),
       HOST: '127.0.0.1',
       DATA_DIR: dataDir,
       ANTHROPIC_API_KEY: '',
-      SHOW_DEMO_LOGINS: 'true',
       SLATE_SUPPORT_EMAIL: 'recruitment@example.gov',
       SLATE_SUPPORT_HOURS: 'Weekdays 8am-5pm Arizona time'
     }

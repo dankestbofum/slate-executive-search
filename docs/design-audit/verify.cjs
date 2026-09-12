@@ -3,10 +3,11 @@ const {chromium}=require('@playwright/test');
 const AxeBuilder=require('@axe-core/playwright').default;
 const fs=require('fs');
 const path=require('path');
+const {installClerk}=require('./identity.cjs');
 (async()=>{
  const browser=await chromium.launch();
  const context=await browser.newContext({viewport:{width:1440,height:1000}});
- await context.request.post('http://127.0.0.1:4190/api/login',{data:{email:'team@slate.local'}});
+ await installClerk(context,{email:'team@slate.local'});
  const page=await context.newPage();await page.goto('http://127.0.0.1:4190');await page.waitForLoadState('networkidle');
  await page.locator('[data-open]').first().click();await page.getByRole('heading',{name:'City Manager',exact:true}).waitFor();
  await page.setViewportSize({width:390,height:844});

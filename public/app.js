@@ -625,11 +625,12 @@ function stepNextCard(view){
 }
 
 async function api(path, opts={}){
+  const token = path.startsWith('/api/apply/') ? null : await window.SlateAuth.token();
   const writesSearch = opts.method && opts.method !== 'GET' && state.search && path.startsWith('/api/searches/'+state.search.id);
   const res = await fetch(path, {
     credentials:'include',
     ...opts,
-    headers:{ 'content-type':'application/json', ...(writesSearch ? { 'if-match':String(state.search.revision) } : {}), ...(opts.headers||{}) },
+    headers:{ 'content-type':'application/json', ...(token ? { authorization:'Bearer ' + token } : {}), ...(writesSearch ? { 'if-match':String(state.search.revision) } : {}), ...(opts.headers||{}) },
     body: opts.body ? JSON.stringify(opts.body) : undefined
   });
   const data = await res.json().catch(() => ({}));
@@ -1177,7 +1178,7 @@ async function loadHealth(){
     const h = await fetch('/api/config').then(r => r.json());
     state.health = h;
   } catch {
-    state.health = state.health || { ok:false, demoLogins:false, accounts:[] };
+    state.health = state.health || { ok:false };
   }
 }
 
@@ -1188,7 +1189,7 @@ async function loadMe(){
     state.users = me.users || [];
     state.health = Object.assign({}, state.health, me.health);
     return true;
-  } catch { state.user = null; return false; }
+  } catch (error) { state.user = null; state.authError = window.SlateAuth.signedIn ? error.message : null; return false; }
 }
 async function loadSearches(){ state.searches = await api('/api/searches'); state.searchesError = null; }
 
@@ -1354,7 +1355,7 @@ function shell(body){
           <button type="button" data-theme="auto">Auto</button>
           <button type="button" data-theme="dark">Dark</button>
         </div>
-        <button class="btn btn--ghost btn--sm" data-act="logout">Leave workspace</button>
+        <div class="auth-profile"><div data-clerk-user></div><button class="btn btn--ghost btn--sm" data-act="logout">Sign out</button></div>
       </div>
     </nav>
     <main class="page" id="main" tabindex="-1">
@@ -1416,20 +1417,23 @@ function crumbs(){
 }
 
 function vGate(){
+  const controls = window.SlateAuth.signedIn
+    ? '<div class="auth-profile"><div data-clerk-user></div><button class="btn btn--ghost" data-act="logout">Sign out</button></div>'
+    : `<div class="row"><button class="btn btn--ghost" data-act="sign-in" ${state.authError?'disabled':''}>Sign in</button><button class="btn btn--primary" data-act="sign-up" ${state.authError?'disabled':''}>Sign up</button></div>`;
   return `<div class="gate">
     <header class="gate__bar">
       <div class="login__brand">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="u-accent" aria-hidden="true"><path d="M4 20h16M6 20V9l6-4 6 4v11M10 20v-5h4v5"/></svg>
         <span class="rail__name">Slate</span>
       </div>
-      <button class="btn btn--primary" data-act="start">Start</button>
+      ${controls}
     </header>
     <div class="wrap gate__hero">
       <h1 class="t-title">A guided executive search</h1>
       <p class="t-body">Every engagement seats the search committee, asks each member what they are looking for, and builds the candidate profile from their answers. Recruiting, screening, and interviews all run against that profile.</p>
     </div>
     <div class="wrap gate__table stack">
-      <div class="row"><button class="btn btn--primary" data-act="start">Start</button></div>
+      <p class="t-body">Sign in to work with your search team. New here? Create an account using the email on your invitation.</p>${state.authError ? `<p role="alert">${esc(state.authError)}</p><button class="btn" data-act="auth-retry">Try again</button>` : ''}
     </div>
   </div>`;
 }
@@ -4335,7 +4339,9 @@ function paint(root){
   const scroll = window.scrollY;
   tipSeq = 0;
   hideTip();
+  window.SlateAuth.unmount();
   root.innerHTML = page();
+  window.SlateAuth.mount(root);
   applyDynamicStyles(root);
   markScrollableRegions(root);
   crumbs();
@@ -4837,22 +4843,14 @@ document.addEventListener('click', async e => {
     });
     return;
   }
-  if (act==='start'){
-    if (state.busy) return;
-    await withBusy(async () => {
-      const out = await api('/api/start', { method:'POST', body:{} });
-      state.user = out.user;
-      await loadMe();
-      await loadSearches();
-      await go('home');
-    }, waitSave('Opening workspace'));
-    return;
-  }
+  if (act==='sign-in') { window.SlateAuth.signIn(); return; }
+  if (act==='sign-up') { window.SlateAuth.signUp(); return; }
+  if (act==='auth-retry') { location.reload(); return; }
   if (act==='logout'){
     showWait(waitSave('Leaving workspace'));
     try {
-      await api('/api/logout', { method:'POST', body:{} });
-      state.user = null; state.search = null; state.view = 'home';
+      await window.SlateAuth.signOut();
+      state.user = null; state.search = null; state.searches = []; state.users = []; state.view = 'home';
     } catch (err) { toast(err.message); }
     finally { hideWait(); render(); }
     return;
@@ -5455,6 +5453,17 @@ window.addEventListener('popstate', async event => {
     render();
     return;
   }
+  try {
+    await window.SlateAuth.init(state.health?.auth, () => {
+      state.user = null; state.search = null; state.searches = []; state.users = []; state.dirty = false;
+      render();
+      location.reload();
+    });
+  } catch (error) {
+    state.authError = error.message;
+    render();
+    return;
+  }
   if (await loadMe()){
     await refreshSearches();
     navDepth = Number(history.state?.slateDepth) || 0;
@@ -5466,6 +5475,7 @@ window.addEventListener('popstate', async event => {
 
 // Warn before losing unsaved work, including candidate questionnaires.
 document.addEventListener('input', e => {
+  if (!e.target.closest('#app')) return;
   // Filter controls change what is listed, not what is saved. Treating them as
   // unsaved work would ask the user to confirm leaving a page they only
   // searched in.

@@ -10,11 +10,15 @@
 // rather than by opening every file.
 
 const { test, expect } = require('@playwright/test');
+const { installClerk } = require('./clerk');
+
+// Every test here works as a signed-in consultant. The session is a real one
+// as far as the server is concerned; only Clerk's own script is stubbed.
+test.beforeEach(async ({ page }) => { await installClerk(page); });
 
 async function workspace(page) {
   await page.goto('/');
   await page.waitForLoadState('networkidle');
-  await page.getByRole('button', { name: 'Start', exact: true }).first().click();
   await expect(page.getByRole('button', { name: /open a new search/i }).first()).toBeVisible({ timeout: 10000 });
 }
 

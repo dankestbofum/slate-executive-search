@@ -8,8 +8,10 @@
 
 const assert = require('assert');
 const telemetry = require('../server/telemetry');
+const identity = require('./identity');
 
 const BASE = process.env.SLATE_URL || 'http://127.0.0.1:4173';
+const auth = identity.signer().headers('abe@slate.local');
 let passed = 0;
 let failed = 0;
 
@@ -56,13 +58,8 @@ async function check(name, fn) {
   });
 
   await check('core work stays usable without AI', async () => {
-    const login = await fetch(BASE + '/api/login', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'abe@slate.local', pin: '2468' })
-    });
-    const cookie = login.headers.getSetCookie().map(c => c.split(';')[0]).join('; ');
     const made = await fetch(BASE + '/api/searches', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', cookie },
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...auth },
       body: JSON.stringify({ client: 'Monitoring County', position: 'County Administrator' })
     });
     assert.strictEqual(made.status, 200, 'a search could not be opened without an API key');
@@ -165,19 +162,14 @@ async function check(name, fn) {
   /* ---------------- Candidate support ---------------- */
 
   await check('a real candidate page carries a support and accommodation contact', async () => {
-    const login = await fetch(BASE + '/api/login', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'abe@slate.local', pin: '2468' })
-    });
-    const cookie = login.headers.getSetCookie().map(c => c.split(';')[0]).join('; ');
-    const json = { 'Content-Type': 'application/json', cookie };
+    const json = { 'Content-Type': 'application/json', ...auth };
 
     const search = await (await fetch(BASE + '/api/searches', {
       method: 'POST', headers: json,
       body: JSON.stringify({ client: 'Support County', position: 'County Administrator' })
     })).json();
 
-    const revision = String((await (await fetch(BASE + '/api/searches/' + search.id, { headers: { cookie } })).json()).revision);
+    const revision = String((await (await fetch(BASE + '/api/searches/' + search.id, { headers: auth })).json()).revision);
     const withCandidate = await (await fetch(BASE + '/api/searches/' + search.id + '/candidates', {
       method: 'POST', headers: { ...json, 'if-match': revision },
       body: JSON.stringify({ name: 'Support Test Candidate' })

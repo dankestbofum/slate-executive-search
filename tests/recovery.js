@@ -4,7 +4,7 @@
 //
 // The central check is the restore drill: take a snapshot, copy it somewhere
 // that does not share the volume, restore that copy into an empty environment,
-// and confirm the search survived intact while old sessions did not.
+// and confirm the search survived intact while a pre-Clerk session table did not.
 
 const assert = require('assert');
 const fs = require('fs');
@@ -107,8 +107,8 @@ check('an independently copied snapshot restores a complete search', () => {
   assert.ok(fs.existsSync(photo), 'the brochure image was not restored');
   assert.strictEqual(fs.readFileSync(photo, 'utf8'), 'brochure image bytes');
 
-  // Old sessions must not come back to life.
-  assert.deepStrictEqual(store.sessions, {}, 'a session survived the restore');
+  // A session table written before Clerk must not come back to life.
+  assert.strictEqual(store.sessions, undefined, 'a session table survived the restore');
 
   console.log('      drill: restored in ' + elapsed + 'ms from a copy outside the source volume');
 });

@@ -24,10 +24,10 @@ The server suite runs against temporary data directories with an empty
 
 | File | Checks | Covers |
 |---|---|---|
-| `bughunt.js` | 243 | Baseline API behaviour |
+| `bughunt.js` | 245 | Baseline API behaviour |
 | `jurisdictions.js` | 30 | County setup, discovery, fact verification (DEP-07) |
-| `security.js` | 26 | Headers, CSRF, bounds, SSRF, log redaction (DEP-03) |
-| `roles.js` | 24 | Permission matrix, credentials, sessions (DEP-02) |
+| `security.js` | 28 | Headers, CSRF, bounds, SSRF, log redaction (DEP-03) |
+| `roles.js` | 24 | Permission matrix, identity, withdrawal of access (DEP-02) |
 | `candidates.js` | 20 | Receipts, drafts, documents, communications (DEP-08) |
 | `disposition.js` | 19 | Outcomes, closeout, reopening (DEP-09) |
 | `storage.js` | 17 | Media commit, schema, single writer (DEP-04) |

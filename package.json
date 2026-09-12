@@ -18,7 +18,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
-    "cookie-parser": "^1.4.7",
+    "@clerk/express": "^2.1.67",
     "dotenv": "^17.2.1",
     "express": "^5.1.0",
     "undici": "^7.29.0"

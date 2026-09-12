@@ -50,7 +50,7 @@ function restore(source, destination) {
   if (fs.existsSync(destination) && fs.readdirSync(destination).length) throw new Error('Restore requires a new or empty destination. Stop the app before switching DATA_DIR.');
   fs.mkdirSync(destination, { recursive: true });
   const store = JSON.parse(fs.readFileSync(path.join(source, 'slate.json'), 'utf8'));
-  store.sessions = {}; // Never resurrect old authenticated sessions.
+  delete store.sessions; // Never resurrect sessions from a pre-Clerk store.
   fs.writeFileSync(path.join(destination, 'slate.json'), JSON.stringify(store, null, 2));
   if (fs.existsSync(path.join(source, 'media'))) fs.cpSync(path.join(source, 'media'), path.join(destination, 'media'), { recursive: true });
   return destination;
