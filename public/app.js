@@ -1291,9 +1291,11 @@ function railDest(d){
 // working area is destinations rather than identity.
 function railAccount(u, s){
   const seat = s && you().seat ? SEAT[you().seat]?.label || '' : '';
+  const title = String(u.title || '').trim();
+  const detail = title && seat && title.toLowerCase() !== seat.toLowerCase() ? title + ' · ' + seat : title || seat;
   return `<div class="acct">
-    <span class="acct__init">${esc(u.init)}</span>
-    <span class="acct__id"><span class="acct__nm">${esc(u.name)}</span><span class="acct__rl">${esc(u.title)}${seat?' · '+esc(seat):''}</span></span>
+    <div class="acct__avatar" data-clerk-user></div>
+    <span class="acct__id"><span class="acct__nm">${esc(u.name)}</span>${detail?`<span class="acct__rl">${esc(detail)}</span>`:''}</span>
   </div>`;
 }
 
@@ -1324,6 +1326,7 @@ function shell(body){
       </div>
       <div class="rail__group"><div class="rail__label">Workspace</div>
         <button class="rail__link" data-go="home" ${!s && state.view==='home'?'aria-current="page"':''}>Home</button>
+        ${!isCommittee() ? '<button class="rail__link" data-go="new" '+(state.view==='new'?'aria-current="page"':'')+'>New search</button>' : ''}
         ${!isCommittee() ? '<button class="rail__link" data-go="archives" '+(state.view==='archives'?'aria-current="page"':'')+'>Archived searches</button>' : ''}
         ${!isCommittee() && packages().length ? `<button class="rail__link" data-go="packages" ${state.view==='packages'?'aria-current="page"':''}>Packages</button>` : ''}
       </div>
@@ -1355,7 +1358,6 @@ function shell(body){
           <button type="button" data-theme="auto">Auto</button>
           <button type="button" data-theme="dark">Dark</button>
         </div>
-        <div class="auth-profile"><div data-clerk-user></div><button class="btn btn--ghost btn--sm" data-act="logout">Sign out</button></div>
       </div>
     </nav>
     <main class="page" id="main" tabindex="-1">
@@ -1538,6 +1540,7 @@ function vHome(){
   const pickup = list.find(s => s.progress?.next);
   const owed = list.filter(s => s.intakeOpen && s.seat && !s.intakeMine);
   const manage = canDelete && Boolean(state.open.homemanage);
+  const managed = list.filter(s => s.seat === 'manager');
 
   const rows = shown.map(s => {
     const n = s.progress?.next;
@@ -1602,6 +1605,14 @@ function vHome(){
           u.role==='consultant' ? `<button class="btn btn--primary" data-go="new">Open a new search</button>` : '')}</div>`}</div>
       </div>
       <div class="row"><button class="btn btn--secondary btn--sm" data-go="archives">Archived searches</button></div>
+      ${canDelete && managed.length ? `<div class="spec">
+        <div class="spec__bar">Start fresh</div>
+        <div class="spec__body stack stack--tight">
+          <p>Archive the ${managed.length === 1 ? 'search you manage' : managed.length+' searches you manage'} and open a new search. Your account and Clerk login stay active. Other consultants' searches stay on the book.</p>
+          <p class="t-small">Archived searches leave the active workspace for everyone on their committees. You can restore them from Archived searches.</p>
+          <div class="row"><button type="button" class="btn btn--secondary btn--sm" data-act="start-fresh">Start fresh</button></div>
+        </div>
+      </div>` : ''}
     </div></div>`);
 }
 
@@ -4918,6 +4929,23 @@ document.addEventListener('click', async e => {
     const already = shown.length > 0 && shown.every(s => picked.includes(s.id));
     state.picked = already ? [] : shown.map(s => s.id);
     render();
+    return;
+  }
+  if (act==='start-fresh'){
+    const managed = (state.searches || []).filter(s => s.seat === 'manager');
+    if (!managed.length) return;
+    const names = managed.map(s => '- '+(s.client || s.no || 'Untitled')+(s.position ? ' / '+s.position : '')).join('\n');
+    if (!confirm('Archive these '+managed.length+' managed search'+(managed.length===1?'':'es')+' and start a new search?\n\n'+names+'\n\nThey will leave the active workspace for everyone on their committees. Your Clerk login stays active. You can restore the searches from Archived searches.')) return;
+    await withBusy(async () => {
+      const out = await api('/api/account/start-fresh', { method:'POST', body:{ ids:managed.map(s => s.id) } });
+      state.search = null;
+      state.picked = [];
+      state.homeQ = '';
+      state.open.homemanage = false;
+      await loadSearches();
+      toast('Archived '+out.archived+' search'+(out.archived===1?'':'es')+'. Your account is ready for a new search.');
+      await go('new');
+    });
     return;
   }
   if (act==='delete-searches'){

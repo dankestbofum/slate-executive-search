@@ -677,6 +677,28 @@ function removeSearch(search){
   db.db.searches = db.db.searches.filter(s => s.id !== search.id);
 }
 
+app.post('/api/account/start-fresh', requireUser, (req, res) => {
+  if (!db.isConsultant(req.user)) return res.status(403).json({ error:'Only a consultant can archive managed searches.' });
+  const ids = req.body?.ids;
+  if (!Array.isArray(ids) || !ids.length || ids.some(id => typeof id !== 'string') || new Set(ids).size !== ids.length) {
+    return res.status(400).json({ error:'Confirm the searches to archive.' });
+  }
+  // Confirm exactly the managed searches shown to this person. New searches or
+  // a reassigned manager must prompt a fresh review, never expand the reset.
+  const searches = db.db.searches.filter(s => db.accountManager(s)?.userId === req.user.id);
+  if (searches.length !== ids.length || searches.some(s => !ids.includes(s.id))) {
+    return res.status(409).json({ error:'Your managed searches changed. Refresh Home and review them before starting fresh.' });
+  }
+  for (const s of searches) {
+    db.touch(s, req.user, 'archived the search to start fresh');
+    removeSearch(s);
+  }
+  // Keep account identities so a committee member signing in while their
+  // search is archived cannot create a conflicting account on restoration.
+  db.persist();
+  res.json({ ok:true, archived:searches.length, ids });
+});
+
 app.get('/api/archives', requireUser, (req, res) => {
   if (!db.isConsultant(req.user)) return res.status(403).json({ error:'A consultant manages archived searches.' });
   res.json(db.db.archivedSearches.map(s => ({ id:s.id, no:s.no, client:s.client, position:s.position, archivedAt:s.archivedAt })));
