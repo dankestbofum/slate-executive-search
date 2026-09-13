@@ -133,12 +133,19 @@ are configured. An alert with no named recipient is not monitoring.
 write p95 88 ms against a 1,000 ms target, 473 req/s, no unexpected responses.
 On that evidence the JSON store is not the constraint at pilot size.
 
-It did surface the thing to watch: **history is the growth, and each entry is a
-full snapshot** of criteria, scores and notes rather than a delta, so it grows
-faster than linearly as scoring proceeds. 255 score saves produced 217 KB of
-history. It is monitored and it is not bounded by any policy. The measurement
-also needs repeating on Render, where a network disk changes the cost of the
-whole-file write this design performs on every save.
+It surfaced the thing to watch and that has since been fixed: **history was the
+growth, and each entry was a full snapshot** of criteria, scores and notes
+rather than a delta, so it grew faster than linearly as scoring proceeded — 255
+score saves produced 217 KB of history. A scoring entry now records only what
+that save replaced. The same measurement, with more writes, puts history at
+16.5 KB and the store at 186 KB, and read p95 improved from 57 ms to 42 ms.
+Nothing left the record: what did not change is recorded where it did, and the
+export labels every entry as a delta or a complete snapshot.
+
+Growth is now bounded. **Retention is not** — how long any of it is kept is
+still the county records officer's decision. And the measurement needs
+repeating on Render, where a network disk changes the cost of the whole-file
+write this design performs on every save.
 
 **Rollback:** the path is defined and partly enforced — the store carries a
 schema version, and a store written by a newer release is refused rather than

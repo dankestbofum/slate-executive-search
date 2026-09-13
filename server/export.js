@@ -256,7 +256,17 @@ function build(search, { viewer, users, dataDir, release }) {
       actor: attribute(entry, lookupUser),
       body: entry.body ?? null,
       priorScores: entry.scores ?? undefined,
-      priorCriteria: entry.criteria ?? undefined
+      priorNotes: entry.notesBy ?? undefined,
+      priorCriteria: entry.criteria ?? undefined,
+      // Which profile the marks were given against, so a scoring entry that
+      // does not carry its own copy of the criteria can still be read against
+      // the profile entry for the same revision.
+      profileRevision: entry.revision ?? undefined,
+      // A delta entry records what that one save replaced. A reader
+      // reconstructing the full picture starts from the profile revision's
+      // baseline and applies the deltas after it; an entry without this flag
+      // carries the complete map as it stood.
+      scope: entry.kind === 'scores' ? (entry.delta ? 'changed-only' : 'complete-snapshot') : undefined
     })),
 
     activity: (search.activity || []).map(entry => ({

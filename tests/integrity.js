@@ -95,6 +95,48 @@ async function request(url, method = 'GET', body, auth, revision) {
   check('history preserves sealed score privacy between consultants', () => {
     for (const entry of privateHistory) if (entry.scores) assert.equal(entry.scores[login.body.user.id], undefined);
   });
+
+  /* --- history records the change, not a copy of everything (DEP-04) ------- */
+  //
+  // A scoring entry used to carry every reviewer's marks on every candidate,
+  // plus the criteria, on every save. That is quadratic in a panel's work and
+  // it is what made history 217 KB against 3.5 KB of scores in the load
+  // measurement. These pin the new shape and, more importantly, pin that the
+  // record is still complete.
+  {
+    const mine = login.body.user.id;
+    const entries = (await request(p + '/history', 'GET', undefined, auth)).body.history
+      .filter(h => h.kind === 'scores');
+    const latest = entries[entries.length - 1];
+
+    check('a scoring entry records what that save replaced, not the whole panel', () => {
+      assert.ok(latest, 'no scoring entry was written');
+      assert.equal(latest.delta, true);
+      // The criteria are named by revision rather than copied per entry.
+      assert.equal(latest.criteria, undefined);
+      assert.ok(latest.revision >= 1);
+      // The second save changed only the note on one candidate, so that is all
+      // the entry should carry.
+      assert.deepEqual(Object.keys(latest.notesBy || {}), [mine]);
+      assert.deepEqual(Object.keys(latest.notesBy[mine]), [c.id]);
+      assert.equal(latest.notesBy[mine][c.id], 'Budget evidence');
+    });
+
+    check('an unchanged score is not copied into every later entry', () => {
+      // S1 was 5 before and after the second save, so that save's entry has no
+      // business restating it.
+      assert.equal(latest.scores?.[mine]?.[c.id], undefined,
+        'a score that did not change was copied into the entry anyway');
+    });
+
+    check('the replaced value is still on the record', () => {
+      // The first save is where S1 went from nothing to 5, and that entry is
+      // what holds the value it replaced. Nothing is lost by not repeating it.
+      const first = entries.find(e => e.scores?.[mine] && Object.hasOwn(e.scores[mine], c.id));
+      assert.ok(first, 'the save that set a score recorded no prior value for it');
+      assert.deepEqual(first.scores[mine][c.id], {});
+    });
+  }
   await write('', 'PATCH', { released:true });
   await write('/profile', 'PUT', { criteria:[{ id:'S1', kind:'skill', label:'Public engagement', weight:3 }] });
   let s = await read();

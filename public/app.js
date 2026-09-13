@@ -4676,7 +4676,8 @@ function vHistory(){
   return shell(`${head('This search','History and recovery','Previous copy and evaluations stay on file. Restoring a profile clears current scores, because they were given against the old one.')}
     <div class="band"><div class="wrap stack">
       ${entries.length ? entries.map(e => `<details class="spec"><summary class="spec__bar">${esc(e.key || e.kind)} · ${esc(e.at)} · ${esc(e.who)}</summary><div class="spec__body stack stack--tight">
-        ${e.criteria ? `<p class="t-small">Profile revision ${esc(e.revision)}</p><ul>${e.criteria.map(c => `<li>${esc(c.id)}: ${esc(c.label)} (weight ${esc(c.weight)})</li>`).join('')}</ul>` : ''}
+        ${e.revision ? `<p class="t-small">Profile revision ${esc(e.revision)}</p>` : ''}
+        ${e.criteria ? `<ul>${e.criteria.map(c => `<li>${esc(c.id)}: ${esc(c.label)} (weight ${esc(c.weight)})</li>`).join('')}</ul>` : ''}
         ${historyRecord(e)}
         ${['artifact','profile','facts'].includes(e.kind) ? `<div class="row">${withTip(`<button type="button" class="btn btn--secondary btn--sm" data-act="restore-history" data-index="${e.index}">Restore this ${e.kind==='artifact'?'copy':e.kind}</button>`,
           'Bring this saved version back as the current one. The version it replaces stays in this list.')}</div>` : ''}
@@ -4688,16 +4689,41 @@ function vHistory(){
     </div></div>`);
 }
 
+/**
+ * The criteria an entry was given against.
+ *
+ * A scoring entry no longer repeats them — `revision` names the profile, and
+ * that profile's own entry holds the list. Entries written before that change
+ * carry their own copy and keep using it.
+ */
+function historyCriteria(entry){
+  if (entry.criteria) return entry.criteria;
+  if (entry.revision && entry.revision === state.search?.profileRevision) return state.search.criteria || [];
+  const profile = (state.history?.history || []).find(e => e.kind === 'profile' && e.revision === entry.revision);
+  return profile?.criteria || [];
+}
+
 function historyRecord(entry){
   if (entry.kind === 'response') return `<p>${esc(entry.candidateName)} · ${esc(entry.reason)}</p>` + surveyRead(entry.body.survey, entry.body);
   if (entry.kind === 'scores' || entry.kind === 'profile') {
-    return Object.entries(entry.scores || {}).map(([uid, byCandidate]) => {
+    const criteria = historyCriteria(entry);
+    const rows = Object.entries(entry.scores || {}).map(([uid, byCandidate]) => {
       const name = state.users.find(u => u.id === uid)?.name || 'Former reviewer';
       return Object.entries(byCandidate).map(([cid, scores]) => {
         const candidate = (entry.candidates || state.search.candidates).find(c => c.id === cid)?.name || 'Former candidate';
-        return `<p><b>${esc(name)} · ${esc(candidate)}</b></p><ul>${Object.entries(scores).map(([id, n]) => `<li>${esc(entry.criteria?.find(c=>c.id===id)?.label || id)}: ${esc(n)}</li>`).join('')}</ul><p>${esc(entry.notesBy?.[uid]?.[cid] || '')}</p>`;
+        const marks = Object.entries(scores);
+        return `<p><b>${esc(name)} · ${esc(candidate)}</b></p>${marks.length
+          ? `<ul>${marks.map(([id, n]) => `<li>${esc(criteria.find(c=>c.id===id)?.label || id)}: ${esc(n)}</li>`).join('')}</ul>`
+          : '<p class="t-small">Not scored before this change.</p>'}<p>${esc(entry.notesBy?.[uid]?.[cid] || '')}</p>`;
       }).join('');
-    }).join('') || '<p>No scores recorded for this version.</p>';
+    }).join('');
+    // A delta entry lists what that save replaced, not the whole panel. Saying
+    // so is the difference between "these were the only scores" and "these are
+    // the ones this save changed".
+    const lede = entry.delta
+      ? '<p class="t-small">What this save replaced. Scores it did not touch are unchanged and recorded where they were last set.</p>'
+      : '';
+    return rows ? lede + rows : '<p>No scores recorded for this version.</p>';
   }
   const display = value => {
     if (value == null) return '';

@@ -142,32 +142,58 @@ TLS, no proxy, warm page cache:
 
 | Measurement | n | p50 | p95 | p99 | max |
 |---|---|---|---|---|---|
-| Add candidate, first 10 (85 KB store) | 10 | 12.1 ms | 13.6 ms | 13.6 ms | 13.6 ms |
-| Add candidate, last 10 | 10 | 15.3 ms | 16.2 ms | 16.2 ms | 16.2 ms |
-| GET search, 19 concurrent readers | 9,216 | 39.6 ms | **56.7 ms** | 62.7 ms | 433.3 ms |
-| PUT scores, 1 concurrent writer | 255 | 77.1 ms | 87.5 ms | 100.2 ms | 453.2 ms |
+| Add candidate, first 10 (85 KB store) | 10 | 12.0 ms | 13.6 ms | 13.6 ms | 13.6 ms |
+| Add candidate, last 10 | 10 | 14.6 ms | 15.4 ms | 15.4 ms | 15.4 ms |
+| GET search, 19 concurrent readers | 11,095 | 34.0 ms | **41.9 ms** | 46.9 ms | 462.0 ms |
+| PUT scores, 1 concurrent writer | 307 | 62.3 ms | 70.6 ms | 126.2 ms | 480.0 ms |
 
-473 req/s sustained, no unexpected responses, no revision conflicts. A second
-run on the same machine reproduced it within a few milliseconds (read p95 55 ms,
-496 req/s), so the figures are not a single lucky sample — but they are still
-two samples on one machine.
+569 req/s sustained, no unexpected responses, no revision conflicts.
 
-**Read p95 of 57 ms against the checklist's 1,000 ms target.** On this hardware
+These are the figures **after** the history fix below. The first run, before it,
+read p95 56.7 ms and wrote 255 scores at p95 87.5 ms for 473 req/s; a repeat of
+that run reproduced within a few milliseconds, so neither set is a single lucky
+sample — but both are samples on one machine.
+
+**Read p95 of 42 ms against the checklist's 1,000 ms target.** On this hardware
 the JSON store is not close to being the constraint at pilot size, and the
 single-writer model costs a score save under 100 ms while nineteen readers are
 hitting the same file.
 
 ### What the run found anyway
 
-**History dominates growth, and each entry is a full snapshot.** 255 score saves
-took the store from 85 KB to 823 KB. The search itself accounts for 300 KB of
-that, and 217 KB of the search is 101 history entries — roughly 4 KB each,
-because every entry snapshots the whole `criteria`, `scores` and `notesBy`
-state rather than a delta. That per-entry cost *rises as scoring proceeds*, so
-history grows faster than linearly in the number of edits. At full pilot scale —
-15 scorers across 100 candidates — this is the number to watch, and it is what
-DEP-04's instruction to bound history growth is about. It is monitored
-(`/api/ready` reports store size) and it is not yet bounded by any policy.
+**History dominated growth, and each entry was a full snapshot — now fixed.**
+The first run put 255 score saves at 823 KB, of which 217 KB was 101 history
+entries, roughly 4 KB each: every entry copied the whole `criteria`, `scores`
+and `notesBy` state rather than what changed. That per-entry cost *rose as
+scoring proceeded*, so history grew faster than linearly in the number of edits
+— quadratic in a panel's work, and precisely what DEP-04's instruction to bound
+history growth is about.
+
+A scoring entry now records only the reviewer-and-candidate pairs that actually
+changed, and names the profile revision instead of copying the criteria. The
+same measurement, with *more* writes:
+
+| | before | after |
+|---|---|---|
+| History, 101 entries | 217 KB | **16.5 KB** |
+| One entry | 4,002 bytes | **166 bytes** |
+| Whole store file | 823 KB | **186 KB** |
+| Score writes in 20s | 255 | 307 |
+
+**Nothing was removed from the record.** A score that did not change is still
+recorded in the entry where it did change, or in the search's current state; the
+full picture at a point in time is the profile revision's baseline plus the
+deltas after it, as it always was. Entries written before the change keep their
+old shape and are read as complete snapshots — the export labels each one
+`changed-only` or `complete-snapshot` so a reader never has to guess. Three
+checks in `tests/integrity.js` pin both halves: that the redundancy is gone, and
+that the replaced value is still there.
+
+This bounds the growth. It does not decide **retention**, which is still an open
+decision for the county's records officer.
+
+**Activity is now the largest growing component** — 424 entries, 46.5 KB — but
+it grows linearly, one small entry per action, which is the shape you want.
 
 **The store is written pretty-printed.** 303 KB of data occupies 823 KB on
 disk, about 2.7x. That is a deliberate trade for a store a person can read

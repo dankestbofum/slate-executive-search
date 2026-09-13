@@ -702,6 +702,19 @@ changed while they ran. Use **Reload search** after copying edits you want to ke
 
 Changing the profile preserves the previous criteria, scores, and notes in
 **History and recovery**, clears current scores, and seals the new evaluation.
+
+A **scoring** entry records what that save replaced — the reviewer-and-candidate
+pairs whose marks or notes actually changed — and names the profile revision
+rather than copying the criteria into every entry. It previously copied the
+whole panel each time, which grew faster than linearly in a panel's work: the
+load measurement put 255 score saves at 217 KB of history against 3.5 KB of
+actual scores, now 16.5 KB. **Nothing left the record.** A mark that did not
+change is recorded in the entry where it did, or in the current state, and the
+full picture at any point is the profile revision's baseline plus the deltas
+after it. Entries written before the change keep their old shape; the export
+labels each one `changed-only` or `complete-snapshot` so a reader never guesses.
+This bounds growth; it does not set a retention period, which is the county's
+decision.
 Consensus adoption preserves IDs for matching criteria. Changes to recruiting
 facts, community copy, the ad plan, and the brochure invalidate dependent copy
 approvals. Old artifact versions can be restored from history; restoring a

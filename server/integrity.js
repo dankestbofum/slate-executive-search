@@ -15,6 +15,52 @@ function reopen(record) {
   if (record) { record.doneAt = null; record.doneBy = null; record.doneByName = ''; }
 }
 
+/**
+ * What actually changed about scoring, rather than a copy of everything.
+ *
+ * A scoring entry used to carry the whole `scores` and `notesBy` map — every
+ * reviewer's marks on every candidate — plus a copy of the criteria, on every
+ * save. With fifteen reviewers and a hundred candidates that is quadratic:
+ * the load measurement (`npm run test:load`) put 255 score saves at 217 KB of
+ * history against 3.5 KB of actual scores, and the history screen re-rendered
+ * the entire panel under each entry, which is unreadable as well as large.
+ *
+ * **Nothing is dropped from the record.** A score that did not change is still
+ * recorded — in the entry where it did change, or in the search's current
+ * state. The full picture at any point is the profile revision's baseline plus
+ * the deltas after it, which is exactly what it was before; what has gone is
+ * the repetition. Entries written before this carry the full map and are left
+ * alone, so `delta` marks which shape an entry is.
+ *
+ * This bounds the growth. It does not decide how long any of it is kept: that
+ * is a retention policy, and it belongs to the county's records officer.
+ */
+function scoreDelta(before, after) {
+  const scores = {};
+  const notesBy = {};
+  const owners = new Set([
+    ...Object.keys(before.scores || {}), ...Object.keys(after.scores || {}),
+    ...Object.keys(before.notesBy || {}), ...Object.keys(after.notesBy || {})
+  ]);
+  for (const uid of owners) {
+    const wasScores = (before.scores || {})[uid] || {};
+    const nowScores = (after.scores || {})[uid] || {};
+    const wasNotes = (before.notesBy || {})[uid] || {};
+    const nowNotes = (after.notesBy || {})[uid] || {};
+    const people = new Set([
+      ...Object.keys(wasScores), ...Object.keys(nowScores),
+      ...Object.keys(wasNotes), ...Object.keys(nowNotes)
+    ]);
+    for (const cid of people) {
+      // The value being kept is the one that was replaced. A reader asking
+      // "what did this change" needs what it was, not what it became.
+      if (!equal(wasScores[cid], nowScores[cid])) (scores[uid] ||= {})[cid] = wasScores[cid] ?? {};
+      if (!equal(wasNotes[cid], nowNotes[cid])) (notesBy[uid] ||= {})[cid] = wasNotes[cid] ?? '';
+    }
+  }
+  return { scores, notesBy };
+}
+
 // One place applies invariants for manual saves, consensus adoption and AI writes.
 function reconcile(search, before) {
   search.revision = before?.revision || search.revision || 1;
@@ -45,8 +91,10 @@ function reconcile(search, before) {
     search.released = false;
     stale(['survey1', 'survey2', 'guide', 'brochure', 'ads', 'schedule', 'contract', 'bar'], 'The candidate profile changed. Review this copy against the current profile.');
   } else if (!equal(before.scores, search.scores) || !equal(before.notesBy, search.notesBy)) {
-    remember({ kind: 'scores', revision: search.profileRevision, criteria: search.criteria,
-      scores: before.scores, notesBy: before.notesBy, released: before.released });
+    // The criteria are not repeated here: `revision` names the profile they
+    // were given against, and that profile's own entry holds them.
+    remember({ kind: 'scores', revision: search.profileRevision, delta: true,
+      ...scoreDelta(before, search), released: before.released });
   }
   if (FACTS.some(key => !equal(before[key], search[key]))) {
     remember({ kind: 'facts', body: Object.fromEntries(FACTS.map(k => [k, before[k]])) });
@@ -138,4 +186,4 @@ function validateAnswers(survey, answers) {
   return null;
 }
 
-module.exports = { clone, digest, reconcile, reopen, validateCandidate, validateCriteria, validateSurvey, validateAnswers };
+module.exports = { clone, digest, reconcile, reopen, scoreDelta, validateCandidate, validateCriteria, validateSurvey, validateAnswers };
