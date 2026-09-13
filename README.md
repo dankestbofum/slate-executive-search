@@ -339,11 +339,15 @@ and is not verified.
 | Job | What it proves |
 |---|---|
 | `checks` | Every first-party file parses (`npm run check`), the isolated suite passes on Node 24, and production dependencies have no advisory at moderate or above |
+| `browser` | The full Playwright suite in Chromium and WebKit, plus mobile emulation: critical journeys, axe-core scanning, and the CSP as a browser actually enforces it |
 | `container` | The image builds, refuses to start without storage, boots on an empty volume without PIN configuration, runs as non-root, answers `/api/health` with the built release, and survives a restart with its store intact |
 
 A failing run means the commit is not eligible to be marked ready for release.
-Browser, accessibility, and print coverage are not in CI yet, so a green run is
-not evidence of those.
+
+What a green run still does not cover: a real phone, a screen reader, printed
+output looked at by a person, and `npm run test:load`, which is deliberately
+outside CI because its output is a measurement to read rather than a threshold
+to pass. See **[docs/test-evidence.md](docs/test-evidence.md)**.
 
 ## Outcomes and closeout
 

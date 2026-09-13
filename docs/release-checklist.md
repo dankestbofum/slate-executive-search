@@ -44,8 +44,11 @@ breadth, print, and load testing. See `docs/handoff.md` §6.
 - [ ] A real phone (iPhone Safari, Android Chrome)
 - [ ] Screen-reader pass (NVDA, JAWS, or VoiceOver)
 - [ ] Print and PDF output visually inspected
-- [ ] Load test against the pilot envelope: 100 candidates, 15 accounts,
-      20 concurrent sessions, p95 under 1s
+- [x] Load test against the pilot envelope: 100 candidates, 15 accounts,
+      20 concurrent sessions, p95 under 1s — **read p95 57 ms** on a developer
+      machine (`npm run test:load`)
+- [ ] **The same measurement on the Render instance**, where a network disk
+      changes the cost of the whole-file write this design does on every save
 
 ### Recovery
 

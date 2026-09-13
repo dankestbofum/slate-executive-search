@@ -15,6 +15,7 @@ Last updated: 2026-09-12.
 | Isolated server suite | `npm test` | **482 checks** | yes |
 | Browser, accessibility, policy | `npm run test:browser` | **162 checks** (54 each: Chromium desktop, WebKit desktop, mobile Chromium emulation) | yes |
 | Container build and boot | CI only | 12 steps | yes |
+| Load measurement | `npm run test:load` | 1 run, ~30s | no — a measurement, not a pass |
 
 The server suite runs against temporary data directories with an empty
 `ANTHROPIC_API_KEY`. The browser suite starts its own server the same way.
@@ -129,6 +130,55 @@ screen reader, and no person has tried. The following remain **untested**:
 - Real device behaviour on iPhone Safari and Android Chrome
 - Print and PDF output
 
+## Load measurement
+
+`npm run test:load` builds the plan's envelope (§6: one county search, 100
+candidates, 15 accounts) and then runs 20 concurrent request streams — 19
+readers and one writer — against it. It is not part of `npm test`: it takes
+half a minute and its output is a measurement to read, not a pass or a fail.
+
+One run, 12 September 2026, Node v22.18.0 on Windows, 16 CPUs, loopback, no
+TLS, no proxy, warm page cache:
+
+| Measurement | n | p50 | p95 | p99 | max |
+|---|---|---|---|---|---|
+| Add candidate, first 10 (85 KB store) | 10 | 12.1 ms | 13.6 ms | 13.6 ms | 13.6 ms |
+| Add candidate, last 10 | 10 | 15.3 ms | 16.2 ms | 16.2 ms | 16.2 ms |
+| GET search, 19 concurrent readers | 9,216 | 39.6 ms | **56.7 ms** | 62.7 ms | 433.3 ms |
+| PUT scores, 1 concurrent writer | 255 | 77.1 ms | 87.5 ms | 100.2 ms | 453.2 ms |
+
+473 req/s sustained, no unexpected responses, no revision conflicts. A second
+run on the same machine reproduced it within a few milliseconds (read p95 55 ms,
+496 req/s), so the figures are not a single lucky sample — but they are still
+two samples on one machine.
+
+**Read p95 of 57 ms against the checklist's 1,000 ms target.** On this hardware
+the JSON store is not close to being the constraint at pilot size, and the
+single-writer model costs a score save under 100 ms while nineteen readers are
+hitting the same file.
+
+### What the run found anyway
+
+**History dominates growth, and each entry is a full snapshot.** 255 score saves
+took the store from 85 KB to 823 KB. The search itself accounts for 300 KB of
+that, and 217 KB of the search is 101 history entries — roughly 4 KB each,
+because every entry snapshots the whole `criteria`, `scores` and `notesBy`
+state rather than a delta. That per-entry cost *rises as scoring proceeds*, so
+history grows faster than linearly in the number of edits. At full pilot scale —
+15 scorers across 100 candidates — this is the number to watch, and it is what
+DEP-04's instruction to bound history growth is about. It is monitored
+(`/api/ready` reports store size) and it is not yet bounded by any policy.
+
+**The store is written pretty-printed.** 303 KB of data occupies 823 KB on
+disk, about 2.7x. That is a deliberate trade for a store a person can read
+during an incident, and it is worth knowing before sizing a disk or reading a
+backup-duration figure. Not changed here: it is a decision, not a defect.
+
+**Neither of these is a reason to move off JSON for the pilot**, on this
+evidence. Both are reasons to re-measure on Render before the pilot starts,
+because a network disk changes the cost of rewriting the whole file on every
+write, and that is the operation this design performs most.
+
 ## Coverage gaps, stated plainly
 
 | Gap | Consequence | Ticket |
@@ -139,7 +189,7 @@ screen reader, and no person has tried. The following remain **untested**:
 | **Clerk's own components unverified** | The sign-in modal and account button are excluded from the accessibility scan and are not covered by any test here. | DEP-12 |
 | **No screen-reader testing** | The priority accessibility claim is unverified. | DEP-12 |
 | **No print/PDF verification** | Brochures, panel materials and long answers have not been printed and looked at. A browser-printed PDF is also not an accessible tagged document. | DEP-12 |
-| **No load testing** | The pilot envelope (100 candidates, 20 concurrent sessions, p95 under 1s) is unmeasured. Whether the JSON store is adequate is an open question. | DEP-04 |
+| **Load measured on a developer machine only** | The envelope has been measured against loopback on Windows, not against a Render starter instance and its network disk. The numbers bound the application's own cost; they do not predict the pilot. | DEP-04 |
 | **No real AI calls** | Model IDs, tool compatibility, latency and cost are configuration, not evidence. | DEP-11 |
 | **No manual restore drill** | The mechanism is tested on synthetic data in milliseconds. That is not evidence an operator can recover under pressure. | DEP-05 |
 | **No manual print inspection** | Print rules are asserted under emulated print media; no one has looked at a printed brochure or a long answer on paper. | DEP-12 |

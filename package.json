@@ -11,7 +11,8 @@
     "test:live": "node tests/bughunt.js",
     "backup": "node scripts/backup.js",
     "test:browser": "playwright test",
-    "preflight": "node scripts/preflight.js"
+    "preflight": "node scripts/preflight.js",
+    "test:load": "node tests/load.js"
   },
   "engines": {
     "node": ">=24"

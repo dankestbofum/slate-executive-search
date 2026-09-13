@@ -44,7 +44,7 @@ person or real infrastructure can produce.
 | DEP-01 Runtime and release pipeline | `5a57a6a` | yes | **yes** — container verified in CI |
 | DEP-02 Accounts, sessions, permissions | `caae399` | yes | yes |
 | DEP-03 HTTP security and input bounds | `b0f1054` | yes | yes (CSP verified later, in DEP-12) |
-| DEP-04 Failure-safe storage | `c0a6ac2` | yes | **partial** — shutdown verified in CI; no load test |
+| DEP-04 Failure-safe storage | `c0a6ac2` | yes | **partial** — shutdown verified in CI; load measured on a dev machine, not on Render |
 | DEP-05 Scheduled recovery off-volume | `b62d3c5` | yes | **no** — no manual restore drill |
 | DEP-06 Health and monitoring | `2596afe` | yes | **partial** — no named operator or alert recipient |
 | DEP-07 County setup and fact verification | `2ac3e4f` | yes | **partial** — has a UI now; drafts never generated or reviewed |
@@ -66,6 +66,7 @@ npm run check          # 56 files parsed, 0 failed
 npm test               # 482 checks, exit 0
 npm run test:browser   # 162 checks, 0 failed (54 in each of three projects)
 npm run preflight      # AI key and model entitlement (not run against a live account)
+npm run test:load      # envelope measurement; read p95 57 ms, write p95 88 ms
 ```
 
 | | |
@@ -127,6 +128,18 @@ configured**, so `/api/ready` reports `offVolumeCopy: "NOT CONFIGURED"`.
 and `error-rate` work and are deduplicated, but no destination and no recipient
 are configured. An alert with no named recipient is not monitoring.
 
+**Load:** the plan's envelope was measured for the first time on 12 September
+(`npm run test:load`, recorded in `docs/test-evidence.md`). Read p95 57 ms and
+write p95 88 ms against a 1,000 ms target, 473 req/s, no unexpected responses.
+On that evidence the JSON store is not the constraint at pilot size.
+
+It did surface the thing to watch: **history is the growth, and each entry is a
+full snapshot** of criteria, scores and notes rather than a delta, so it grows
+faster than linearly as scoring proceeds. 255 score saves produced 217 KB of
+history. It is monitored and it is not bounded by any policy. The measurement
+also needs repeating on Render, where a network disk changes the cost of the
+whole-file write this design performs on every save.
+
 **Rollback:** the path is defined and partly enforced — the store carries a
 schema version, and a store written by a newer release is refused rather than
 downgraded, which is the case where rollback turns into data loss. **It has
@@ -178,7 +191,7 @@ Evidence gaps that block the gates:
 | One authorised real draft and research run, with measured latency and cost | Gate 3 |
 | A real phone, screen-reader testing, print output | Gate 1 |
 | One CI run of this branch, including the WebKit project and the container job | Gate 1 |
-| Load test against the pilot envelope | Gate 1 |
+| Load measurement repeated on the Render instance | Gate 1 |
 | Named operator, backup operator, alert recipient | Gate 3 |
 | Staffed candidate support contact | Gate 2 |
 | Every decision in `docs/pilot-decisions.md` | Gate 2 |
