@@ -188,7 +188,9 @@ everything below is what the blueprint sets and what it deliberately leaves for
 you to supply.
 
 1. **Storage.** The blueprint mounts a disk at `/data` and sets `DATA_DIR` to
-   match. Production refuses to start without it, which is what stops records
+   `/data/clean-owner` for the clean owner workspace. Existing records at
+   `/data/slate.json` remain available by switching `DATA_DIR` back to `/data`.
+   Production refuses to start without configured storage, which stops records
    from being written into the container filesystem and lost on the next
    deploy. A disk needs a paid instance type; a free instance has no
    persistent storage.

@@ -31,7 +31,9 @@ services:
       - key: NODE_ENV
         value: production
       - key: DATA_DIR
-        value: /data
+        # A fresh owner workspace on the existing disk. Prior records at
+        # /data/slate.json remain available for rollback.
+        value: /data/clean-owner
 
       # Identity. Without these every workspace request answers 503; there is
       # no fallback to open access.
