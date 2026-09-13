@@ -63,6 +63,13 @@ out of the migration in, on purpose.
 - **Late writes.** Navigations are ordered by when they were asked for, and an
   AI job re-checks that it still has authority over the search it started on
   before it commits.
+- **Who may found a firm.** The plan left public self-service creation as "a
+  separate rollout decision". It is now a decision you make with
+  `SLATE_WORKSPACE_FOUNDERS`: in production, only the emails on that list, and
+  an empty list means nobody. Outside production it is open, so development and
+  the suites need no configuration. It bounds who can bring a new, empty firm
+  into being and grants nothing inside any workspace — which is what separates
+  it from the operator allowlist this work removed.
 
 ## What it found on the way
 
@@ -79,10 +86,10 @@ Three defects the work surfaced, all now fixed:
 ## Verification
 
 - `npm run check` — 64 files parsed, 0 failed.
-- `npm test` — 508 checks, exit 0. Includes `tests/organizations.js`: 19 checks
+- `npm test` — 509 checks, exit 0. Includes `tests/organizations.js`: 20 checks
   covering reads, writes, listings, counts, directories, archives, exports,
   media, administration, held seats, removal, and forged organization claims.
-- `npm run test:browser` — 178 checks across Chromium, WebKit and a phone
+- `npm run test:browser` — 181 checks across Chromium, WebKit and a phone
   viewport, 0 failed. The runner exits normally and leaves no listener behind;
   the teardown problem noted in the plan is resolved (`SLATE_EXIT_WITH_PARENT`
   plus closing idle connections on shutdown).

@@ -123,6 +123,12 @@ async function accessChecks() {
 (async () => {
   try {
     assert.equal(configuration(env).fixtureDirectory, false, 'Production ignores the test identity fixture');
+    // Open where a developer needs it, closed where the URL is public.
+    assert.equal(configuration({ NODE_ENV:'development' }).openWorkspaceCreation, true);
+    assert.equal(configuration({ NODE_ENV:'test' }).openWorkspaceCreation, true);
+    assert.equal(configuration({ NODE_ENV:'production' }).openWorkspaceCreation, false);
+    assert.deepEqual(configuration({ SLATE_WORKSPACE_FOUNDERS:' Owner@Firm.Example , ,b@c.test ' }).workspaceFounders,
+      ['owner@firm.example', 'b@c.test'], 'the founder list is not normalised');
     await identityChecks();
     await accessChecks();
     let base = await start();
@@ -156,6 +162,15 @@ async function accessChecks() {
     const held = await fetch(base + '/api/me', { headers:{ authorization:'Bearer ' + token({ sts:'pending' }) } });
     assert.equal(held.status, 401);
     assert.equal((await held.json()).code, 'SESSION_TASK_PENDING');
+
+    // A public sign-up page must not hand a workspace to whoever finds the URL.
+    // In production the founder list decides, and an empty list means nobody —
+    // refused before the provider is touched, so this holds offline.
+    assert.equal(body.canCreateWorkspace, false, 'production offered workspace creation to an account not on the list');
+    const founded = await fetch(base + '/api/organizations', {
+      method:'POST', headers:{ ...headers, 'content-type':'application/json' }, body:JSON.stringify({ name:'Uninvited Firm' }) });
+    assert.equal(founded.status, 403);
+    assert.equal((await founded.json()).code, 'WORKSPACE_CREATION_CLOSED');
     for (const invalid of [token({ exp:1 }), token({ azp:'https://attacker.example' }), token().slice(0,-15)+'invalid']) {
       assert.equal((await fetch(base + '/api/me', { headers:{ authorization:'Bearer ' + invalid } })).status, 401);
     }

@@ -27,7 +27,7 @@ The server suite runs against temporary data directories with an empty
 | File | Checks | Covers |
 |---|---|---|
 | `bughunt.js` | 245 | Baseline API behaviour |
-| `organizations.js` | 19 | Workspace isolation: reads, writes, listings, archives, exports, media, administration, and forged organization claims |
+| `organizations.js` | 20 | Workspace isolation: reads, writes, listings, archives, exports, media, administration, and forged organization claims |
 | `jurisdictions.js` | 30 | County setup, discovery, fact verification (DEP-07) |
 | `security.js` | 28 | Headers, CSRF, bounds, SSRF, log redaction (DEP-03) |
 | `roles.js` | 26 | Permission matrix within one workspace, identity, withdrawal of access (DEP-02) |

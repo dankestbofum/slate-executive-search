@@ -129,6 +129,33 @@ test('an invitation to a search holds a seat, and joining the workspace opens ex
   await theirBrowser.close();
 });
 
+test('a deployment that does not offer workspace creation says so instead of showing the form', async ({ page }, testInfo) => {
+  const email = `closed-${testInfo.project.name}@example.test`;
+  await installClerk(page, { email, organization: null });
+  // The gate is live only in production, which the browser server is not, so
+  // the answer it would give there is substituted here. What is under test is
+  // the client honouring it: a form that will be refused must not be offered.
+  await page.route('**/api/me', async route => {
+    const response = await route.fetch();
+    const body = await response.json();
+    await route.fulfill({ response, json: { ...body, canCreateWorkspace: false } });
+  });
+  await page.goto('/');
+  await page.getByLabel('Your name').fill('Closed Deployment');
+  await page.getByRole('radio', { name:/Search consultant/ }).check();
+  await page.getByRole('button', { name:'Continue', exact:true }).click();
+
+  await expect(page.getByRole('heading', { name:'You are not in a workspace yet' })).toBeVisible();
+  await expect(page.getByText(/join one by invitation from a firm already using Slate/)).toBeVisible();
+  await expect(page.getByRole('button', { name:'Create a workspace' })).toHaveCount(0);
+  await expect(page.getByLabel('Workspace name')).toHaveCount(0);
+  // The way in that is on offer is still there, and still names the address.
+  await expect(page.getByRole('button', { name:'Check invitations' })).toBeVisible();
+  await expect(page.getByText(email)).toBeVisible();
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  await page.screenshot({ path:testInfo.outputPath('workspace-creation-closed.png'), fullPage:true });
+});
+
 test('failed setup retains entries and can be retried', async ({ page }, testInfo) => {
   await installClerk(page, { email:`retry-setup-${testInfo.project.name}@example.test`, organization:null });
   await page.goto('/');

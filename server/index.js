@@ -487,6 +487,10 @@ app.get('/api/me', requireUser, async (req, res) => {
     organization: req.access.organization,
     role: req.access.role,
     capabilities: req.access.capabilities,
+    // Deliberately outside `capabilities`, which describe what somebody may do
+    // inside the workspace they are in. This is about founding a new one, which
+    // is a property of the deployment rather than of any membership.
+    canCreateWorkspace: auth.mayCreateWorkspace(req.user),
     workspaces,
     workspacesError: workspaces ? null : 'We could not list your workspaces. Try again shortly.',
     users: visibleUsers(req.access).map(db.publicUser),
@@ -555,8 +559,19 @@ app.get('/api/organizations', requireUser, async (req, res) => {
  * nothing else. It never claims unowned legacy searches — mapping those is a
  * migration decision made with scripts/organizations.js, where somebody can
  * see what they are about to hand over.
+ *
+ * Who may do it at all is bounded in production (see `workspaceFounders` in
+ * server/auth.js), because the sign-up page is reachable by anyone who has the
+ * URL and a workspace nobody asked for is still a workspace.
  */
 app.post('/api/organizations', requireUser, async (req, res) => {
+  if (!auth.mayCreateWorkspace(req.user)) {
+    return res.status(403).json({
+      error: 'New workspaces are created by the operator of this deployment. '
+        + 'If a firm invited you, ask them to send the invitation to ' + req.user.email + '.',
+      code: 'WORKSPACE_CREATION_CLOSED'
+    });
+  }
   const name = String(req.body?.name || '').trim();
   if (!name || name.length > ORG_NAME_MAX) {
     return res.status(400).json({ error: 'Name the workspace (up to ' + ORG_NAME_MAX + ' characters).' });

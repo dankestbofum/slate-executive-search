@@ -135,6 +135,13 @@ async function newSearch(fields, who = {}) {
     assert.equal(list.status, 403);
   });
 
+  await check('founding a workspace is open outside production, and only there', async () => {
+    const { configuration } = require('../server/auth');
+    assert.equal(configuration({ NODE_ENV:'production' }).openWorkspaceCreation, false);
+    const me = await call('/api/me', { email: 'founder-check@example.test', org: null });
+    assert.equal(me.body.canCreateWorkspace, true, 'the suite could not have created the workspaces it just used');
+  });
+
   await check('a session with no workspace at all reaches no records', async () => {
     const stranger = 'no-workspace@example.test';
     for (const route of ['/api/searches', '/api/archives', '/api/searches/' + inA.id]) {

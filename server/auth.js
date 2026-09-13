@@ -25,6 +25,21 @@ function configuration(env = process.env) {
     // store.
     fixtureDirectory: env.NODE_ENV === 'test' && env.SLATE_CLERK_FIXTURE === 'true',
     invitationRedirectUrl: String(env.SLATE_INVITATION_REDIRECT_URL || '').trim(),
+    // Who may bring a new firm's workspace into being.
+    //
+    // This is not the global grant the organization model removed. That one
+    // handed somebody consultant access to searches that already existed;
+    // founding a workspace grants authority over a new, empty one and over
+    // nothing else — it never claims a search and never joins an existing firm.
+    // What it bounds is who can create a firm at all on a deployment whose
+    // sign-up page anyone can reach.
+    //
+    // Outside production it is open, so a developer can make one and the suites
+    // can build their own. In production the list decides, and an empty list
+    // means nobody: a public URL should not hand a workspace to whoever finds
+    // it. Everybody else arrives by invitation.
+    workspaceFounders: String(env.SLATE_WORKSPACE_FOUNDERS || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean),
+    openWorkspaceCreation: env.NODE_ENV !== 'production',
     authorizedParties: String(env.CLERK_AUTHORIZED_PARTIES || '').split(',').map(s => s.trim()).filter(Boolean)
   };
 }
@@ -190,8 +205,14 @@ function createAuth(store, config = configuration()) {
     : id => clerkClient.users.getUser(id);
   const directory = organizations.createDirectory(store, { ...config, clerkClient });
 
+  /** May this account found a workspace? See `workspaceFounders` above. */
+  function mayCreateWorkspace(user) {
+    if (config.openWorkspaceCreation) return true;
+    return config.workspaceFounders.includes(String(user?.email || '').trim().toLowerCase());
+  }
+
   return {
-    config, middleware, directory,
+    config, middleware, directory, mayCreateWorkspace,
     publicConfig: {
       provider: 'clerk',
       configured: config.configured,

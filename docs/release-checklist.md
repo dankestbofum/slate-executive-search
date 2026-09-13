@@ -14,8 +14,8 @@ breadth, print, and load testing. See `docs/handoff.md` §6.
 ### Automated checks
 
 - [x] `npm run check` — 64 files parsed, 0 failed
-- [x] `npm test` — 508 checks, exit 0
-- [x] `npm run test:browser` — 178 checks across Chromium, WebKit and a phone viewport, 0 failed, runner exits normally
+- [x] `npm test` — 509 checks, exit 0
+- [x] `npm run test:browser` — 181 checks across Chromium, WebKit and a phone viewport, 0 failed, runner exits normally
 - [x] `npm audit --omit=dev` — 0 vulnerabilities
 - [x] **A CI run has been observed to pass** — 11 runs green; latest `cdb2ce8`, 127s, on Ubuntu with Node 24.20.0
 
@@ -55,6 +55,11 @@ breadth, print, and load testing. See `docs/handoff.md` §6.
       organization selection required, and the custom roles `org:consultant`
       and `org:committee` registered. The development instance having them is
       not evidence that a hosted environment points at the same instance.
+- [ ] **`SLATE_WORKSPACE_FOUNDERS` set on the deployment** to the first
+      administrator's verified email. Without it nobody can create a workspace
+      in production, which is the safe default but also means the app cannot be
+      stood up. Confirm it is set *and* that it lists only people who should be
+      able to found a firm.
 - [ ] **Decide whether `/api/ready`'s record count should stay public.** It is
       unauthenticated by design, and with several firms on one deployment its
       search count is an aggregate across all of them. Nothing identifying; a

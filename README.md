@@ -154,9 +154,9 @@ invited to contradict it.
 After that, the workspace step. Each of the ways it can go is its own screen,
 because "no access" covers several situations that need different answers:
 
-- **A firm owner with no workspace** is offered **Create a workspace**. Creating
-  one makes them its administrator and touches nothing else — it never adopts
-  existing searches.
+- **A firm owner with no workspace** is offered **Create a workspace**, if this
+  deployment lets them (see below). Creating one makes them its administrator
+  and touches nothing else — it never adopts existing searches.
 - **Somebody waiting on an invitation** is told an administrator has to invite
   their exact address, with **Check invitations** and a way to sign in as
   somebody else.
@@ -166,6 +166,26 @@ because "no access" covers several situations that need different answers:
   who can change it.
 - **A committee member with no assignment** is told they are part of the firm
   and that a search manager seats people individually.
+
+#### Who may found a workspace
+
+In production, only the verified emails in `SLATE_WORKSPACE_FOUNDERS`. An empty
+list means nobody, which is the right default for a URL anyone can reach: Clerk's
+sign-up page is public, so without this a stranger could sign up and create a
+firm. They would see nothing of yours — a new workspace is empty and grants
+authority over nothing that already exists — but it is still an account and a
+workspace you did not ask for.
+
+Set it to the first administrator's email to stand a firm up; everybody else
+arrives by invitation. Where creation is closed, the workspace step says so and
+does not show a form that would be refused after it was filled in. Outside
+production it is open, so local development and the test suites need no
+configuration.
+
+This is not the operator allowlist the organization model removed. That one gave
+somebody consultant access to searches that already existed, sitting above
+organization membership and defeating it. This bounds who can bring a new, empty
+firm into being, and grants nothing inside any workspace.
 
 **My access** in the rail shows the role the workspace assigned, the searches
 they are seated on, and who to ask for a change. It is not a control that
@@ -315,8 +335,11 @@ you to supply.
    - `CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY`. Without them every
      workspace request answers 503 rather than falling back to open access.
    - `CLERK_AUTHORIZED_PARTIES`, set to the service's own origin once it has
-     one. No variable grants access: the first person to sign in creates the
-     workspace and invites everybody else.
+     one.
+   - `SLATE_WORKSPACE_FOUNDERS`, the verified email of the first administrator.
+     Without it nobody can create a workspace in production, which is the safe
+     default for a public URL. It grants nothing inside any workspace; everybody
+     else joins by invitation.
    - `ANTHROPIC_API_KEY` for drafts and city research. The app serves without
      it; those two features stop.
    - `SLATE_SUPPORT_EMAIL`, shown to candidates who cannot proceed alone.

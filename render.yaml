@@ -49,6 +49,13 @@ services:
       # invitation; unset uses the instance default.
       - key: SLATE_INVITATION_REDIRECT_URL
         sync: false
+      # Who may create a new firm workspace here, comma-separated. Empty means
+      # nobody, which is the right answer for a URL anyone can reach: set it to
+      # the first administrator's verified email to stand the firm up, and
+      # everybody else joins by invitation. It grants nothing over any workspace
+      # that already exists.
+      - key: SLATE_WORKSPACE_FOUNDERS
+        sync: false
 
       # Drafting and city research. The app serves without it; only those two
       # features stop.

@@ -189,6 +189,9 @@ const state = {
   // from anything stored on the account: the same person is a consultant in
   // one workspace and a committee member in another.
   org:null, role:null, caps:{},
+  // Whether this deployment lets this account found a new workspace at all.
+  // Separate from `caps`, which describe the workspace you are already in.
+  canCreateWorkspace:false,
   // Every workspace this account can enter, for the chooser. null means the
   // list has not been loaded, which is different from belonging to none.
   workspaces:null, workspacesError:null,
@@ -1354,6 +1357,7 @@ async function loadMe(){
     state.org = me.organization || null;
     state.role = me.role || null;
     state.caps = me.capabilities || {};
+    state.canCreateWorkspace = Boolean(me.canCreateWorkspace);
     state.workspaces = me.workspaces || null;
     state.workspacesError = me.workspacesError || null;
     state.users = me.users || [];
@@ -1824,7 +1828,8 @@ const ROLE_LABEL = {
 function vWorkspaceChooser(){
   const list = (state.workspaces || []).filter(w => w.role);
   const unusable = (state.workspaces || []).filter(w => !w.role);
-  const wantsToOwn = state.onboarding?.requestedRole === 'consultant';
+  const mayCreate = state.canCreateWorkspace;
+  const wantsToOwn = mayCreate && state.onboarding?.requestedRole === 'consultant';
   const draft = state.orgDraft || {};
   const createForm = `<form id="createworkspace" class="stack stack--tight">
     <label class="stack stack--tight" for="ws-name"><span>Workspace name</span>
@@ -1851,14 +1856,20 @@ function vWorkspaceChooser(){
     <h1 class="t-title">${list.length ? 'Where are you working?' : 'You are not in a workspace yet'}</h1>
     <p class="t-body">${list.length
       ? 'Each workspace is one firm. Searches, staff, and committees never cross between them.'
-      : 'A workspace is one firm\u2019s shared space. Create your own, or join one you have been invited to.'}</p></div>
+      : mayCreate
+        ? 'A workspace is one firm\u2019s shared space. Create your own, or join one you have been invited to.'
+        : 'A workspace is one firm\u2019s shared space. You join one by invitation from a firm already using Slate.'}</p></div>
     ${state.workspacesError ? `<p role="alert">${esc(state.workspacesError)} <button class="btn btn--ghost btn--sm" data-act="check-account-access">Try again</button></p>` : ''}
     ${state.orgError ? `<p role="alert">${esc(state.orgError)}</p>` : ''}
     ${chooseBlock}
     ${blocked}
-    ${wantsToOwn || list.length
-      ? `<section class="onboarding__next stack stack--tight"><h2 class="t-section">Create a workspace</h2>${createForm}</section>${joinBlock}`
-      : `${joinBlock}<section class="onboarding__next stack stack--tight"><h2 class="t-section">Or create your own workspace</h2>${createForm}</section>`}`);
+    ${!mayCreate
+      // This deployment does not hand a workspace to whoever signs up. Say so
+      // rather than showing a form that would be refused after it is filled in.
+      ? joinBlock
+      : wantsToOwn || list.length
+        ? `<section class="onboarding__next stack stack--tight"><h2 class="t-section">Create a workspace</h2>${createForm}</section>${joinBlock}`
+        : `${joinBlock}<section class="onboarding__next stack stack--tight"><h2 class="t-section">Or create your own workspace</h2>${createForm}</section>`}`);
 }
 
 /** The session names a workspace this account is no longer in. */
