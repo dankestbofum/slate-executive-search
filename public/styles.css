@@ -652,6 +652,34 @@ details.toggle[open] summary::before{transform:rotate(90deg) translateX(-1px)}
 
 @media print{
   @page{margin:.6in}
+
+  /* Every print, not only the packet.
+   *
+   * These rules used to sit entirely behind [data-print], which only the
+   * brochure and advertisement Print controls set. Anyone pressing Ctrl+P on
+   * any other screen — the ad plan table, the candidate list, someone's
+   * answers — printed the navigation rail, the filter controls and the action
+   * bar, losing about a fifth of the page width to a sidebar of links that do
+   * nothing on paper. Found by looking at the output (scripts/print-samples.js);
+   * the existing print test set the flag by hand and so never saw it.
+   *
+   * Deliberately navigation and controls only. Content is never hidden here:
+   * on an editor screen the fields are the document, and the stage counts on
+   * the candidate list are information even though they are also buttons. */
+  .rail, .appbar, .scrim, .toast, .skip, .backbar, .listbar{
+    display:none !important;
+  }
+  .shell{display:block; grid-template-columns:1fr}
+  .page, .band{background:#fff; box-shadow:none}
+  /* A row should not be split down the middle by a page break. */
+  .spec, .hubrow, .seat, .q, .scorerow{break-inside:avoid}
+  thead{display:table-header-group}
+  tr{break-inside:avoid}
+
+  /* A review warning is for the consultant who has to act on it, never for the
+   * county reading the brochure it is printed on. */
+  html[data-print] .notice{display:none !important}
+
   html[data-print] .rail,
   html[data-print] .masthead,
   html[data-print] .pagehead,

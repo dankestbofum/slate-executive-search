@@ -16,6 +16,7 @@ Last updated: 2026-09-12.
 | Browser, accessibility, policy | `npm run test:browser` | **162 checks** (54 each: Chromium desktop, WebKit desktop, mobile Chromium emulation) | yes |
 | Container build and boot | CI only | 12 steps | yes |
 | Load measurement | `npm run test:load` | 1 run, ~30s | no — a measurement, not a pass |
+| Print samples | `npm run print:samples` | 7 PDFs + PNGs | no — output for a person to review |
 
 The server suite runs against temporary data directories with an empty
 `ANTHROPIC_API_KEY`. The browser suite starts its own server the same way.
@@ -205,6 +206,44 @@ evidence. Both are reasons to re-measure on Render before the pilot starts,
 because a network disk changes the cost of rewriting the whole file on every
 write, and that is the operation this design performs most.
 
+## Print output
+
+`npm run print:samples` builds a search deliberately shaped to break layout — a
+county name that wraps, a matching position title, long candidate answers, a
+six-row plan table and eight candidates with names that do not fit a narrow
+column — drives the application's own print path, and writes seven PDFs plus
+PNGs of the same pages to `print-samples/`. The output is gitignored: it is
+evidence for a review, not an artifact of the build.
+
+**Looking at the output found two defects the print test did not**, because
+that test set the print flag by hand and so only ever exercised the path where
+it is set:
+
+1. **The print stylesheet applied only to the brochure and advertisements.**
+   Every rule sat behind `html[data-print]`, which only those two Print controls
+   set. Pressing Ctrl+P anywhere else — the ad plan table, the candidate list,
+   someone's answers — printed the navigation rail, the filter controls and the
+   back link, losing about a fifth of the page width. Navigation chrome is now
+   hidden on any print; content never is.
+2. **An internal review warning printed on the client-facing brochure.** "The
+   candidate profile changed. Review this copy against the current profile." is
+   for the consultant who has to act on it, not for the county reading the
+   packet. Notices are now hidden when printing a packet.
+
+Two browser checks now pin both, including the unflagged Ctrl+P path.
+
+**Still open, and left for a person deliberately:**
+
+- Editor fields print as input boxes and truncate: a plan table cell holding
+  "ICMA Job Center" prints as "ICMA Job". Fixing it means rendering a read-only
+  view for print, which is a design decision rather than a CSS change.
+- Row action buttons still print. Hiding every button risked hiding things that
+  read as content.
+- **Nobody has printed one on paper.** Screen PDF and paper differ, and the
+  sign-off in `print-samples/README.md` is not closed until someone has.
+- A browser-printed PDF is **not an accessible tagged document**, as DEP-12 says
+  explicitly. None of these files satisfy that if the county requires it.
+
 ## Coverage gaps, stated plainly
 
 | Gap | Consequence | Ticket |
@@ -218,7 +257,7 @@ write, and that is the operation this design performs most.
 | **Load measured on a developer machine only** | The envelope has been measured against loopback on Windows, not against a Render starter instance and its network disk. The numbers bound the application's own cost; they do not predict the pilot. | DEP-04 |
 | **No real AI calls** | Model IDs, tool compatibility, latency and cost are configuration, not evidence. | DEP-11 |
 | **No manual restore drill** | The mechanism is tested on synthetic data in milliseconds. That is not evidence an operator can recover under pressure. | DEP-05 |
-| **No manual print inspection** | Print rules are asserted under emulated print media; no one has looked at a printed brochure or a long answer on paper. | DEP-12 |
+| **Print samples generated but not signed off** | `npm run print:samples` produces seven PDFs and PNGs from a search shaped to break layout; two defects were found and fixed from them, but nobody has opened the current set or printed one on paper. | DEP-12 |
 | **Graceful shutdown unverifiable locally** | Windows emulates SIGTERM as unconditional termination. Checked in CI via `docker stop`. | DEP-04 |
 
 ## How to reproduce

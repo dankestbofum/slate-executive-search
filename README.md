@@ -345,9 +345,21 @@ and is not verified.
 A failing run means the commit is not eligible to be marked ready for release.
 
 What a green run still does not cover: a real phone, a screen reader, printed
-output looked at by a person, and `npm run test:load`, which is deliberately
-outside CI because its output is a measurement to read rather than a threshold
-to pass. See **[docs/test-evidence.md](docs/test-evidence.md)**.
+output looked at by a person, and two commands that are deliberately outside CI
+because their output is something to read rather than a threshold to pass —
+`npm run test:load` (a latency measurement) and `npm run print:samples`.
+
+### Print output for review
+
+`npm run print:samples` builds a search shaped to break layout — a county name
+that wraps, long candidate answers, a wide table, eight candidates with names
+that do not fit a column — and writes seven PDFs and matching PNGs to
+`print-samples/` (gitignored). Looking at the first set found two defects: the
+print stylesheet applied only to the brochure and advertisements, so Ctrl+P
+anywhere else printed the navigation rail and filter controls; and an internal
+review warning printed on the client-facing brochure. Both are fixed and pinned
+by browser checks. **The remaining sign-off needs a person** — a screen PDF and
+paper are not the same thing. See **[docs/test-evidence.md](docs/test-evidence.md)**.
 
 ## Outcomes and closeout
 

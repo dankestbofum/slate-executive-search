@@ -20,3 +20,8 @@ Slate - Partnership Proposal.md
 /playwright-report/
 /blob-report/
 /playwright/.cache/
+
+# Generated print output for review (npm run print:samples). Regenerated on
+# demand from a synthetic search; evidence for a person to look at, not an
+# artifact of the build.
+/print-samples/

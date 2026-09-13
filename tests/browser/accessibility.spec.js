@@ -257,3 +257,84 @@ test('the record-keeping screens have no WCAG 2.1 AA violations, in either theme
     }
   }
 });
+
+test('an ordinary Ctrl+P drops the navigation chrome, without the print flag set', async ({ page }, testInfo) => {
+  // The test above sets `data-print` by hand, which only the brochure and
+  // advertisement Print controls ever do. That left the common case unchecked:
+  // someone pressing Ctrl+P on any other screen used to print the navigation
+  // rail and the filter controls, losing about a fifth of the page width.
+  // Found by looking at scripts/print-samples.js output, not by a test.
+  await installClerk(page);
+  await page.goto('/');
+  await page.waitForLoadState('networkidle');
+  await expect(page.getByRole('button', { name: /open a new search/i }).first()).toBeVisible({ timeout: 10000 });
+
+  const search = await (await page.request.post('/api/searches', {
+    data: { client: 'Printed Plainly ' + testInfo.project.name, position: 'County Administrator', package: 'executive' }
+  })).json();
+  await page.request.post('/api/searches/' + search.id + '/candidates', {
+    headers: { 'if-match': String((await (await page.request.get('/api/searches/' + search.id)).json()).revision) },
+    data: { name: 'Ada Baker', cur: 'Deputy County Administrator', org: 'County of Elsewhere' }
+  });
+
+  await page.goto('/#/s/' + search.id + '/screen');
+  await expect(page.locator('#main h1')).toBeVisible({ timeout: 10000 });
+  await page.emulateMedia({ media: 'print' });
+
+  const hidden = sel => page.evaluate(s => {
+    const el = document.querySelector(s);
+    return !el || getComputedStyle(el).display === 'none';
+  }, sel);
+
+  // No print flag is set here on purpose.
+  expect(await page.evaluate(() => document.documentElement.dataset.print)).toBeUndefined();
+  expect(await hidden('.rail'), 'the navigation rail prints').toBe(true);
+  expect(await hidden('.listbar'), 'the list filters print').toBe(true);
+  expect(await hidden('.backbar'), 'the back control prints').toBe(true);
+  // And the content is still there, which is the half that matters.
+  expect(await hidden('#main h1'), 'the page heading is missing from the printed page').toBe(false);
+  expect(await hidden('.candtable'), 'the candidate table is missing from the printed page').toBe(false);
+
+  await page.emulateMedia({ media: 'screen' });
+});
+
+test('a review warning never prints on the packet it warns about', async ({ page }, testInfo) => {
+  // "The candidate profile changed. Review this copy against the current
+  // profile." is for the consultant who has to act on it. It was printing on
+  // the brochure a county receives.
+  await installClerk(page);
+  await page.goto('/');
+  await page.waitForLoadState('networkidle');
+  await expect(page.getByRole('button', { name: /open a new search/i }).first()).toBeVisible({ timeout: 10000 });
+
+  const search = await (await page.request.post('/api/searches', {
+    data: { client: 'Warned County ' + testInfo.project.name, position: 'County Administrator', package: 'executive' }
+  })).json();
+  const revision = async () => String((await (await page.request.get('/api/searches/' + search.id)).json()).revision);
+  await page.request.put('/api/searches/' + search.id + '/artifact/community', {
+    headers: { 'if-match': await revision() },
+    data: { body: { history: 'A county with a history.', qualityOfLife: 'Good.' } }
+  });
+  await page.request.post('/api/searches/' + search.id + '/assemble', {
+    headers: { 'if-match': await revision() }, data: { kind: 'brochure' }
+  });
+  // Changing the profile is what marks the brochure stale.
+  await page.request.put('/api/searches/' + search.id + '/profile', {
+    headers: { 'if-match': await revision() },
+    data: { criteria: [{ id: 'S1', kind: 'skill', label: 'Financial management', weight: 5, note: '' }] }
+  });
+
+  await page.goto('/#/s/' + search.id + '/brochure');
+  await expect(page.locator('#main h1, .pack').first()).toBeVisible({ timeout: 10000 });
+  await expect(page.locator('.notice')).toContainText(/profile changed/i);
+
+  await page.emulateMedia({ media: 'print' });
+  await page.evaluate(() => { document.documentElement.dataset.print = 'brochure'; });
+  const noticeShown = await page.evaluate(() => {
+    const el = document.querySelector('.notice');
+    return Boolean(el) && getComputedStyle(el).display !== 'none';
+  });
+  expect(noticeShown, 'an internal review warning printed on the client-facing brochure').toBe(false);
+  await page.evaluate(() => { delete document.documentElement.dataset.print; });
+  await page.emulateMedia({ media: 'screen' });
+});

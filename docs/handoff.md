@@ -52,7 +52,7 @@ person or real infrastructure can produce.
 | DEP-09 Withdrawal, disposition, closeout | `62e4250` | yes | **yes** — consultant UI added and covered in three browsers |
 | DEP-10 Records export and attribution | `c922337` | yes | **partial** — no county records review |
 | DEP-11 AI reliability and cost control | `9db2042` | yes | **no** — no real model call |
-| DEP-12 Browser, accessibility, print | `01409a3` | yes | **partial** — two engines now; no real device, screen reader or print check |
+| DEP-12 Browser, accessibility, print | `01409a3` | yes | **partial** — two engines and print samples generated; no real device, screen reader, or paper sign-off |
 
 Two commits precede these: `48a0d63` squashed pre-existing uncommitted work
 into a working baseline (before it, `HEAD` could neither build nor test), and
@@ -66,7 +66,8 @@ npm run check          # 56 files parsed, 0 failed
 npm test               # 482 checks, exit 0
 npm run test:browser   # 162 checks, 0 failed (54 in each of three projects)
 npm run preflight      # AI key and model entitlement (not run against a live account)
-npm run test:load      # envelope measurement; read p95 57 ms, write p95 88 ms
+npm run test:load      # envelope measurement; read p95 42 ms, write p95 71 ms
+npm run print:samples  # seven PDFs and PNGs for a person to review
 ```
 
 | | |
@@ -196,7 +197,8 @@ Evidence gaps that block the gates:
 |---|---|
 | Manual restore drill on real infrastructure | Gate 3 (the plan: "no off-volume restore evidence means no live pilot") |
 | One authorised real draft and research run, with measured latency and cost | Gate 3 |
-| A real phone, screen-reader testing, print output | Gate 1 |
+| A real phone and screen-reader testing | Gate 1 |
+| Someone opening `print-samples/` and signing it off | Gate 1 |
 | One CI run of this branch, including the WebKit project and the container job | Gate 1 |
 | Load measurement repeated on the Render instance | Gate 1 |
 | Named operator, backup operator, alert recipient | Gate 3 |

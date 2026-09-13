@@ -12,7 +12,8 @@
     "backup": "node scripts/backup.js",
     "test:browser": "playwright test",
     "preflight": "node scripts/preflight.js",
-    "test:load": "node tests/load.js"
+    "test:load": "node tests/load.js",
+    "print:samples": "node scripts/print-samples.js"
   },
   "engines": {
     "node": ">=24"
