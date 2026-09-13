@@ -40,7 +40,7 @@ breadth, print, and load testing. See `docs/handoff.md` §6.
 
 ### Coverage still missing
 
-- [ ] Safari / WebKit
+- [x] Safari / WebKit — desktop WebKit 26.6, run locally; not yet run in CI
 - [ ] A real phone (iPhone Safari, Android Chrome)
 - [ ] Screen-reader pass (NVDA, JAWS, or VoiceOver)
 - [ ] Print and PDF output visually inspected

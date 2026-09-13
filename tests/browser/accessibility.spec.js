@@ -11,6 +11,8 @@
 //  - The county's applicable standard and deadlines are an open decision
 //    (docs/pilot-decisions.md). WCAG 2.1 AA is the working target, not a
 //    confirmed obligation.
+//  - Clerk's account button is excluded: see `scan` below. Nothing here says
+//    anything about the accessibility of the sign-in components Clerk renders.
 //
 // The candidate questionnaire is the priority path: it is used by members of
 // the public who did not choose this software and cannot ask for a workaround.
@@ -28,8 +30,14 @@ function describeViolations(violations) {
   ).join('\n    ');
 }
 
+// The account button is Clerk's own component, mounted into [data-clerk-user].
+// Slate neither renders nor styles it, and under test it is the bare button the
+// fixture puts there — which WebKit paints in its default grey and Chromium does
+// not. Scanning it measures the stub, not the application. Its real
+// accessibility is Clerk's to answer for, and is recorded as a residual
+// limitation rather than proven here.
 async function scan(page) {
-  const results = await new AxeBuilder({ page }).withTags(TAGS).analyze();
+  const results = await new AxeBuilder({ page }).withTags(TAGS).exclude('[data-clerk-user]').analyze();
   return results.violations;
 }
 
@@ -195,6 +203,57 @@ test('a populated workspace screen has no WCAG 2.1 AA violations, in either them
       await setTheme(page, theme);
       const violations = await scan(page);
       expect(violations, view + ' in ' + theme + ':\n    ' + describeViolations(violations)).toEqual([]);
+    }
+  }
+});
+
+test('the record-keeping screens have no WCAG 2.1 AA violations, in either theme', async ({ page }, testInfo) => {
+  await installClerk(page);
+  await page.goto('/');
+  await page.waitForLoadState('networkidle');
+  await expect(page.getByRole('button', { name: /open a new search/i }).first()).toBeVisible({ timeout: 10000 });
+
+  // Both projects share one store, so the client name has to be unique.
+  const search = await (await page.request.post('/api/searches', {
+    data: { client: 'Recorded County ' + testInfo.project.name, position: 'County Administrator', jurisdictionType: 'county' }
+  })).json();
+  const revision = async () => String((await (await page.request.get('/api/searches/' + search.id)).json()).revision);
+  const withCandidate = await (await page.request.post('/api/searches/' + search.id + '/candidates', {
+    headers: { 'if-match': await revision() }, data: { name: 'Lee Morgan', cur: 'Deputy Administrator', org: 'County of Elsewhere' }
+  })).json();
+  const candidate = withCandidate.candidates[0];
+
+  // Scan these populated, not empty: the rows, badges and log entries are the
+  // parts a scan has anything to say about.
+  await page.request.post('/api/searches/' + search.id + '/candidates/' + candidate.id + '/documents', {
+    headers: { 'if-match': await revision() },
+    data: { kind: 'reference', label: 'Reference call notes', url: 'https://records.example.gov/lee' }
+  });
+  await page.request.post('/api/searches/' + search.id + '/candidates/' + candidate.id + '/communications', {
+    headers: { 'if-match': await revision() },
+    data: { channel: 'phone', purpose: 'scheduling', summary: 'Agreed a panel slot.', followUpOn: '2020-01-02' }
+  });
+  await page.request.post('/api/searches/' + search.id + '/candidates/' + candidate.id + '/disposition', {
+    headers: { 'if-match': await revision() },
+    data: { outcome: 'not-selected', reason: 'Two stronger finalists.', evidence: 'Scores against S1 and S3.' }
+  });
+
+  const surfaces = [
+    ['verify', null],
+    ['closeout', null],
+    ['screen', null],
+    ['person/' + candidate.id, 'Details'],
+    ['person/' + candidate.id, 'Outcome']
+  ];
+  for (const [view, tab] of surfaces) {
+    await page.goto('/#/s/' + search.id + '/' + view);
+    await expect(page.locator('#main h1')).toBeVisible({ timeout: 10000 });
+    if (tab) await page.getByRole('tab', { name: tab }).click();
+
+    for (const theme of ['light', 'dark']) {
+      await setTheme(page, theme);
+      const violations = await scan(page);
+      expect(violations, view + (tab ? ' · ' + tab : '') + ' in ' + theme + ':\n    ' + describeViolations(violations)).toEqual([]);
     }
   }
 });

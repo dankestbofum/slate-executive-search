@@ -38,6 +38,59 @@ const SUGGEST = {
   opp:   ['Economic development','Organizational innovation','New partnerships','Technology improvements','Community development','Strategic growth','Regional collaboration','Improved employee engagement']
 };
 
+/* --- outcomes, documents and contact --------------------------------------
+ * The vocabulary the server validates against (server/disposition.js and
+ * server/candidates.js). Mirrored here so the forms offer exactly what will be
+ * accepted; the server remains the one that decides.
+ * ------------------------------------------------------------------------ */
+
+const OUTCOME = {
+  withdrawn: {
+    label:'Withdrew', pill:'idle',
+    hint:'The candidate told you they are out. Recorded by staff, on their behalf.',
+    evidence:false, revokes:true
+  },
+  'not-selected': {
+    label:'Not selected', pill:'stop',
+    hint:'The firm’s decision. It has to name the job-related basis it rests on.',
+    evidence:true, revokes:true
+  },
+  selected: {
+    label:'Selected', pill:'ok',
+    hint:'The hire. Their file stays open through contracting, so their link is not revoked.',
+    evidence:true, revokes:false
+  },
+  'declined-offer': {
+    label:'Declined the offer', pill:'wait',
+    hint:'They were selected and said no. Recorded by staff, on their behalf.',
+    evidence:false, revokes:true
+  }
+};
+
+// Staff record these two on a candidate's behalf. Saying so on screen keeps a
+// candidate's own decision from reading as the firm's.
+const OUTCOME_SOURCE = {
+  'staff-recorded-from-candidate': 'Reported by the candidate, recorded by staff',
+  'consultant-decision': 'Decision by the search team'
+};
+
+const DOC_KIND = {
+  resume:     { label:'Resume', restricted:false },
+  application:{ label:'Application', restricted:false },
+  supporting: { label:'Supporting material', restricted:false },
+  // Narrower than the rest of the file, and labelled as such wherever listed.
+  reference:  { label:'Reference material', restricted:true },
+  background: { label:'Background check', restricted:true }
+};
+
+const CHANNEL = {
+  email:'Email', phone:'Phone', letter:'Letter', 'in-person':'In person', other:'Other'
+};
+const PURPOSE = {
+  invitation:'Invitation', reminder:'Reminder', scheduling:'Scheduling',
+  status:'Status update', decision:'Decision', accommodation:'Accommodation', other:'Other'
+};
+
 /* ===========================================================================
  * Destinations
  *
@@ -167,7 +220,10 @@ const state = {
   tab:{},
   reviewCol:'both',
   // Home's local text filter over the searches already loaded.
-  homeQ:''
+  homeQ:'',
+  // Who has not been contacted and whose follow-up date has passed, as the
+  // server reports it. Refreshed when the candidate list opens.
+  followUps:null
 };
 
 function toast(msg, ms=3400){
@@ -681,7 +737,7 @@ function availableDests(){
 // Every view this build can render. A deep link to anything else lands on the
 // search overview rather than silently painting Home under a stale address.
 function knownView(view){
-  if (['home','new','archives','packages','overview','facts','history','person','people','intake-mine'].includes(view)) return true;
+  if (['home','new','archives','packages','overview','facts','verify','closeout','history','person','people','intake-mine'].includes(view)) return true;
   if (HUB_VIEWS.includes(view)) return true;
   return STEP_FLOW.includes(view);
 }
@@ -810,7 +866,9 @@ async function go(view, extra={}, opts={}){
     toast('That step is run by the search consultant.');
     view = 'overview';
   }
-  if (state.search && ['facts','history'].includes(view) && !canEdit()){
+  // Facts, verification, closeout and history are the consultant's side of the
+  // file. A committee member who follows a link to one lands on the search.
+  if (state.search && ['facts','verify','closeout','history'].includes(view) && !canEdit()){
     view = 'overview';
   }
   if (view === 'archives' && isCommittee()) view = 'home';
@@ -834,6 +892,13 @@ async function go(view, extra={}, opts={}){
     if (view === 'archives') state.archives = await api('/api/archives');
     if (view === 'history') state.history = await api('/api/searches/'+state.search.id+'/history');
   } catch (error) { toast(error.message); return; }
+  // Who still needs chasing, read from the server so the list and the export
+  // agree on the answer. Deliberately not fatal: the candidate list is still
+  // worth opening when this one call fails.
+  if (['screen','people'].includes(view) && state.search && canEdit()){
+    try { state.followUps = await api('/api/searches/'+state.search.id+'/follow-ups'); }
+    catch { state.followUps = null; }
+  }
   Object.assign(state, extra, { view });
   if (view === 'brochure' && brochureNeedsFill(state.search)){
     pushRoute(opts.replace);
@@ -1300,6 +1365,11 @@ function railAccount(u, s){
 }
 
 function shell(body){
+  // A closed search refuses every ordinary write at the server. Saying so once
+  // at the top of whatever screen the user is on is the difference between a
+  // deliberate freeze and a page whose Save button mysteriously fails.
+  const frozen = frozenNotice();
+  if (frozen) body = frozen + body;
   const warning = state.search?.staleArtifacts?.[state.view];
   if (warning) body = `<div class="notice notice--info" role="status">${esc(warning)}</div>` + body;
   const u = state.user, s = state.view==='packages' ? null : state.search;
@@ -2119,7 +2189,9 @@ function vOverview(){
       `${primary}
        ${menu('ovmore','More', [
          canEdit() ? `<button class="btn btn--ghost btn--sm" data-go="facts">Search facts</button>` : '',
+         canEdit() ? `<button class="btn btn--ghost btn--sm" data-go="verify">County fact verification</button>` : '',
          `<button class="btn btn--ghost btn--sm" data-go="process">Process checklist</button>`,
+         canEdit() ? `<button class="btn btn--ghost btn--sm" data-go="closeout">${isFrozen(s)?'Closeout and reopening':'Close this search'}</button>` : '',
          canEdit() ? `<button class="btn btn--ghost btn--sm btn--danger" data-act="delete-search" data-id="${s.id}" data-name="${esc(s.client||s.no||'this search')}">Archive search</button>` : ''
        ])}`)}
     <div class="band"><div class="wrap stack">
@@ -2364,8 +2436,163 @@ function vFacts(){
       ${actionBar(
         `<button class="btn btn--primary" data-act="save-facts">Save facts</button>`,
         withTip(`<button type="button" class="btn btn--secondary" data-act="research">Research this ${esc(jurisdictionInfo().noun)}</button>`, TIPS.research)
+        + ` <button type="button" class="btn btn--ghost" data-go="verify">County fact verification${factGap(s)}</button>`
         + ` <button type="button" class="btn btn--ghost" data-go="profile">Candidate profile</button>`)}
     </form></div></div>`);
+}
+
+// How many material facts are still unconfirmed, shown on the way in so the
+// gap is visible while the work is happening rather than when a county reads
+// the brochure. Defined below vFacts deliberately: tests/jurisdictions.js
+// renders that screen from the source between vFacts and seatPill, so its
+// helpers have to sit inside that range.
+function factGap(s){
+  const fs = s?.factStatus;
+  if (!fs || !fs.materialTotal || fs.readyToPublish) return '';
+  return ' ' + pill('wait', (fs.materialTotal - fs.materialConfirmed) + ' outstanding');
+}
+
+/* ===========================================================================
+ * County fact verification (DEP-07)
+ *
+ * Drafting can propose who appoints the administrator. It cannot confirm it.
+ * The difference between a fact a person checked against a named source and a
+ * sentence a model produced is the difference between a brochure a county will
+ * stand behind and one it will not, so the record has to show which is which.
+ * ========================================================================= */
+
+const FACT_STATE = {
+  confirmed:  { pill:'ok',   label:'Confirmed' },
+  unverified: { pill:'wait', label:'Not verified' },
+  missing:    { pill:'idle', label:'Not recorded' }
+};
+
+function factBlock(f){
+  const st = FACT_STATE[f.state] || FACT_STATE.missing;
+  return `<div class="spec" data-fact="${esc(f.key)}">
+    <div class="spec__bar">${esc(f.label)} ${pill(st.pill, st.label)}${f.material?pill('info','Material'):''}</div>
+    <div class="spec__body stack stack--tight">
+      <p class="t-small">${esc(f.why||'')}</p>
+      ${f.state !== 'confirmed' && f.needs?.length
+        ? `<p class="t-small">Still needs: ${esc(f.needs.join(', '))}.</p>` : ''}
+      <div class="formgrid">
+        ${field('What is true','', `<textarea class="input ed" name="${esc(f.key)}.value">${esc(f.value||'')}</textarea>`, { span:true })}
+        ${field('Source','The document or page it was read from.', `<input class="input" name="${esc(f.key)}.source" value="${esc(f.source||'')}" placeholder="County code § 2-14, or a page URL">`)}
+        ${field('Current as of','The date that source was current.', `<input class="input" name="${esc(f.key)}.asOf" value="${esc(f.asOf||'')}" placeholder="2026-09-01">`)}
+        ${field('Confirmed by','The person who checked it. Naming yourself here is a statement that you did.',
+          `<input class="input" name="${esc(f.key)}.confirmedBy" value="${esc(f.confirmedBy||'')}">`)}
+      </div>
+      ${f.confirmedAt ? `<p class="t-small">Last confirmed ${esc(String(f.confirmedAt).slice(0,10))}. The timestamp is stamped by the server, not typed.</p>` : ''}
+    </div></div>`;
+}
+
+function vVerify(){
+  const s = state.search;
+  const fs = s.factStatus || { fields:[], applies:false };
+  const fields = fs.fields || [];
+  return shell(`
+    ${head('Search facts','County fact verification',
+      'What a person checked against a named source, and what is still only asserted. Material facts must be confirmed before recruiting copy goes out.',
+      `<button type="button" class="btn btn--secondary" data-go="facts">Search facts</button>`)}
+    <div class="band"><div class="wrap stack">
+      ${!fs.applies ? `<div class="notice notice--info"><div>
+        <div class="notice__t">This search is not a county</div>
+        <div class="notice__b">These questions are about county authority and governance. They are recorded
+          either way, but the publishing gate applies to county searches.</div></div></div>` : ''}
+      <div class="notice notice--${fs.readyToPublish?'ok':'info'}" role="status"><div>
+        <div class="notice__t">${fs.readyToPublish ? 'Every material fact is confirmed' : 'Material facts outstanding'}</div>
+        <div class="notice__b">${esc(fs.materialConfirmed||0)} of ${esc(fs.materialTotal||0)} material facts confirmed,
+          ${esc(fs.confirmedCount||0)} of ${esc(fs.total||0)} overall.${!fs.readyToPublish && fs.outstanding?.length
+            ? ' Outstanding: '+esc(fs.outstanding.join(', '))+'.' : ''}
+          <br>Generated copy is a draft whatever this says. Confirming a fact means a person checked it, not that a model produced it.</div>
+      </div></div>
+      <form id="verifyform" class="stack">
+        ${fields.map(factBlock).join('')}
+        ${actionBar(
+          `<button type="button" class="btn btn--primary" data-act="save-verification">Save these facts</button>`,
+          `<button type="button" class="btn btn--secondary" data-go="overview">Back to this search</button>`,
+          'Who confirmed a fact, and when, is recorded by the server.',
+          'Unsaved facts')}
+      </form>
+    </div></div>`);
+}
+
+/* ===========================================================================
+ * Closeout (DEP-09)
+ *
+ * Archive is filing. Closing is the statement that the work concluded and how,
+ * and it freezes the file so a concluded record cannot drift afterwards.
+ * ========================================================================= */
+
+function vCloseout(){
+  const s = state.search;
+  const lc = s.lifecycle || { status:'active', byOutcome:{}, selected:[], undecided:[], finalDocuments:[] };
+  const frozen = isFrozen(s);
+  const counts = Object.entries(lc.byOutcome || {});
+  return shell(`
+    ${head('This search','Closeout',
+      'How this search concluded, and the record it leaves behind. Closing is separate from archiving: one says the work finished, the other files it away.')}
+    <div class="band"><div class="wrap stack">
+      <div class="spec"><div class="spec__bar">Status ${pill(frozen?'stop':'ok', lc.status||'active')}</div>
+        <div class="spec__body stack stack--tight">
+          ${kv('Candidates on the file', esc(String(lc.candidates||0)))}
+          ${counts.map(([k, n]) => kv(k === 'in-process' ? 'Still in process' : (OUTCOME[k]?.label || k), esc(String(n)))).join('')}
+          ${lc.selected?.length ? kv('Selected', lc.selected.map(p => esc(p.name)).join(', ')) : ''}
+          ${lc.closedAt ? kv('Closed', esc(String(lc.closedAt).slice(0,10))) : ''}
+          ${lc.reopenCount ? kv('Reopened', esc(String(lc.reopenCount))+' time'+(lc.reopenCount===1?'':'s')) : ''}
+        </div></div>
+
+      ${lc.undecided?.length ? `<div class="notice notice--info"><div>
+        <div class="notice__t">${esc(String(lc.undecided.length))} candidate${lc.undecided.length===1?' has':'s have'} no outcome recorded</div>
+        <div class="notice__b">Closing does not decide them. A search can close with people undecided, but the
+          record will not say what happened to them.<br>
+          ${lc.undecided.slice(0,12).map(p => `<button type="button" class="btn btn--ghost btn--sm" data-cand="${esc(p.id)}">${esc(p.name)}</button>`).join('')}
+          ${lc.undecided.length>12?'<span class="t-small"> and '+esc(String(lc.undecided.length-12))+' more</span>':''}</div></div></div>` : ''}
+
+      <div class="spec"><div class="spec__bar">Final documents · ${esc(String((lc.finalDocuments||[]).length))}</div>
+        <div class="spec__body stack stack--tight">
+          ${(lc.finalDocuments||[]).length
+            ? `<p class="t-small">${(lc.finalDocuments||[]).map(k => esc(DRAFTS[k]?.title || STEP_NAME[k] || k)).join(' · ')}</p>`
+            : '<p class="t-small">No documents drafted on this file.</p>'}
+          <p class="t-small">Documents held outside Slate — resumes, background reports, signed agreements — are
+            recorded as references on each candidate and must be exported from the repository that holds them.</p>
+        </div></div>
+
+      ${frozen ? `<div class="spec"><div class="spec__bar">Reopen</div>
+        <div class="spec__body">
+          <form id="reopenform" class="stack stack--tight">
+            <p class="t-small">Reopening restores ordinary editing. It does not put revoked candidate links back
+              into circulation: issuing a new link is a separate, deliberate act on each candidate.</p>
+            ${field('Why is this search being reopened','Recorded on the file.', `<textarea class="input ed" name="reason" required></textarea>`, { span:true, req:true })}
+            <div class="row"><button type="button" class="btn btn--primary" data-act="reopen-search">Reopen this search</button></div>
+          </form>
+        </div></div>`
+      : `<div class="spec"><div class="spec__bar">Close this search</div>
+        <div class="spec__body">
+          <form id="closeform" class="stack stack--tight">
+            <p class="t-small">Closing freezes the file: no edits, no scoring, no candidate submissions, and every
+              outstanding candidate link is revoked. It can be reopened deliberately, with a reason.</p>
+            <div class="formgrid">
+              ${field('Outcome','', `<select class="input" name="status">
+                <option value="closed">Closed — the search concluded</option>
+                <option value="cancelled">Cancelled — the search ended without a hire</option>
+              </select>`)}
+              ${field('Why','Recorded on the file and in the export.', `<textarea class="input ed" name="reason" required></textarea>`, { span:true, req:true })}
+            </div>
+            <div class="row"><button type="button" class="btn btn--primary" data-act="close-search">Close this search</button></div>
+          </form>
+        </div></div>`}
+
+      <div class="spec"><div class="spec__bar">Where the rest of the record is</div>
+        <div class="spec__body stack stack--tight">
+          <p class="t-small">Every close and reopen is recorded on the activity feed with the account that did it.
+            Each candidate's outcome, with its reason and evidence, is on that candidate.</p>
+          <div class="row">
+            <button type="button" class="btn btn--secondary btn--sm" data-go="activity">Open activity</button>
+            <button type="button" class="btn btn--secondary btn--sm" data-go="screen">Open candidates</button>
+          </div>
+        </div></div>
+    </div></div>`);
 }
 
 /* ===========================================================================
@@ -3714,6 +3941,63 @@ function stagePill(stage){
   return pill(k, STAGE_ONE[stage] || stage);
 }
 
+/* ===========================================================================
+ * Outcomes and the search lifecycle
+ *
+ * Stage is where someone has reached. An outcome is how their part of the
+ * search ended, and it is a separate fact: a finalist who withdrew is still a
+ * finalist. The search's own lifecycle is separate again — closing a search
+ * states that the work concluded, which filing it in Archive does not.
+ * ========================================================================= */
+
+// The current outcome for a candidate, which is the last entry recorded. A
+// correction is another entry, so the earlier decision stays readable.
+function outcomeOf(c){
+  const list = c?.dispositions || [];
+  return list.length ? list[list.length - 1] : null;
+}
+
+function outcomePill(c){
+  const current = outcomeOf(c);
+  if (!current) return '';
+  const meta = OUTCOME[current.outcome];
+  return meta ? pill(meta.pill, meta.label) : pill('idle', current.outcome);
+}
+
+/**
+ * Why this candidate can no longer be advanced, or '' if they can.
+ *
+ * Scores already recorded stay: they are evidence of how the committee worked.
+ * What stops is new activity that would contradict the outcome. The hire is
+ * the exception — their file continues through contracting.
+ */
+function concludedBy(c){
+  const current = outcomeOf(c);
+  if (!current || current.outcome === 'selected') return '';
+  return OUTCOME[current.outcome]?.label || '';
+}
+
+function lifecycleOf(s = state.search){
+  return s?.lifecycle?.status || 'active';
+}
+
+function isFrozen(s = state.search){
+  return ['closed', 'cancelled'].includes(lifecycleOf(s));
+}
+
+function frozenNotice(){
+  const s = state.search;
+  if (!s || !isFrozen(s)) return '';
+  const status = lifecycleOf(s);
+  const when = String(s.lifecycle?.closedAt || '').slice(0, 10);
+  const why = s.lifecycle?.reason || '';
+  return `<div class="notice notice--stop" role="status"><div>
+    <div class="notice__t">This search is ${esc(status)}${when?' · '+esc(when):''}</div>
+    <div class="notice__b">Edits, scoring and candidate submissions are closed. Every candidate link was revoked at closeout.${why?' Recorded reason: '+esc(why):''}
+      ${canEdit()?' <button type="button" class="btn btn--secondary btn--sm" data-go="closeout">Open closeout</button>':''}</div>
+  </div></div>`;
+}
+
 function answerOf(answers, q){
   if (!answers) return '';
   return answers['q'+q.n] || answers[q.n] || answers[String(q.n)] || '';
@@ -3778,7 +4062,7 @@ function candidateRow(c){
   return `<tr>
     <th scope="row"><button type="button" class="candlink" data-cand="${c.id}">${esc(c.name)}</button>
       <span class="candmeta">${esc(c.cur||'')}${c.cur && c.org ? ' · ' : ''}${esc(c.org||'')}</span></th>
-    <td data-label="Stage">${stagePill(c.stage)}</td>
+    <td data-label="Stage">${stagePill(c.stage)}${outcomePill(c)}</td>
     <td data-label="Response">${c.survey1 ? pill('ok','Response in') : pill('idle','No response')}</td>
     <td data-label="Actions" class="candacts">
       ${withTip(`<button type="button" class="btn btn--secondary btn--sm" data-cand="${c.id}">Review</button>`,
@@ -3786,6 +4070,31 @@ function candidateRow(c){
       ${invite}
     </td>
   </tr>`;
+}
+
+/**
+ * Who still needs chasing.
+ *
+ * The question a consultant asks every morning, and the one thing a contact
+ * log is actually for. Computed by the server so this panel and the exported
+ * record cannot disagree about who was contacted.
+ */
+function followUpPanel(){
+  const f = state.followUps;
+  if (!canEdit() || !f || !f.total) return '';
+  const names = list => list.slice(0, 8).map(p =>
+    `<button type="button" class="btn btn--ghost btn--sm" data-cand="${esc(p.id)}">${esc(p.name)}</button>`).join('')
+    + (list.length > 8 ? `<span class="t-small"> and ${list.length - 8} more</span>` : '');
+
+  return `<div class="spec"><div class="spec__bar">Follow-up ${pill(f.due.length?'wait':'idle', f.total+' to chase')}</div>
+    <div class="spec__body stack stack--tight">
+      ${f.due.length ? `<div><div class="t-label">Follow-up date has passed</div>
+        <div class="row">${names(f.due)}</div></div>` : ''}
+      ${f.uncontacted.length ? `<div><div class="t-label">No contact recorded yet</div>
+        <div class="row">${names(f.uncontacted)}</div></div>` : ''}
+      <p class="t-small">Contact is logged by hand on each candidate. Slate sends nothing, so this
+        reflects what staff recorded, not what a mail server delivered.</p>
+    </div></div>`;
 }
 
 function vScreen(){
@@ -3803,6 +4112,7 @@ function vScreen(){
       canEdit() ? `<button type="button" class="btn btn--primary" data-panel="addcand" aria-expanded="${addOpen}" aria-controls="addcand" data-open-label="Add a candidate" data-close-label="Close this form">${addOpen?'Close this form':'Add a candidate'}</button>` : '')}
     <div class="band"><div class="wrap stack">
       ${canEdit() && s.invitesRotatedAt ? '<div class="notice notice--info">Candidate links were replaced during the privacy update. Share the current links below; links issued before the update no longer work.</div>' : ''}
+      ${followUpPanel()}
       ${!all.length ? emptyState(
           canEdit() ? 'No candidates on the file yet' : 'No candidates yet',
           canEdit()
@@ -3909,6 +4219,157 @@ function vFinalists(){
     </div></div>`);
 }
 
+/* ===========================================================================
+ * Candidate documents and contact log (DEP-08)
+ *
+ * Slate holds neither. A resume lives in the county-approved repository and a
+ * message is sent by a person from their own mailbox; what is recorded here is
+ * that a document was received and where it is, and that staff say they made
+ * contact. Both screens are written to say exactly that, because a search
+ * record that implies more than the application knows is worse than no record.
+ * ========================================================================= */
+
+function documentRow(c, d){
+  const kind = DOC_KIND[d.kind] || { label:d.kind, restricted:false };
+  return `<div class="hubrow">
+    <div class="hubrow__id"><b>${esc(d.label)}</b>
+      <div class="t-small">${esc(kind.label)} · received ${esc(String(d.receivedAt||'').slice(0,10))}${d.recordedByName?' · recorded by '+esc(d.recordedByName):''}
+        ${d.url ? `<br><a href="${esc(d.url)}" target="_blank" rel="noopener noreferrer">Open in the repository</a>` : '<br>No link recorded.'}
+        ${d.note ? '<br>'+esc(d.note) : ''}</div></div>
+    <div class="hubrow__st">${d.restricted ? pill('stop','Restricted') : ''}</div>
+    <div class="hubrow__act"><button type="button" class="btn btn--ghost btn--sm" data-act="drop-doc" data-cid="${esc(c.id)}" data-docid="${esc(d.id)}" data-label="${esc(d.label)}">Remove</button></div>
+  </div>`;
+}
+
+function documentsPanel(c){
+  const list = c.documents || [];
+  const open = Boolean(state.open['doc-'+c.id]);
+  return `<div class="spec"><div class="spec__bar">Documents received ${pill(list.length?'ok':'idle', String(list.length))}</div>
+    <div class="spec__body stack stack--tight">
+      <p class="t-small">A reference to a document, not the document. Access stays whatever the repository
+        grants; recording a link here does not widen it. Reference and background material is marked
+        restricted and is narrower than the rest of the file.</p>
+      ${list.length ? list.map(d => documentRow(c, d)).join('')
+        : '<div class="t-small">Nothing recorded yet.</div>'}
+      <div class="row"><button type="button" class="btn btn--secondary btn--sm" data-panel="doc-${esc(c.id)}"
+        aria-expanded="${open}" aria-controls="docform-${esc(c.id)}"
+        data-open-label="Record a document" data-close-label="Close this form">${open?'Close this form':'Record a document'}</button></div>
+      <div id="docform-${esc(c.id)}"${open?'':' hidden'}>
+        <form id="docform" class="stack stack--tight" data-cid="${esc(c.id)}">
+          <div class="formgrid">
+            ${field('Type','', `<select class="input" name="kind">${Object.entries(DOC_KIND).map(([k,v])=>`<option value="${esc(k)}">${esc(v.label)}</option>`).join('')}</select>`)}
+            ${field('Label','What this document is, in a few words.', `<input class="input" name="label" placeholder="Resume, received 4 Sep" required>`, { req:true })}
+            ${field('Link','https only, to the approved repository. Leave blank if it is held offline.', `<input class="input" name="url" placeholder="https://">`, { span:true })}
+            ${field('Note','', `<textarea class="input ed" name="note"></textarea>`, { span:true })}
+          </div>
+          <div class="row"><button type="button" class="btn btn--primary btn--sm" data-act="add-doc" data-cid="${esc(c.id)}">Record this document</button></div>
+        </form>
+      </div>
+    </div></div>`;
+}
+
+function contactRow(e){
+  return `<div class="feed__i">
+    <span class="feed__w">${esc(CHANNEL[e.channel]||e.channel)} · ${esc(PURPOSE[e.purpose]||e.purpose)}</span>
+    <span class="feed__x">${esc(e.summary)}${e.followUpOn?' · follow up '+esc(e.followUpOn):''}${e.actorName?' · '+esc(e.actorName):''}</span>
+    <span class="feed__t">${esc(String(e.at||'').slice(0,10))}</span>
+  </div>`;
+}
+
+function contactPanel(c){
+  const log = c.communications || [];
+  const open = Boolean(state.open['comm-'+c.id]);
+  const today = new Date().toISOString().slice(0,10);
+  return `<div class="spec"><div class="spec__bar">Contact log ${pill(log.length?'ok':'idle', String(log.length))}</div>
+    <div class="spec__body stack stack--tight">
+      <p class="t-small">Staff-recorded contact. Slate has no mail server and cannot confirm delivery, so
+        every line here says what someone recorded doing, not what a candidate received.</p>
+      ${log.length ? `<div class="feed">${log.map(contactRow).join('')}</div>`
+        : '<div class="t-small">No contact recorded yet.</div>'}
+      <div class="row"><button type="button" class="btn btn--secondary btn--sm" data-panel="comm-${esc(c.id)}"
+        aria-expanded="${open}" aria-controls="commform-${esc(c.id)}"
+        data-open-label="Log contact" data-close-label="Close this form">${open?'Close this form':'Log contact'}</button></div>
+      <div id="commform-${esc(c.id)}"${open?'':' hidden'}>
+        <form id="commform" class="stack stack--tight" data-cid="${esc(c.id)}">
+          <div class="formgrid">
+            ${field('How','', `<select class="input" name="channel">${Object.entries(CHANNEL).map(([k,v])=>`<option value="${esc(k)}">${esc(v)}</option>`).join('')}</select>`)}
+            ${field('About','', `<select class="input" name="purpose">${Object.entries(PURPOSE).map(([k,v])=>`<option value="${esc(k)}">${esc(v)}</option>`).join('')}</select>`)}
+            ${field('What was communicated','', `<textarea class="input ed" name="summary" required></textarea>`, { span:true, req:true })}
+            ${field('Follow up on','Leave blank if nothing is owed. Dated follow-ups appear on the candidate list.', `<input class="input" name="followUpOn" type="date" min="${esc(today)}">`)}
+          </div>
+          <div class="row"><button type="button" class="btn btn--primary btn--sm" data-act="log-contact" data-cid="${esc(c.id)}">Record this contact</button></div>
+        </form>
+      </div>
+    </div></div>`;
+}
+
+/* ===========================================================================
+ * Candidate outcome (DEP-09)
+ *
+ * A decision is an event, never an edit. Correcting one adds an entry that
+ * names what it supersedes, so the file shows both what was decided and that
+ * it was later changed — which is the whole point of keeping it.
+ * ========================================================================= */
+
+function outcomeHistory(c){
+  const list = c.dispositions || [];
+  if (!list.length) return '';
+  return `<div class="spec"><div class="spec__bar">Decision history · ${list.length}</div>
+    <div class="spec__body stack stack--tight">
+      ${list.slice().reverse().map(d => {
+        const meta = OUTCOME[d.outcome] || { label:d.outcome, pill:'idle' };
+        const superseded = list.some(other => other.supersedes === d.id);
+        return `<div class="spec"><div class="spec__bar">${pill(meta.pill, meta.label)}
+          ${superseded ? pill('idle','Superseded') : ''}${d.supersedes ? pill('info','Correction') : ''}</div>
+          <div class="spec__body stack stack--tight">
+            ${kv('Recorded', esc(String(d.at||'').slice(0,16).replace('T',' ')) + (d.actorName ? ' · '+esc(d.actorName) : ''))}
+            ${kv('Basis', esc(OUTCOME_SOURCE[d.source] || d.source || ''))}
+            ${kv('Reason', esc(d.reason||''))}
+            ${d.evidence ? kv('Job-related evidence', esc(d.evidence)) : ''}
+          </div></div>`;
+      }).join('')}
+    </div></div>`;
+}
+
+function outcomePanel(c){
+  const current = outcomeOf(c);
+  const frozen = isFrozen();
+  return `<div class="stack">
+    <div class="spec"><div class="spec__bar">Outcome</div>
+      <div class="spec__body stack stack--tight">
+        ${current
+          ? `<p class="t-small">Recorded as ${outcomePill(c)} on ${esc(String(current.at||'').slice(0,10))}. Recording another outcome
+              corrects this one; the entry above stays on the file.</p>`
+          : `<p class="t-small">Nothing recorded. This candidate is still in process.</p>`}
+        <p class="t-small">An outcome is separate from stage. Withdrawing, declining and non-selection all
+          revoke this candidate's questionnaire link; selection does not, because the hire's file continues
+          through contracting.</p>
+      </div></div>
+
+    ${frozen ? `<div class="notice notice--info"><div><div class="notice__t">The search is ${esc(lifecycleOf())}</div>
+      <div class="notice__b">Reopen it from closeout before recording anything further.</div></div></div>` : `
+    <div class="spec"><div class="spec__bar">${current ? 'Correct the outcome' : 'Record an outcome'}</div>
+      <div class="spec__body">
+        <form id="outcomeform" class="stack stack--tight" data-cid="${esc(c.id)}">
+          <div class="formgrid">
+            ${field('Outcome','', `<select class="input" name="outcome">
+              ${Object.entries(OUTCOME).map(([k,v])=>`<option value="${esc(k)}">${esc(v.label)}</option>`).join('')}
+            </select>`)}
+            ${field('Reason','Why this decision was made. Required.', `<textarea class="input ed" name="reason" required></textarea>`, { span:true, req:true })}
+            ${field('Job-related evidence','Required for Selected and Not selected. Name the criteria, scores or responses the decision rests on.',
+              `<textarea class="input ed" name="evidence"></textarea>`, { span:true })}
+          </div>
+          <p class="t-small">${Object.entries(OUTCOME).map(([,v]) => '<b>'+esc(v.label)+'</b> — '+esc(v.hint)).join('<br>')}</p>
+          ${current ? `<label class="t-small u-inline-check"><input type="checkbox" name="correction" checked>
+            Record this as a correction of the ${esc(OUTCOME[current.outcome]?.label || current.outcome)} entry</label>` : ''}
+          <div class="row"><button type="button" class="btn btn--primary" data-act="record-outcome" data-cid="${esc(c.id)}">Record this outcome</button></div>
+        </form>
+      </div></div>`}
+
+    ${outcomeHistory(c)}
+  </div>`;
+}
+
 function vPerson(){
   const s = state.search;
   const c = (s.candidates||[]).find(x=>x.id===state.sel);
@@ -3923,7 +4384,10 @@ function vPerson(){
       return { name: u?.name || uid, scores: byCand[c.id] || {} };
     })
     .filter(row => Object.keys(row.scores).length);
-  const nextStage = c.stage==='applicant' ? 'semifinalist' : c.stage==='semifinalist' ? 'finalist' : '';
+  // An outcome that ended this person's participation stops new advancement.
+  // The scores they already have stay exactly where they are.
+  const concluded = concludedBy(c);
+  const nextStage = concluded ? '' : c.stage==='applicant' ? 'semifinalist' : c.stage==='semifinalist' ? 'finalist' : '';
   const nextLabel = nextStage==='semifinalist' ? 'Advance to semifinalist' : nextStage==='finalist' ? 'Advance to finalist' : '';
   const scoredCount = (s.criteria||[]).filter(cr => mine[cr.id]).length;
 
@@ -3971,7 +4435,7 @@ function vPerson(){
 
   return shell(`
     ${head('Candidate', c.name,
-      `${esc(c.cur||'')}${c.cur && c.org ? ', ' : ''}${esc(c.org||'')} ${stagePill(c.stage)}`,
+      `${esc(c.cur||'')}${c.cur && c.org ? ', ' : ''}${esc(c.org||'')} ${stagePill(c.stage)}${outcomePill(c)}`,
       canEdit() && nextStage
         ? withTip(`<button type="button" class="btn btn--secondary" data-act="advance" data-stage="${nextStage}">${esc(nextLabel)}</button>`,
             nextStage==='semifinalist' ? TIPS.advanceSemi : TIPS.advanceFinal)
@@ -3979,8 +4443,13 @@ function vPerson(){
     <div class="band"><div class="wrap stack">
       ${secTabs('person', [
         { key:'review', label:'Review' },
-        { key:'details', label:'Details' }
+        { key:'details', label:'Details' },
+        ...(canEdit() ? [{ key:'outcome', label:'Outcome' }] : [])
       ])}
+      ${concluded ? `<div class="notice notice--info" role="status"><div>
+        <div class="notice__t">${esc(concluded)}</div>
+        <div class="notice__b">Scores already recorded stay on the file as evidence of how the committee worked.
+          This candidate cannot be advanced or newly evaluated while that outcome stands.</div></div></div>` : ''}
       <div data-tabpanel="person:review" role="tabpanel" id="panel-person-review" aria-labelledby="tab-person-review" tabindex="0" class="stack"${(state.tab?.person||'review')==='review'?'':' hidden'}>
         ${sealed?`<div class="seal">${ico('lock')}<div><div class="empty__t">Other scores are sealed</div><div class="t-small">Enter your scores. You will see the rest of the panel after the account manager releases scores.</div></div></div>`:''}
         <div class="colswitch" role="group" aria-label="What to show">
@@ -4000,15 +4469,22 @@ function vPerson(){
       <div data-tabpanel="person:details" role="tabpanel" id="panel-person-details" aria-labelledby="tab-person-details" tabindex="0" class="stack"${(state.tab?.person||'review')==='details'?'':' hidden'}>
         <div class="spec"><div class="spec__bar">Record</div>
           <div class="spec__body">${record.map(([k, v]) => kv(k, esc(v))).join('')}</div></div>
+        ${canEdit() ? documentsPanel(c) : ''}
+        ${canEdit() ? contactPanel(c) : ''}
         ${canEdit() ? `<div class="spec"><div class="spec__bar">Candidate link and corrections</div><div class="spec__body stack stack--tight">
-          <p class="t-small">Current invite link: <span class="mono">${esc(location.origin+'/apply/'+c.invite)}</span></p>
+          ${c.invite
+            ? `<p class="t-small">Current invite link: <span class="mono">${esc(location.origin+'/apply/'+c.invite)}</span></p>`
+            : `<p class="t-small">This candidate has no live link. It was revoked${c.inviteRevokedAt?' on '+esc(String(c.inviteRevokedAt).slice(0,10)):''}, and reissuing one is a deliberate act.</p>`}
           <div class="row">
-            ${withTip(`<button type="button" class="btn btn--secondary btn--sm" data-act="copy-invite" data-cid="${c.id}">Copy invite</button>`, TIPS.copyInvite)}
-            ${withTip(`<button type="button" class="btn btn--secondary btn--sm" data-act="replace-invite" data-cid="${c.id}">Replace candidate link</button>`, TIPS.replaceInvite)}
+            ${c.invite ? withTip(`<button type="button" class="btn btn--secondary btn--sm" data-act="copy-invite" data-cid="${c.id}">Copy invite</button>`, TIPS.copyInvite) : ''}
+            ${withTip(`<button type="button" class="btn btn--secondary btn--sm" data-act="replace-invite" data-cid="${c.id}">${c.invite?'Replace candidate link':'Issue a new link'}</button>`, TIPS.replaceInvite)}
             ${['survey1','survey2'].filter(k=>c[k]).map(k=>withTip(`<button type="button" class="btn btn--secondary btn--sm" data-act="reopen-survey" data-cid="${c.id}" data-which="${k}">Reopen ${k==='survey1'?'initial':'semifinalist'} questionnaire</button>`, TIPS.reopenSurvey)).join('')}
           </div>
         </div></div>` : ''}
       </div>
+      ${canEdit() ? `<div data-tabpanel="person:outcome" role="tabpanel" id="panel-person-outcome" aria-labelledby="tab-person-outcome" tabindex="0" class="stack"${(state.tab?.person||'review')==='outcome'?'':' hidden'}>
+        ${outcomePanel(c)}
+      </div>` : ''}
       ${actionBar(
         withTip(`<button type="button" class="btn btn--primary" data-act="save-score">Save my scores</button>`, TIPS.saveScores),
         `<button type="button" class="btn btn--secondary" data-go="screen">Back to candidates</button>`,
@@ -4252,6 +4728,8 @@ function page(){
     case 'activity': return vActivity();
     case 'process': return vProcess();
     case 'facts': return vFacts();
+    case 'verify': return vVerify();
+    case 'closeout': return vCloseout();
     case 'team': return vTeam();
     case 'intake':
     case 'intake-mine': return vIntake();
@@ -5123,6 +5601,115 @@ document.addEventListener('click', async e => {
     await withBusy(async () => {
       state.search = await api('/api/searches/'+state.search.id, { method:'PATCH', body });
       toast('Facts saved.');
+    });
+    return;
+  }
+
+  /* --- county fact verification (DEP-07) --------------------------------- */
+  if (act==='save-verification'){
+    const form = $('#verifyform');
+    if (!form) return;
+    // The form is flat — "appointment.source" — because that is what a form
+    // can carry. The API takes one record per fact, so fold it back here.
+    const body = {};
+    for (const [name, value] of new FormData(form).entries()){
+      const at = name.indexOf('.');
+      if (at < 1) continue;
+      const key = name.slice(0, at), prop = name.slice(at + 1);
+      (body[key] ||= {})[prop] = String(value).trim();
+    }
+    await withBusy(async () => {
+      state.search = await api('/api/searches/'+state.search.id+'/verification', { method:'PUT', body });
+      const fs = state.search.factStatus || {};
+      toast(fs.readyToPublish
+        ? 'Recorded. Every material fact is confirmed.'
+        : 'Recorded. '+((fs.materialTotal||0) - (fs.materialConfirmed||0))+' material fact(s) still outstanding.');
+    });
+    return;
+  }
+
+  /* --- candidate documents and contact (DEP-08) -------------------------- */
+  if (act==='add-doc'){
+    const form = $('#docform');
+    if (!form || !form.reportValidity()) return;
+    const cid = t.dataset.cid;
+    const body = Object.fromEntries(new FormData(form).entries());
+    await withBusy(async () => {
+      state.search = await api('/api/searches/'+state.search.id+'/candidates/'+cid+'/documents', { method:'POST', body });
+      state.open['doc-'+cid] = false;
+      toast('Recorded. Slate holds the reference, not the document.');
+    });
+    return;
+  }
+  if (act==='drop-doc'){
+    if (!confirm('Remove the reference to “'+(t.dataset.label||'this document')+'”? The document itself is untouched.')) return;
+    await withBusy(async () => {
+      state.search = await api('/api/searches/'+state.search.id+'/candidates/'+t.dataset.cid+'/documents/'+t.dataset.docid, { method:'DELETE' });
+      toast('Reference removed.');
+    });
+    return;
+  }
+  if (act==='log-contact'){
+    const form = $('#commform');
+    if (!form || !form.reportValidity()) return;
+    const cid = t.dataset.cid;
+    const body = Object.fromEntries(new FormData(form).entries());
+    await withBusy(async () => {
+      state.search = await api('/api/searches/'+state.search.id+'/candidates/'+cid+'/communications', { method:'POST', body });
+      state.open['comm-'+cid] = false;
+      toast('Contact recorded. Slate sent nothing.');
+    });
+    return;
+  }
+
+  /* --- outcomes and closeout (DEP-09) ------------------------------------ */
+  if (act==='record-outcome'){
+    const form = $('#outcomeform');
+    if (!form || !form.reportValidity()) return;
+    const cid = t.dataset.cid;
+    const data = Object.fromEntries(new FormData(form).entries());
+    const meta = OUTCOME[data.outcome];
+    const who = (state.search.candidates||[]).find(c => c.id === cid)?.name || 'this candidate';
+    if (!confirm('Record “'+(meta?.label || data.outcome)+'” for '+who+'?'
+      + (meta?.revokes ? '\n\nTheir questionnaire link is revoked and they cannot be advanced further.' : '')
+      + (data.correction ? '\n\nThe earlier decision stays on the file, marked superseded.' : ''))) return;
+    const body = {
+      outcome: data.outcome,
+      reason: data.reason,
+      evidence: data.evidence || '',
+      correction: Boolean(data.correction)
+    };
+    await withBusy(async () => {
+      state.search = await api('/api/searches/'+state.search.id+'/candidates/'+cid+'/disposition', { method:'POST', body });
+      toast('Outcome recorded for '+who+'.');
+    });
+    return;
+  }
+  if (act==='close-search'){
+    const form = $('#closeform');
+    if (!form || !form.reportValidity()) return;
+    const body = Object.fromEntries(new FormData(form).entries());
+    const undecided = (state.search.lifecycle?.undecided || []).length;
+    if (!confirm('Mark this search '+body.status+'?\n\nEditing, scoring and candidate submissions stop, and every '
+      + 'outstanding candidate link is revoked.'
+      + (undecided ? '\n\n'+undecided+' candidate(s) have no outcome recorded.' : '')
+      + '\n\nIt can be reopened deliberately, with a reason.')) return;
+    await withBusy(async () => {
+      const out = await api('/api/searches/'+state.search.id+'/close', { method:'POST', body });
+      state.search = out.search;
+      toast('Search '+body.status+'. '+(out.linksRevoked||0)+' candidate link(s) revoked.');
+    });
+    return;
+  }
+  if (act==='reopen-search'){
+    const form = $('#reopenform');
+    if (!form || !form.reportValidity()) return;
+    const body = Object.fromEntries(new FormData(form).entries());
+    if (!confirm('Reopen this search? Revoked candidate links stay revoked; issue new ones individually if they are needed.')) return;
+    await withBusy(async () => {
+      const out = await api('/api/searches/'+state.search.id+'/reopen', { method:'POST', body });
+      state.search = out.search;
+      toast('Search reopened. Candidate links were not restored.');
     });
     return;
   }

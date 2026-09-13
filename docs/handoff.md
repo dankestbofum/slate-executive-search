@@ -2,7 +2,14 @@
 
 Response to `CLAUDE_DEPLOYMENT_HANDOFF.md` §10.
 
-**Release proposed for review:** `9db2042b79efd41cb298140841462f313e00ecd0` on `main`.
+**Release proposed for review:** the `account-controls` branch, on top of
+`77ae9d75622a7d0d918eac2362d3522b6d8f10ab`.
+
+Updated 12 September 2026. The version of this document dated 8 September
+described release `9db2042`; since then Clerk became the only way in, the
+deployment moved from Railway to Render, the workspace was redesigned around
+recruiting destinations, and the three tickets that had shipped as API routes
+with no interface now have one.
 
 **Gate reached: none of the three.** Not "ready for synthetic staging", not
 "ready for county review", not "ready for authorized pilot launch".
@@ -13,9 +20,15 @@ credentials, boots on an empty volume, runs as non-root, survives a restart,
 **shuts down cleanly on SIGTERM**, and restarts with no stale lock. That was
 the blocker recorded in the first version of this document, and it is resolved.
 
-What still blocks Gate 1 is coverage breadth, not the container: no
-Safari/WebKit, no real device, no screen-reader pass, no print inspection, and
-no load test. §6 lists it.
+What still blocks Gate 1 is coverage breadth, not the container. WebKit is now
+covered, which removes one of the five items below. What remains: no real
+device, no screen-reader pass, no print inspection, and no load test. §6 lists
+it.
+
+Note that the CI run counted above predates this branch. The container job has
+not been re-read since Clerk, Render and the interface work landed, and the
+WebKit job has never run in CI at all — it has only been run locally, on
+Windows. That is the first thing to check, not the last.
 
 ---
 
@@ -34,12 +47,12 @@ person or real infrastructure can produce.
 | DEP-04 Failure-safe storage | `c0a6ac2` | yes | **partial** — shutdown verified in CI; no load test |
 | DEP-05 Scheduled recovery off-volume | `b62d3c5` | yes | **no** — no manual restore drill |
 | DEP-06 Health and monitoring | `2596afe` | yes | **partial** — no named operator or alert recipient |
-| DEP-07 County setup and fact verification | `2ac3e4f` | yes | **partial** — drafts never generated or reviewed |
-| DEP-08 Candidate intake and recovery | `3f3a319` | yes | **partial** — no real-device submission |
-| DEP-09 Withdrawal, disposition, closeout | `62e4250` | yes | **partial** — API only, no consultant UI |
+| DEP-07 County setup and fact verification | `2ac3e4f` | yes | **partial** — has a UI now; drafts never generated or reviewed |
+| DEP-08 Candidate intake and recovery | `3f3a319` | yes | **partial** — has a UI now; no real-device submission |
+| DEP-09 Withdrawal, disposition, closeout | `62e4250` | yes | **yes** — consultant UI added and covered in three browsers |
 | DEP-10 Records export and attribution | `c922337` | yes | **partial** — no county records review |
 | DEP-11 AI reliability and cost control | `9db2042` | yes | **no** — no real model call |
-| DEP-12 Browser, accessibility, print | `01409a3` | yes | **partial** — Chromium only; no print check |
+| DEP-12 Browser, accessibility, print | `01409a3` | yes | **partial** — two engines now; no real device, screen reader or print check |
 
 Two commits precede these: `48a0d63` squashed pre-existing uncommitted work
 into a working baseline (before it, `HEAD` could neither build nor test), and
@@ -49,9 +62,9 @@ into a working baseline (before it, `HEAD` could neither build nor test), and
 
 ```bash
 npm ci
-npm run check          # 46 files parsed, 0 failed
-npm test               # 476 checks, exit 0
-npm run test:browser   # 39 checks, 0 failed
+npm run check          # 56 files parsed, 0 failed
+npm test               # 482 checks, exit 0
+npm run test:browser   # 162 checks, 0 failed (54 in each of three projects)
 npm run preflight      # AI key and model entitlement (not run against a live account)
 ```
 
@@ -59,20 +72,28 @@ npm run preflight      # AI key and model entitlement (not run against a live ac
 |---|---|
 | Runtime under test | Node **v22.18.0** (Windows) |
 | Runtime in CI and the image | Node **24.20.0** LTS, pinned by digest |
-| Browser | Chromium 153 (Playwright 1.63), desktop + Pixel 7 emulation |
+| Browser | Chromium 153 and **WebKit 26.6** (Playwright 1.63), desktop each, plus Pixel 7 emulation |
 | Container | **builds and boots** — verified in CI; Docker unavailable locally |
-| CI | GitHub Actions, **11 runs, all green** (latest `cdb2ce8`, 127s) |
+| CI | GitHub Actions, 11 runs all green as of `cdb2ce8` — **not re-read since**, and it has never run the WebKit project |
 
-Server suite composition: 243 baseline, 37 integrity regression, 30 county, 26
-security, 24 roles, 20 candidates, 19 disposition, 18 AI, 17 storage, 17
+Server suite composition: 245 baseline, 37 integrity regression, 30 county, 28
+security, 26 roles, 20 candidates, 19 disposition, 18 AI, 17 storage, 17
 export, 14 monitoring, 11 recovery.
 
-The suite grew from **298 to 476**, plus 39 browser checks that did not exist.
+The suite grew from **298 to 482**, plus 162 browser checks that did not exist.
 
 ## 3. Stubs versus real external services
 
 **Nothing in any automated suite calls an external service.** No paid model
 call has been made at any point.
+
+That sentence was not true the first time WebKit ran, and it is worth recording
+why. Playwright does not intercept service-worker requests under WebKit, so once
+Slate had registered its worker, a reload fetched Clerk’s real SDK from Clerk’s
+real CDN — the fixture domain sits inside Clerk’s own wildcard, so it resolved.
+Nine tests failed, which is how it was noticed. Service workers are now blocked
+in that project. A claim to be offline is only as good as the engine it was
+checked in.
 
 | Area | How it was tested | Real service used |
 |---|---|---|
@@ -142,11 +163,12 @@ The first three hold, and are now evidenced rather than assumed: CI run
 `cdb2ce8` builds the image and exercises every boot, restart and shutdown
 assertion on Ubuntu with Node 24.20.0, and both suites pass there.
 
-The fourth is incomplete. Browser evidence covers Chromium only — no
-Safari/WebKit, no real device, no screen reader, and no print output has been
-looked at. DEP-12 is a P0 ticket and its acceptance criterion explicitly
-requires real-device evidence and visually inspected print examples. Recovery
-evidence is complete synthetically but the manual drill has not been run.
+The fourth is incomplete. Browser evidence now covers two engines — Chromium
+and WebKit, the engine every browser on iOS runs — but no real device, no
+screen reader, and no print output has been looked at. DEP-12 is a P0 ticket
+and its acceptance criterion explicitly requires real-device evidence and
+visually inspected print examples. Recovery evidence is complete synthetically
+but the manual drill has not been run.
 
 Evidence gaps that block the gates:
 
@@ -154,7 +176,8 @@ Evidence gaps that block the gates:
 |---|---|
 | Manual restore drill on real infrastructure | Gate 3 (the plan: "no off-volume restore evidence means no live pilot") |
 | One authorised real draft and research run, with measured latency and cost | Gate 3 |
-| Safari/WebKit, a real phone, screen-reader testing, print output | Gate 1 |
+| A real phone, screen-reader testing, print output | Gate 1 |
+| One CI run of this branch, including the WebKit project and the container job | Gate 1 |
 | Load test against the pilot envelope | Gate 1 |
 | Named operator, backup operator, alert recipient | Gate 3 |
 | Staffed candidate support contact | Gate 2 |
@@ -162,10 +185,16 @@ Evidence gaps that block the gates:
 
 ## 7. Residual limitations
 
-- **Three tickets have no user interface.** Outcomes and closeout (DEP-09),
-  county fact verification (DEP-07), and document and communication logging
-  (DEP-08) are reachable only through the API. A consultant cannot do any of it
-  in the app today.
+- **The new screens have never been used against real work.** Outcomes and
+  closeout (DEP-09), county fact verification (DEP-07) and document and contact
+  logging (DEP-08) now have a consultant interface, covered by browser tests in
+  three projects. No consultant has run a search through them. The shape of
+  these screens is a proposal about how the work is done, and it should be
+  reviewed by someone who does it.
+- **PWA and offline behaviour is covered in Chromium only.** Service workers
+  are blocked in the WebKit project to keep it offline; see §3.
+- **Clerk’s own components are unverified.** The sign-in modal and the account
+  button are excluded from the accessibility scan and are stubbed in every test.
 - **Automated accessibility scanning finds roughly a third of real problems.**
   Zero violations is a floor, not a conformance claim.
 - **The decision history is recoverable history, not a tamper-evident audit
@@ -210,16 +239,20 @@ back requires restoring the snapshot that matches the release.
 
 ## 10. Recommended next steps, in order
 
-1. **Read a CI run.** Everything reported here is local verification. The
-   container job has never executed.
+1. **Run CI on this branch and read it.** Everything new here is local
+   verification on Windows. CI has not run since Clerk, Render and the
+   interface work landed, and it has never run the WebKit project or built the
+   container from this tree.
 2. **Run `npm run preflight`** against the real account to confirm model
    entitlement. Costs nothing; consumes no tokens.
 3. **Configure an off-volume backup destination and run the manual restore
    drill** (`docs/operations.md` §5). Record elapsed time and snapshot age.
 4. **Name an operator, a backup, and an alert recipient.** Configure the
    destination and trigger a test alert.
-5. **Build the missing user interfaces** for outcomes, closeout, and fact
-   verification, or accept that those steps are API-only for the pilot.
+5. **Have a consultant walk the new screens** — outcome, closeout, county fact
+   verification, documents and the contact log — against a synthetic search,
+   and say where the shape is wrong. They were built from the plan's wording,
+   not from watching the work.
 6. **Authorise one staging AI run** against synthetic records to measure
    latency and cost.
 7. **Start the county conversations** in `docs/pilot-decisions.md`. Several

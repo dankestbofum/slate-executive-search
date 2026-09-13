@@ -46,6 +46,20 @@ module.exports = defineConfig({
 
   projects: [
     { name: 'desktop-chrome', use: { ...devices['Desktop Chrome'] } },
+    // WebKit is the engine behind every browser on iOS, so it is the one that
+    // decides whether a candidate on a phone can submit a questionnaire. It is
+    // a real second engine, not a user-agent string: Chromium passing says
+    // nothing about how WebKit parses the CSP, the date inputs or the layout.
+    // It is still desktop WebKit on this machine, not Safari on a device.
+    //
+    // Service workers are blocked here, and the reason matters. Playwright does
+    // not intercept requests a service worker makes in WebKit, so once Slate's
+    // own worker was active a reload fetched Clerk's real SDK from Clerk's real
+    // CDN — the suite left the machine, and the page then failed to initialise
+    // against an instance that does not exist. Blocking the worker keeps this
+    // project offline. The cost is that PWA and offline behaviour is covered in
+    // Chromium only.
+    { name: 'desktop-safari', use: { ...devices['Desktop Safari'], serviceWorkers: 'block' } },
     // Emulation, not a real device. It catches layout and touch-target
     // problems; it does not establish real iOS or Android browser behaviour,
     // which still needs a phone in someone's hand.

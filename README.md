@@ -217,6 +217,25 @@ to treat as stale.
 The image is built from `Dockerfile`. There is no second build path: the former
 `nixpacks.toml` was removed so the runtime cannot drift between build methods.
 
+### Claude API key on Render
+
+Clerk authenticates users; the Express server checks their search access and
+editor permissions before calling Claude with `ANTHROPIC_API_KEY`. Keep that
+key in the server environment, separate from the Clerk keys.
+
+In the Render Dashboard, select the Slate web service, open **Environment**,
+and add `ANTHROPIC_API_KEY` under **Environment Variables**. Choose **Save and
+deploy** to apply it to the existing build. For an initial Blueprint deployment,
+Render prompts for the key because `render.yaml` marks it `sync: false`.
+Never put the actual key in `render.yaml`, frontend code, or Clerk user metadata.
+See [Render environment variables and secrets](https://render.com/docs/configure-environment-variables).
+
+For local development, put a separate development key in the ignored `.env`.
+Check that key and the configured models from the project directory with
+`node --env-file=.env scripts/preflight.js`; this checks model metadata without
+generating content. Production reads Render's environment variables and ignores
+the local `.env` file.
+
 ### Container volume permissions
 
 The container runs as the unprivileged `node` user (uid 1000), not root. A
@@ -292,17 +311,24 @@ draft is a billed call and belongs in an authorised staging run.
 
 ## Browser and accessibility testing
 
-`npm run test:browser` (Playwright, Chromium) starts its own server against a
-throwaway data directory and runs 39 checks across a desktop and an emulated
-mobile viewport: the critical journeys, WCAG 2.1 AA scanning with axe-core, and
-whether the Content-Security-Policy is actually enforced by a browser.
+`npm run test:browser` (Playwright) starts its own server against a throwaway
+data directory and runs 162 checks — the same 54 in each of three projects:
+desktop Chromium, desktop WebKit, and an emulated Pixel 7. They cover the
+critical journeys, WCAG 2.1 AA scanning with axe-core, and whether the
+Content-Security-Policy is actually enforced by a browser.
+
+WebKit is there because it is the engine behind every browser on iOS, which is
+what a committee member or a candidate is likely to be holding. It is a second
+engine, not a second user-agent string: Chromium passing says nothing about how
+WebKit parses the policy, the date inputs or the layout. Service workers are
+blocked in that project, and `playwright.config.js` records why.
 
 That last one matters. The CSP was verified only by asserting on the header
 until DEP-12, and a real browser showed it was blocking the application's own
 styling. **A header is a claim; the browser is what enforces it.**
 
-Not covered, and so not evidenced by a green run: Safari/WebKit, a real phone,
-screen-reader testing, and print output. See
+Not covered, and so not evidenced by a green run: a real phone, screen-reader
+testing, and print output. Desktop WebKit is not Safari on an iPhone. See
 **[docs/test-evidence.md](docs/test-evidence.md)** for the full list of what is
 and is not verified.
 
@@ -353,6 +379,14 @@ circulation.
 The export carries the lifecycle and every outcome decision with its reason,
 evidence, actor, and any corrections.
 
+**Where this is in the app.** A candidate's **Outcome** section — the third tab
+on their page — records and corrects the decision and lists the history, with
+the earlier entries marked superseded. Closeout is its own screen, reached from
+**More** on the search overview; it summarises the outcomes, names the
+candidates still undecided, lists the final documents, and holds both the close
+and the reopen form. While a search is closed, every screen in it carries a
+notice saying so — the alternative is a Save button that quietly fails.
+
 ## Candidate intake and submission recovery
 
 **A committed submission is never lost to a dropped connection.** Submitting
@@ -367,6 +401,17 @@ Genuinely *different* answers against a submitted questionnaire are still
 refused, with the original kept and instructions to request a correction. A
 submitted response is part of the record; replacing it is a decision a person
 makes, not a side effect of a retry.
+
+**Documents and contact are recorded on the candidate's Details tab.** Slate
+holds neither. A document entry is a reference — a type, a label, and an https
+link into the approved repository — and recording it does not widen who can
+read the document; reference and background material is marked restricted.
+The contact log records what staff say they did: the channel, the purpose, a
+summary and an optional follow-up date. **Slate sends nothing and cannot
+confirm delivery**, and the screen says so, because a search record that
+implies a candidate was notified when all it knows is that someone meant to is
+worse than no record. Dated follow-ups and anyone never contacted appear in a
+panel at the top of the candidate list.
 
 **Drafts are server-side and expire** (14 days). A long answer typed on a phone
 survives a lost connection without leaving the candidate's text sitting in the
@@ -417,6 +462,12 @@ live county website.
 
 **Generated text is not authoritative.** Drafts suggest what to ask; the
 county-approved job description and the county's own sources settle it.
+
+**Where this is in the app.** **County fact verification**, from Search facts or
+from **More** on the overview. Each fact gets its value, source, as-of date and
+the person confirming it, with its state shown beside it; the screen leads with
+whether the material facts are complete enough to publish against, and Search
+facts carries a count of what is still outstanding.
 
 ## Records export
 

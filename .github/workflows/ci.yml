@@ -66,10 +66,14 @@ jobs:
 
       - run: npm ci
 
-      # Chromium only. Real Safari/WebKit and a physical phone are still
-      # outstanding; see docs/test-evidence.md.
-      - name: Install Chromium
-        run: npx playwright install --with-deps chromium
+      # Two engines. WebKit is what every browser on iOS runs, so a candidate
+      # filling in a questionnaire on a phone is using it; Chromium passing says
+      # nothing about how WebKit handles the CSP, date inputs or layout. This is
+      # desktop WebKit on Linux, not Safari on a device: a physical phone is
+      # still outstanding, and so is a real screen reader. See
+      # docs/test-evidence.md.
+      - name: Install browsers
+        run: npx playwright install --with-deps chromium webkit
 
       # Starts its own server against a throwaway data directory with no API
       # key, so nothing here touches real records or makes a paid model call.

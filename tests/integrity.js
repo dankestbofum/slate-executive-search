@@ -181,6 +181,9 @@ async function request(url, method = 'GET', body, auth, revision) {
     // The candidate screen now has sections and a record list beside the
     // scoring; these are the same kind of layout stub as the ones above.
     secTabs:()=>'', kv:()=>'', stepOf:()=>null,
+    // Outcome, documents and the contact log are the consultant's side of the
+    // screen and canEdit is false here, so only these two are reached.
+    outcomePill:()=>'', concludedBy:()=>'',
     location:{ origin:'http://test' }
   });
   check('legacy score markup is escaped by the real renderer', () => { assert.ok(!html.includes(marker)); assert.ok(html.includes('&lt;b')); });
