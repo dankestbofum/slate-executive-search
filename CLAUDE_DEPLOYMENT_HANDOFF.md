@@ -24,7 +24,7 @@ Instructions for Claude:
 |---|---|---|
 | Pilot audience | One county, a small named consultant team, invited committee members, individually invited candidates | Multiple firms or requirements for independent client isolation |
 | Search type | County; Arizona; actual appointed position title | County-approved job description and governance structure |
-| Hosting | Existing Railway Docker path, if county procurement and IT approve it | Required hosting region, approved vendor list, SSO, or security controls |
+| Hosting | Render Docker web service using `render.yaml`, with one instance and a persistent disk mounted at `/data`; subject to county procurement and IT approval | Required hosting region, approved vendor list, SSO, or security controls |
 | Storage | One app process and one persistent volume; retain JSON for the bounded pilot if recovery and load gates pass | Multiple writers, availability commitments, or storage/load tests that fail |
 | Environments | Separate development, synthetic staging, and production data and secrets | None: production data must not be used as routine test fixtures |
 | Service package | Confirm the purchased package; Executive is the working rehearsal assumption | Actual engagement scope; preserve Basic and Enhanced behavior |
@@ -56,7 +56,7 @@ Observed in source; investigate and address through the tickets below:
 
 | Area | Current evidence | Deployment implication |
 |---|---|---|
-| Runtime | Dockerfile and nixpacks.toml use Node 20; package.json permits >=20 | Align production, CI, and documentation on supported Node 24 LTS. Node 20 is EOL. See [Node releases](https://nodejs.org/en/about/previous-releases) and [Node EOL](https://nodejs.org/en/about/eol). |
+| Runtime | Dockerfile pins Node 24.20.0; package.json requires >=24; `render.yaml` builds from the Dockerfile | Keep production, CI, and documentation aligned on Node 24 LTS and verify the Render container with its persistent disk. |
 | Production identity | Named accounts are seeded from environment; shared account is reconciled at boot; sessions last 14 days | Need reliable named-account rotation, revocation, lifecycle, and a documented session policy. Changing a seed variable is not a general account-management workflow. |
 | Configuration | dotenv loads with override enabled outside tests | Ensure development .env cannot override production platform configuration. |
 | HTTP controls | API responses use no-store; cookie protections and proxy configuration exist; no explicit general security-header or origin/CSRF middleware found | Validate and harden browser boundaries, media responses, and error handling. |
@@ -76,7 +76,7 @@ No dependency vulnerability scan, production security assessment, live model com
 
 ### DEP-01 — Reproducible runtime and release pipeline — P0
 
-Files: Dockerfile, package.json, package-lock.json, nixpacks.toml, railway.json, .dockerignore, .env.example, README.md; add CI configuration for the repository's actual provider.
+Files: Dockerfile, package.json, package-lock.json, render.yaml, .dockerignore, .env.example, README.md; maintain CI configuration for the repository's actual provider.
 
 - Update to a supported Node 24 LTS patch and align all build paths. Remove the stale alternate build configuration if it is not used; otherwise keep it consistent.
 - Use lockfile installs. Audit production dependencies and container packages, investigate findings, and update selectively. Do not apply force upgrades without compatibility testing.
