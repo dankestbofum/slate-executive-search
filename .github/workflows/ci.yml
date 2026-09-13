@@ -2,10 +2,12 @@ name: CI
 
 # A failing run here means the commit is not eligible to be marked ready for
 # release. Three jobs: the isolated server suite, browser and accessibility
-# coverage in Chromium, and the container's build and boot behaviour.
+# coverage in Chromium and WebKit, and the container's build and boot
+# behaviour.
 #
-# Still outside CI, and so not evidenced by a green run: real Safari/WebKit,
-# a physical phone, screen-reader testing, and print output. See
+# Still outside CI, and so not evidenced by a green run: a physical phone,
+# screen-reader testing, print output, and the load measurement, whose result
+# is a number to read rather than a threshold to pass. See
 # docs/test-evidence.md.
 
 on:
