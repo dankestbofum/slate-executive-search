@@ -184,6 +184,23 @@ const DRAFTS = {
 
 const state = {
   user:null, users:[], health:null, view:'home', searches:[], search:null,
+  // The firm workspace this tab is working in, the role held in it, and what
+  // that role may do. Everything on screen is drawn from these rather than
+  // from anything stored on the account: the same person is a consultant in
+  // one workspace and a committee member in another.
+  org:null, role:null, caps:{},
+  // Every workspace this account can enter, for the chooser. null means the
+  // list has not been loaded, which is different from belonging to none.
+  workspaces:null, workspacesError:null,
+  // Onboarding and workspace screens: what is in flight and what failed.
+  orgBusy:false, orgError:null, orgDraft:null, orgNotice:null,
+  // Invitations Clerk is holding for this account, loaded on request.
+  invites:null, invitesError:null,
+  // Team & access, loaded when an administrator opens it.
+  team:null, teamError:null, inviteDraft:null,
+  // Object URLs for brochure photos, which are fetched with the session rather
+  // than by the browser (see photoSource). Revoked when the workspace changes.
+  media:{},
   sel:null, busy:false, premium:false, apply:null,
   // The intake answers being edited, held here rather than read back off the
   // DOM so a re-render never drops what somebody typed. Cleared when the
@@ -496,11 +513,18 @@ function withPreview(search, fn){
 /* --- who the signed-in person is on this search --------------------------- */
 
 function you(){
-  return state.search?.you || { seat:null, member:false, consultant:state.user?.role==='consultant', canEdit:false, canManage:false };
+  return state.search?.you || { seat:null, member:false, staff:isStaff(), consultant:isStaff(), canEdit:false, canManage:false };
 }
 function canEdit(){ return Boolean(you().canEdit); }
 function canManage(){ return Boolean(you().canManage); }
-function isCommittee(){ return state.user?.role === 'committee'; }
+// Works across this workspace's whole book: a consultant or an administrator.
+function isStaff(){ return Boolean(state.caps?.staff); }
+function isAdmin(){ return Boolean(state.caps?.admin); }
+// Kept under its old name because so much of the workspace asks the question
+// this way round. It now means "not staff in the workspace I am in", which is
+// the only sense in which it was ever true.
+function isCommittee(){ return !isStaff(); }
+function orgName(){ return state.org?.name || 'your workspace'; }
 function stepFlow(){
   const steps = catalogSteps();
   return steps.length ? steps.map(s => s.key) : STEP_FLOW;
@@ -737,7 +761,7 @@ function availableDests(){
 // Every view this build can render. A deep link to anything else lands on the
 // search overview rather than silently painting Home under a stale address.
 function knownView(view){
-  if (['home','new','archives','packages','overview','facts','verify','closeout','history','person','people','intake-mine'].includes(view)) return true;
+  if (['home','new','archives','packages','overview','facts','verify','closeout','history','person','people','intake-mine','team-access'].includes(view)) return true;
   if (HUB_VIEWS.includes(view)) return true;
   return STEP_FLOW.includes(view);
 }
@@ -755,30 +779,53 @@ function knownView(view){
 // previous entry belongs to the app, so Back can safely use browser history.
 let navDepth = 0;
 
+/**
+ * Every in-workspace address names its workspace: `#/o/{orgId}/s/{id}/screen`.
+ *
+ * Without it, a link copied out of one firm's workspace and opened while
+ * another is active would silently resolve against whichever workspace the
+ * session happened to be in. With it, the mismatch is visible before anything
+ * is loaded and the app can offer to switch instead of quietly guessing.
+ * Organization slugs are disabled on this instance, so the id is what travels.
+ */
+function orgPrefix(orgId = state.org?.id){
+  return orgId ? '#/o/' + encodeURIComponent(orgId) : '#';
+}
+
 function routeFor(view = state.view, opts = {}){
   const sel = opts.sel !== undefined ? opts.sel : state.sel;
-  if (view === 'packages') return '#/packages/' + encodeURIComponent(opts.pkg || state.showcasePkg || '');
-  if (view === 'new' || view === 'archives' || view === 'home') return '#/' + view;
+  const at = orgPrefix(opts.orgId);
+  if (view === 'packages') return at + '/packages/' + encodeURIComponent(opts.pkg || state.showcasePkg || '');
+  if (['new','archives','home','team-access'].includes(view)) return at + '/' + view;
   const id = opts.searchId || state.search?.id;
-  if (!id) return '#/home';
-  if (view === 'overview') return '#/s/' + encodeURIComponent(id);
-  if (view === 'person') return '#/s/' + encodeURIComponent(id) + '/person/' + encodeURIComponent(sel || '');
-  return '#/s/' + encodeURIComponent(id) + '/' + encodeURIComponent(view);
+  if (!id) return at + '/home';
+  if (view === 'overview') return at + '/s/' + encodeURIComponent(id);
+  if (view === 'person') return at + '/s/' + encodeURIComponent(id) + '/person/' + encodeURIComponent(sel || '');
+  return at + '/s/' + encodeURIComponent(id) + '/' + encodeURIComponent(view);
 }
 
 function parseRoute(hash){
-  const parts = String(hash || '').replace(/^#\/?/, '').split('/').filter(Boolean).map(p => {
+  let parts = String(hash || '').replace(/^#\/?/, '').split('/').filter(Boolean).map(p => {
     try { return decodeURIComponent(p); } catch { return p; }
   });
-  if (!parts.length) return { view:'home' };
-  if (parts[0] === 's'){
-    if (!parts[1]) return { view:'home' };
-    const view = parts[2] || 'overview';
-    return { view, searchId:parts[1], sel: view === 'person' ? (parts[3] || null) : null };
+  // An address written before workspaces existed carries no `/o/` segment. It
+  // is read as "this workspace", which is safe because the search it names is
+  // still looked up through an authorized request: a search belonging to
+  // another firm comes back not-found rather than opening.
+  let orgId = null;
+  if (parts[0] === 'o'){
+    orgId = parts[1] || null;
+    parts = parts.slice(2);
   }
-  if (parts[0] === 'packages') return { view:'packages', pkg: parts[1] || null };
-  if (['home','new','archives'].includes(parts[0])) return { view:parts[0] };
-  return { view:'home' };
+  if (!parts.length) return { view:'home', orgId };
+  if (parts[0] === 's'){
+    if (!parts[1]) return { view:'home', orgId };
+    const view = parts[2] || 'overview';
+    return { view, orgId, searchId:parts[1], sel: view === 'person' ? (parts[3] || null) : null };
+  }
+  if (parts[0] === 'packages') return { view:'packages', orgId, pkg: parts[1] || null };
+  if (['home','new','archives','team-access'].includes(parts[0])) return { view:parts[0], orgId };
+  return { view:'home', orgId };
 }
 
 // The route the address bar is showing right now, used to key scroll memory.
@@ -839,18 +886,56 @@ async function goBack(){
 // Move to a parsed route without pushing a new entry. Used by boot (deep link
 // or refresh) and by popstate (browser Back/Forward).
 async function applyRoute(route, { push=false }={}){
+  const ticket = ++navSeq;
+  // An address from another workspace. Offer the switch explicitly rather than
+  // opening whatever this workspace happens to have at that id — and say
+  // nothing about the other workspace's contents, which this person may have
+  // no business knowing exist.
+  if (route.orgId && state.org?.id && route.orgId !== state.org.id){
+    const known = (state.workspaces || []).find(w => w.id === route.orgId && w.role);
+    if (known){
+      state.pendingLink = { ...route, workspace:known };
+      await go('home', {}, { replace:true });
+      return;
+    }
+    toast('That link belongs to a workspace you are not in.');
+    await go('home', {}, { replace:true });
+    return;
+  }
   if (route.searchId && state.search?.id !== route.searchId){
     try { await loadSearch(route.searchId); }
-    catch { toast('That search is not on your book, or is no longer available.'); await go('home', {}, { replace:true }); return; }
+    catch {
+      if (ticket !== navSeq) return;
+      toast('That search is not on your book, or is no longer available.');
+      await go('home', {}, { replace:true });
+      return;
+    }
+    if (ticket !== navSeq) return;
   }
-  if (!route.searchId && !['home','new','archives','packages'].includes(route.view)) route = { view:'home' };
+  if (!route.searchId && !['home','new','archives','packages','team-access'].includes(route.view)) route = { view:'home' };
   if (route.pkg) state.showcasePkg = route.pkg;
   const extra = route.sel ? { sel:route.sel } : {};
-  await go(route.view, extra, { push, replace:!push, fromHistory:true });
+  await go(route.view, extra, { push, replace:!push, fromHistory:true, ticket });
 }
+
+/**
+ * How many navigations have been asked for.
+ *
+ * A screen can wait on a fetch before it paints — the follow-up list, the
+ * archive, the member list. If somebody moves again while one of those is in
+ * flight, the slower request must not paint over the screen the faster one
+ * already delivered. Every navigation takes a ticket and abandons itself if a
+ * later one has been issued.
+ */
+let navSeq = 0;
 
 async function go(view, extra={}, opts={}){
   if (!state.busy && state.dirty && !confirm('Leave this page and discard unsaved edits?')) return;
+  // Taken when the move was asked for, not when this function happened to get
+  // its turn: a navigation delayed by a slow fetch must not outrank one asked
+  // for after it and already painted.
+  const ticket = opts.ticket ?? ++navSeq;
+  const superseded = () => ticket !== navSeq;
   state.dirty = false;
   if (!opts.fromHistory) rememberScroll();
   state.navOpen = false;
@@ -871,7 +956,15 @@ async function go(view, extra={}, opts={}){
   if (state.search && ['facts','verify','closeout','history'].includes(view) && !canEdit()){
     view = 'overview';
   }
-  if (view === 'archives' && isCommittee()) view = 'home';
+  if (view === 'archives' && !state.caps?.viewArchives) view = 'home';
+  if (view === 'new' && !state.caps?.createSearch) view = 'home';
+  // Team & access is the administrator's screen. A consultant following a link
+  // to it lands on Home rather than on an explanation of a door they cannot
+  // open.
+  if (view === 'team-access' && !state.caps?.manageMembers){
+    toast('An organization administrator manages members and invitations.');
+    view = 'home';
+  }
   // An address this build cannot render is not painted as Home under someone
   // else's URL; it lands on the search, or the book, and says so.
   if (!knownView(view)){
@@ -886,18 +979,24 @@ async function go(view, extra={}, opts={}){
   }
   // Every other screen belongs to an open search. A link to one without a
   // loaded file lands on Home rather than rendering an empty workspace.
-  if (!state.search && !['home','new','archives','packages'].includes(view)) view = 'home';
+  if (!state.search && !['home','new','archives','packages','team-access'].includes(view)) view = 'home';
   try {
     if (view === 'home') await refreshSearches();
     if (view === 'archives') state.archives = await api('/api/archives');
     if (view === 'history') state.history = await api('/api/searches/'+state.search.id+'/history');
-  } catch (error) { toast(error.message); return; }
+    if (view === 'team-access') await loadTeam();
+  } catch (error) {
+    if (superseded()) return;
+    toast(error.message); return;
+  }
+  if (superseded()) return;
   // Who still needs chasing, read from the server so the list and the export
   // agree on the answer. Deliberately not fatal: the candidate list is still
   // worth opening when this one call fails.
   if (['screen','people'].includes(view) && state.search && canEdit()){
     try { state.followUps = await api('/api/searches/'+state.search.id+'/follow-ups'); }
     catch { state.followUps = null; }
+    if (superseded()) return;
   }
   Object.assign(state, extra, { view });
   if (view === 'brochure' && brochureNeedsFill(state.search)){
@@ -1251,12 +1350,120 @@ async function loadMe(){
   try {
     const me = await api('/api/me');
     state.user = me.user;
+    state.onboarding = me.onboarding;
+    state.org = me.organization || null;
+    state.role = me.role || null;
+    state.caps = me.capabilities || {};
+    state.workspaces = me.workspaces || null;
+    state.workspacesError = me.workspacesError || null;
     state.users = me.users || [];
     state.health = Object.assign({}, state.health, me.health);
+    state.authError = null;
     return true;
-  } catch (error) { state.user = null; state.authError = window.SlateAuth.signedIn ? error.message : null; return false; }
+  } catch (error) {
+    // A session Clerk is holding on an unanswered task is not a failure to
+    // sign in; it is a person who has not chosen a workspace yet. The chooser
+    // is what they need, not the sign-in page.
+    if (error.code === 'SESSION_TASK_PENDING') {
+      state.user = state.user || null;
+      state.onboarding = { stage:'workspace', blocked:true, required:false };
+      state.authError = null;
+      return Boolean(state.user);
+    }
+    state.user = null;
+    state.authError = window.SlateAuth.signedIn ? error.message : null;
+    return false;
+  }
+}
+
+/**
+ * Everything that belongs to the workspace being left.
+ *
+ * Called before loading another one. A switch that kept the previous firm's
+ * search, directory, filters, or half-fetched responses on screen would put
+ * one client's material under another client's name, which is the single worst
+ * thing this feature could do.
+ */
+function clearWorkspaceState(){
+  for (const url of Object.values(state.media)) URL.revokeObjectURL(url);
+  state.media = {};
+  state.search = null; state.searches = []; state.users = [];
+  state.sel = null; state.picked = []; state.archives = null; state.history = null;
+  state.followUps = null; state.intake = null; state.newPin = null;
+  state.filters = {}; state.open = {}; state.mode = {}; state.tab = {};
+  state.scrollMem = {}; state.homeQ = ''; state.searchesError = null;
+  state.team = null; state.teamError = null; state.inviteDraft = null;
+  state.dirty = false;
 }
 async function loadSearches(){ state.searches = await api('/api/searches'); state.searchesError = null; }
+
+/**
+ * Move this tab into another firm's workspace.
+ *
+ * The guard runs here, before Clerk is asked for anything, so answering "stay"
+ * leaves the current screen and every typed value exactly as they were — a
+ * prebuilt switcher's selection event cannot be taken back, which is why Slate
+ * owns this control.
+ *
+ * Once the switch is made the page is reloaded at the new workspace's address.
+ * That is deliberate rather than lazy: a reload is the only way to guarantee
+ * that no search, candidate, filter, draft, cached photo, or in-flight response
+ * from the previous firm survives into the next one, and putting one client's
+ * material under another client's name is the worst thing this feature could
+ * do.
+ */
+async function enterWorkspace(orgId, destination){
+  if (!orgId || orgId === state.org?.id) return;
+  const target = (state.workspaces || []).find(w => w.id === orgId);
+  if (state.dirty && !confirm('Switch to ' + (target?.name || 'another workspace')
+    + '?\n\nUnsaved edits on this page will be discarded.')) return;
+  state.orgBusy = true; state.orgError = null;
+  showWait(waitSave('Opening ' + (target?.name || 'the workspace')));
+  try {
+    await window.SlateAuth.setActiveOrganization(orgId);
+    state.dirty = false;
+    clearWorkspaceState();
+    window.removeEventListener('beforeunload', warnUnsaved);
+    location.hash = destination || ('#/o/' + encodeURIComponent(orgId) + '/home');
+    location.reload();
+  } catch (error) {
+    state.orgError = error.message || 'That workspace could not be opened.';
+    state.orgBusy = false;
+    hideWait();
+    render();
+  }
+}
+
+/**
+ * A brochure photo, fetched with this tab's session rather than by the browser.
+ *
+ * An <img src> sends the session cookie, and Clerk's cookie carries whichever
+ * organization was selected last in any tab. That is precisely the request that
+ * must not resolve against the wrong workspace, so the bytes are fetched with
+ * the bearer token the rest of the app uses and handed to the image as an
+ * object URL. The server refuses the ambient form outright.
+ */
+function photoSource(path){
+  if (!path) return '';
+  if (!path.startsWith('/media/')) return path;
+  if (state.media[path]) return state.media[path];
+  if (state.media[path] === null) return '';
+  state.media[path] = null;
+  (async () => {
+    try {
+      const token = await window.SlateAuth.token();
+      const res = await fetch(path, { headers: token ? { authorization:'Bearer ' + token } : {} });
+      if (!res.ok) throw new Error(String(res.status));
+      const url = URL.createObjectURL(await res.blob());
+      // A switch may have happened while this was in flight. Late results from
+      // the previous workspace are dropped rather than painted.
+      if (state.media[path] !== null) { URL.revokeObjectURL(url); return; }
+      state.media[path] = url;
+      for (const img of $('img[data-media="' + CSS.escape(path) + '"]')) img.src = url;
+    } catch { delete state.media[path]; }
+  })();
+  return '';
+}
 
 /**
  * Reconcile the search index without ever blanking it.
@@ -1352,6 +1559,30 @@ function railDest(d){
   </button>`;
 }
 
+/**
+ * Which firm this tab is working in, above everything else in the rail.
+ *
+ * Deliberately separate from the account menu below it. "Who am I" and "whose
+ * records am I looking at" are different questions, and answering them in one
+ * control is how somebody ends up believing a switch changed their identity —
+ * or worse, not noticing it changed the client.
+ */
+function railWorkspace(){
+  if (!state.org) return '';
+  const others = (state.workspaces || []).filter(w => w.role && w.id !== state.org.id).length;
+  const open = Boolean(state.open.wsswitch);
+  const list = (state.workspaces || []).filter(w => w.role);
+  return `<div class="rail__group ws">
+    <div class="rail__label" id="ws-label">Workspace</div>
+    <div class="ws__name" title="${esc(state.org.name)}">${esc(state.org.name)}</div>
+    <div class="ws__role">${esc(state.onboarding?.roleLabel || '')}</div>
+    ${others ? `<button type="button" class="btn btn--ghost btn--sm ws__switch" data-panel="wsswitch" aria-expanded="${open}" aria-controls="wsswitch" data-open-label="Switch workspace" data-close-label="Switch workspace">Switch workspace</button>
+      <div class="ws__list" id="wsswitch"${open?'':' hidden'} role="group" aria-labelledby="ws-label">
+        ${list.map(w => `<button type="button" class="rail__link rail__link--sub" data-act="switch-workspace" data-org="${esc(w.id)}" ${w.id===state.org.id?'aria-current="true" disabled':''}>${esc(w.name)}<span class="ws__listrole">${esc(w.roleLabel)}</span></button>`).join('')}
+      </div>` : ''}
+  </div>`;
+}
+
 // The account and theme controls, kept to the height of a row so the rail's
 // working area is destinations rather than identity.
 function railAccount(u, s){
@@ -1381,7 +1612,7 @@ function shell(body){
         <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M2 4h12M2 8h12M2 12h12"/></svg>
         <span>Menu</span>
       </button>
-      <span class="appbar__ctx">${esc(shellContext(s))}</span>
+      <span class="appbar__ctx">${state.org ? `<span class="appbar__ws">${esc(state.org.name)}</span>` : ''}${esc(shellContext(s))}</span>
     </header>
     <div class="scrim" data-act="nav-close" ${state.navOpen?'':'hidden'}></div>
     <nav class="rail" id="rail" aria-label="Primary">
@@ -1394,11 +1625,14 @@ function shell(body){
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>
       </button>
       </div>
-      <div class="rail__group"><div class="rail__label">Workspace</div>
+      ${railWorkspace()}
+      <div class="rail__group"><div class="rail__label">This workspace</div>
         <button class="rail__link" data-go="home" ${!s && state.view==='home'?'aria-current="page"':''}>Home</button>
-        ${!isCommittee() ? '<button class="rail__link" data-go="new" '+(state.view==='new'?'aria-current="page"':'')+'>New search</button>' : ''}
-        ${!isCommittee() ? '<button class="rail__link" data-go="archives" '+(state.view==='archives'?'aria-current="page"':'')+'>Archived searches</button>' : ''}
-        ${!isCommittee() && packages().length ? `<button class="rail__link" data-go="packages" ${state.view==='packages'?'aria-current="page"':''}>Packages</button>` : ''}
+        <button class="rail__link" data-act="my-access">My access</button>
+        ${state.caps?.manageMembers ? '<button class="rail__link" data-go="team-access" '+(state.view==='team-access'?'aria-current="page"':'')+'>Team &amp; access</button>' : ''}
+        ${state.caps?.createSearch ? '<button class="rail__link" data-go="new" '+(state.view==='new'?'aria-current="page"':'')+'>New search</button>' : ''}
+        ${state.caps?.viewArchives ? '<button class="rail__link" data-go="archives" '+(state.view==='archives'?'aria-current="page"':'')+'>Archived searches</button>' : ''}
+        ${isStaff() && packages().length ? `<button class="rail__link" data-go="packages" ${state.view==='packages'?'aria-current="page"':''}>Packages</button>` : ''}
       </div>
       ${s?`<div class="rail__group rail__group--dests">
         <div class="rail__here" title="${esc(s.client||'Search')}">
@@ -1505,9 +1739,194 @@ function vGate(){
       <p class="t-body">Every engagement seats the search committee, asks each member what they are looking for, and builds the candidate profile from their answers. Recruiting, screening, and interviews all run against that profile.</p>
     </div>
     <div class="wrap gate__table stack">
-      <p class="t-body">Sign in to work with your search team. New here? Create an account using the email on your invitation.</p>${state.authError ? `<p role="alert">${esc(state.authError)}</p><button class="btn" data-act="auth-retry">Try again</button>` : ''}
+      <p class="t-body">Sign in to work with your search team. New here? Create an account, tell us your role, and we will guide you through getting started. If you were invited, use the email on your invitation.</p>${state.authError ? `<p role="alert">${esc(state.authError)}</p><button class="btn" data-act="auth-retry">Try again</button>` : ''}
     </div>
   </div>`;
+}
+
+const ACCOUNT_PATHS = {
+  consultant: { label:'Search consultant', description:'I organize and manage executive searches.', tasks:'Set up searches, manage the committee, review candidates, and prepare search documents.', next:'A workspace administrator must authorize consultant access. Once approved, you can work across the firm’s searches.' },
+  committee: { label:'Committee member', description:'I help evaluate candidates for a search.', tasks:'Share what you are looking for, review assigned search materials, and score candidates.', next:'Your search consultant adds you to the committee using your sign-in email. Only your assigned searches will appear.' }
+};
+
+function accountFrame(body){
+  document.title = 'Account setup · Slate';
+  return `<div class="gate onboarding"><a class="skip" href="#main">Skip to content</a>
+    <header class="gate__bar"><span class="rail__name">Slate</span><div class="auth-profile"><div data-clerk-user></div><button class="btn btn--ghost" data-act="logout">Sign out</button></div></header>
+    <main id="main" class="onboarding__main stack" tabindex="-1">${body}</main></div>`;
+}
+
+/**
+ * Step 1 of Sign in → Choose workspace → Confirm access → Start work.
+ *
+ * Somebody who arrived on an invitation already has a role, so they are not
+ * offered the choice: they are told what they have joined and asked only for
+ * the name their colleagues will see. Everybody else picks a path, which
+ * changes the guidance they get and nothing about what they can open.
+ */
+function vOnboarding(){
+  const draft = state.onboardingDraft || {};
+  const assigned = state.onboarding?.role || null;
+  const selected = draft.requestedRole || state.onboarding?.requestedRole || '';
+  const path = ACCOUNT_PATHS[selected];
+  return accountFrame(`<div><p class="t-label">Welcome to Slate · Step 1 of 3</p>
+    <h1 class="t-title">${assigned ? 'Confirm your name' : 'How will you use Slate?'}</h1>
+    <p class="t-body">${assigned
+      ? 'This is the name your colleagues see on the roster and against your scores.'
+      : 'Tell us who you are so we can show you the right tools and next steps.'}</p></div>
+    <form id="onboardingform" class="stack">
+      <div class="onboarding__identity"><label class="stack stack--tight" for="onboarding-name"><span>Your name</span><input class="input" id="onboarding-name" name="name" autocomplete="name" required maxlength="120" value="${esc(draft.name ?? state.user.name)}"></label>
+        <p class="t-small">Signed in as <strong>${esc(state.user.email)}</strong>. Use the email your search team knows.</p></div>
+      ${assigned ? `<div class="onboarding__next"><h2 class="t-section">You have joined ${esc(state.onboarding.organization?.name || 'a workspace')}</h2>
+        <p>Your role there is <strong>${esc(state.onboarding.roleLabel)}</strong>. ${esc(state.onboarding.roleSummary || '')}</p>
+        <p class="t-small">An administrator of that workspace sets this role. You do not choose it here.</p></div>`
+      : `<fieldset class="onboarding__choices"><legend>Choose your role</legend><div class="onboarding__grid">${Object.entries(ACCOUNT_PATHS).map(([key, option]) => `<label class="onboarding__choice">
+        <input type="radio" id="onboarding-role-${key}" name="requestedRole" value="${key}" required ${selected===key?'checked':''}>
+        <span><strong>${option.label}</strong><span>${option.description}</span><span class="t-small">${option.tasks}</span></span></label>`).join('')}</div></fieldset>
+      <div class="onboarding__next" aria-live="polite"><h2 class="t-section">${path ? 'What happens next' : 'A workspace built around your role'}</h2><p>${path ? path.next : 'Choose a role to see how you will get started.'}</p>
+        <p class="t-small">This choice guides what we show you. It does not grant access: that comes from the workspace you join.</p></div>`}
+      ${state.onboardingError ? `<p role="alert">${esc(state.onboardingError)}</p>` : ''}
+      <div class="row"><button class="btn btn--primary" type="submit" ${state.onboardingSaving?'disabled':''}>${state.onboardingSaving?'Saving…':'Continue'}</button>
+        ${!state.onboarding?.required ? '<button class="btn btn--ghost" type="button" data-act="cancel-account-setup">Cancel</button>' : ''}</div>
+    </form>`);
+}
+
+/** The invitations Clerk is holding for this account, once they are asked for. */
+function inviteList(){
+  if (state.invitesError) return `<p role="alert">${esc(state.invitesError)}</p>`;
+  if (state.invites === null) return '';
+  if (!state.invites.length) {
+    return '<p class="t-small" role="status">No invitations are waiting for <strong>' + esc(state.user.email)
+      + '</strong>. An administrator has to invite that exact address.</p>';
+  }
+  return `<ul class="wslist" role="list">${state.invites.map(i => `<li class="wslist__row">
+    <span class="wslist__id"><strong>${esc(i.organizationName)}</strong>
+      <span class="t-small">Invited as ${esc(ROLE_LABEL[i.role] || i.role)}</span></span>
+    <button class="btn btn--primary btn--sm" data-act="accept-invite" data-invite="${esc(i.id)}" ${state.orgBusy?'disabled':''}>Accept and open</button>
+  </li>`).join('')}</ul>`;
+}
+
+const ROLE_LABEL = {
+  'org:admin':'Organization administrator',
+  'org:consultant':'Search consultant',
+  'org:committee':'Committee member'
+};
+
+/**
+ * Step 2: choose a workspace.
+ *
+ * Three different people land here and they need three different things: the
+ * firm owner who has to create a workspace, the colleague waiting on an
+ * invitation, and the person who belongs to several and has to say which one
+ * they are working in. All three are on the page, ordered by which is most
+ * likely given what we already know about this account.
+ */
+function vWorkspaceChooser(){
+  const list = (state.workspaces || []).filter(w => w.role);
+  const unusable = (state.workspaces || []).filter(w => !w.role);
+  const wantsToOwn = state.onboarding?.requestedRole === 'consultant';
+  const draft = state.orgDraft || {};
+  const createForm = `<form id="createworkspace" class="stack stack--tight">
+    <label class="stack stack--tight" for="ws-name"><span>Workspace name</span>
+      <input class="input" id="ws-name" name="name" maxlength="100" required placeholder="Your firm's name" value="${esc(draft.name || '')}"></label>
+    <p class="t-small">This creates a separate workspace for your firm. You become its administrator and can invite colleagues. It does not join an existing firm, and it does not bring any existing searches with it.</p>
+    <div class="row"><button class="btn btn--primary" type="submit" ${state.orgBusy?'disabled':''}>${state.orgBusy?'Creating…':'Create a workspace'}</button></div>
+  </form>`;
+
+  const joinBlock = `<section class="onboarding__next stack stack--tight"><h2 class="t-section">Join an existing workspace</h2>
+    <p>An administrator at your firm invites <strong>${esc(state.user.email)}</strong>. When they do, the invitation appears here.</p>
+    <div class="row"><button class="btn btn--secondary" data-act="check-invites" ${state.orgBusy?'disabled':''}>Check invitations</button>
+      <button class="btn btn--ghost" data-act="logout">Use a different account</button></div>
+    ${inviteList()}</section>`;
+
+  const chooseBlock = list.length ? `<section class="stack stack--tight"><h2 class="t-section">${list.length===1?'Your workspace':'Choose a workspace'}</h2>
+    <ul class="wslist" role="list">${list.map(w => `<li class="wslist__row">
+      <span class="wslist__id"><strong>${esc(w.name)}</strong><span class="t-small">${esc(w.roleLabel)}</span></span>
+      <button class="btn btn--primary btn--sm" data-act="switch-workspace" data-org="${esc(w.id)}" ${state.orgBusy?'disabled':''}>Open</button>
+    </li>`).join('')}</ul></section>` : '';
+
+  const blocked = unusable.length ? `<p class="t-small">You are also in ${unusable.map(w => esc(w.name)).join(', ')}, with a role Slate does not open searches for. An administrator there can assign you one.</p>` : '';
+
+  return accountFrame(`<div><p class="t-label">Step 2 of 3 · Choose workspace</p>
+    <h1 class="t-title">${list.length ? 'Where are you working?' : 'You are not in a workspace yet'}</h1>
+    <p class="t-body">${list.length
+      ? 'Each workspace is one firm. Searches, staff, and committees never cross between them.'
+      : 'A workspace is one firm\u2019s shared space. Create your own, or join one you have been invited to.'}</p></div>
+    ${state.workspacesError ? `<p role="alert">${esc(state.workspacesError)} <button class="btn btn--ghost btn--sm" data-act="check-account-access">Try again</button></p>` : ''}
+    ${state.orgError ? `<p role="alert">${esc(state.orgError)}</p>` : ''}
+    ${chooseBlock}
+    ${blocked}
+    ${wantsToOwn || list.length
+      ? `<section class="onboarding__next stack stack--tight"><h2 class="t-section">Create a workspace</h2>${createForm}</section>${joinBlock}`
+      : `${joinBlock}<section class="onboarding__next stack stack--tight"><h2 class="t-section">Or create your own workspace</h2>${createForm}</section>`}`);
+}
+
+/** The session names a workspace this account is no longer in. */
+function vMembershipLost(){
+  return accountFrame(`<div><p class="t-label">Workspace access</p>
+    <h1 class="t-title">You are no longer in this workspace</h1>
+    <p class="t-body">Your access to the workspace this tab was open in has ended. Nothing from it is shown here.</p></div>
+    <section class="onboarding__next stack stack--tight">
+      <p>If this is unexpected, ask an administrator at that firm to invite <strong>${esc(state.user.email)}</strong> again.</p>
+      <p class="t-small">Your record of what you did there is kept. It is your access that ended, not your work.</p></section>
+    ${state.orgError ? `<p role="alert">${esc(state.orgError)}</p>` : ''}
+    <div class="row"><button class="btn btn--primary" data-act="check-account-access">Check my workspaces</button>
+      <button class="btn btn--secondary" data-act="logout">Sign out</button></div>`);
+}
+
+/** In the workspace, holding a role Slate does not act on. */
+function vRolePending(){
+  const org = state.onboarding?.organization?.name || 'this workspace';
+  return accountFrame(`<div><p class="t-label">Step 3 of 3 · Confirm access</p>
+    <h1 class="t-title">Your role in ${esc(org)} is not set up yet</h1>
+    <p class="t-body">You are a member of ${esc(org)}, but the role you hold there does not open search records.</p></div>
+    <section class="onboarding__next stack stack--tight">
+      <p>Ask an administrator of ${esc(org)} to set your role to search consultant or committee member for <strong>${esc(state.user.email)}</strong>.</p>
+      ${state.onboarding?.providerRole ? `<p class="t-small">Your current role is <span class="mono">${esc(state.onboarding.providerRole)}</span>.</p>` : ''}
+    </section>
+    <div class="row"><button class="btn btn--primary" data-act="check-account-access">Check again</button>
+      ${(state.workspaces||[]).filter(w => w.role).length ? '<button class="btn btn--secondary" data-act="open-workspaces">Switch workspace</button>' : ''}</div>`);
+}
+
+/** In the workspace, but not on any search yet. */
+function vAssignmentPending(){
+  const org = state.onboarding?.organization?.name || 'this workspace';
+  return accountFrame(`<div><p class="t-label">Step 3 of 3 · Confirm access</p>
+    <h1 class="t-title">You are part of ${esc(org)}</h1>
+    <p class="t-body">Your search assignment is pending. A search manager adds committee members to one search at a time, so being in the workspace is not by itself an assignment.</p></div>
+    <section class="onboarding__next stack stack--tight">
+      <p>Ask your search consultant to seat <strong>${esc(state.user.email)}</strong> on the search you are serving on.</p>
+      <p class="t-small">Nothing is sent by pressing the button below; it re-reads your assignments.</p></section>
+    ${state.onboardingError ? `<p role="alert">${esc(state.onboardingError)}</p>` : ''}
+    <div class="row"><button class="btn btn--primary" data-act="check-account-access">Check for assignments</button>
+      <button class="btn btn--secondary" data-act="my-access">My access</button></div>`);
+}
+
+/**
+ * My access — what this account holds, and how to change it.
+ *
+ * The screen the old "Change my role" button promised and could not deliver:
+ * the role here is the one the workspace assigned, so this explains it and
+ * says who to ask, rather than offering a control that only saved a
+ * preference.
+ */
+function vMyAccess(){
+  const o = state.onboarding || {};
+  const seats = (state.searches || []).map(s => `<li><strong>${esc(s.client || 'Untitled')}</strong> · ${esc(SEAT[s.seat]?.label || 'Assigned')}${s.no ? ' · <span class="mono">'+esc(s.no)+'</span>' : ''}</li>`).join('');
+  const others = (state.workspaces || []).filter(w => w.id !== state.org?.id && w.role);
+  return accountFrame(`<div><p class="t-label">Your account</p><h1 class="t-title">My access</h1>
+    <p class="t-body">Signed in as <strong>${esc(state.user.email)}</strong>.</p></div>
+    <section class="onboarding__next stack stack--tight"><h2 class="t-section">${esc(state.org?.name || 'No active workspace')}</h2>
+      ${o.roleLabel ? `<p>Your role here is <strong>${esc(o.roleLabel)}</strong>. ${esc(o.roleSummary || '')}</p>` : '<p>You have no role in an active workspace.</p>'}
+      <p class="t-small">Roles are set by an administrator of this workspace in Team &amp; access. To change yours, ask one of them.</p></section>
+    <section class="stack stack--tight"><h2 class="t-section">Your searches</h2>
+      ${seats ? `<ul class="wslist wslist--plain" role="list">${seats}</ul>` : '<p class="t-small">You are not seated on any search in this workspace.</p>'}
+      <p class="t-small">A search manager seats people on individual searches. Being in the workspace is a separate thing from being on a search.</p></section>
+    ${others.length ? `<section class="stack stack--tight"><h2 class="t-section">Your other workspaces</h2>
+      <ul class="wslist" role="list">${others.map(w => `<li class="wslist__row"><span class="wslist__id"><strong>${esc(w.name)}</strong><span class="t-small">${esc(w.roleLabel)}</span></span>
+        <button class="btn btn--secondary btn--sm" data-act="switch-workspace" data-org="${esc(w.id)}">Switch</button></li>`).join('')}</ul></section>` : ''}
+    <div class="row"><button class="btn btn--primary" data-act="close-my-access">Back to work</button>
+      <button class="btn btn--secondary" data-act="edit-account-setup">Change my name</button></div>`);
 }
 
 // A committee member's home is a to-do list, not a book of business. If a
@@ -1525,10 +1944,11 @@ function vHomeCommittee(){
     <td data-label="Open" class="candacts"><button class="btn btn--secondary btn--sm" data-open="${s.id}">Open</button></td>
   </tr>`).join('');
   return shell(`
-    ${head('Workspace','Your assignments',
-      'You are on '+(list.length===1?'a search':list.length+' searches')+' as a committee member. You are asked what you are looking for in the executive, and later you score candidates against what the committee agreed on.',
+    ${head(orgName(),'Your assignments',
+      'You are on '+(list.length===1?'a search':list.length+' searches')+' in '+esc(orgName())+' as a committee member. You are asked what you are looking for in the executive, and later you score candidates against what the committee agreed on.',
       owed.length ? `<button class="btn btn--primary" data-open="${owed[0].id}">Answer for ${esc(owed[0].client)}</button>` : '')}
     <div class="band"><div class="wrap stack">
+      ${crossWorkspaceNotice()}
       ${searchesNotice()}
       ${owed.length ? `<div class="spec"><div class="spec__bar">Waiting on you · ${owed.length}</div>
         <div class="spec__body stack stack--tight">${owed.map(s => `<div class="hubrow">
@@ -1550,6 +1970,24 @@ function vHomeCommittee(){
 // Shown when the search index could not be refreshed. The records already
 // loaded stay on the page; this says they may be out of date and offers a
 // retry, rather than replacing the book with an empty state.
+/**
+ * A deep link that belongs to a workspace this person can enter, but is not in.
+ *
+ * Offered as a switch rather than followed, because switching throws away
+ * whatever is open here. Nothing about the other workspace's contents is named
+ * — only that the link belongs to it.
+ */
+function crossWorkspaceNotice(){
+  const link = state.pendingLink;
+  if (!link) return '';
+  return `<div class="notice notice--info" role="status"><div>
+    <div class="notice__t">That link is in ${esc(link.workspace.name)}</div>
+    <div class="notice__b">You are working in ${esc(orgName())}. Opening it switches this tab to
+      ${esc(link.workspace.name)} and closes what is open here.</div></div>
+    <div class="row"><button class="btn btn--secondary btn--sm" data-act="follow-link">Switch and open</button>
+      <button class="btn btn--ghost btn--sm" data-act="dismiss-link">Stay here</button></div></div>`;
+}
+
 function searchesNotice(){
   if (!state.searchesError) return '';
   return `<div class="notice notice--wait" role="status"><div>
@@ -1599,7 +2037,7 @@ function matchesHomeQuery(s){
 function vHome(){
   if (isCommittee()) return vHomeCommittee();
   const u = state.user;
-  const canDelete = u.role==='consultant';
+  const canDelete = isStaff();
   const list = state.searches || [];
   const shown = list.filter(matchesHomeQuery);
   const picked = pickedIds();
@@ -1646,11 +2084,16 @@ function vHome(){
 
   const cols = 5 + (manage ? 2 : 0);
   return shell(`
-    ${head('Workspace','Your searches',
+    ${head(state.onboarding?.roleLabel || 'Workspace', orgName() + ' searches',
       list.length ? esc(live)+' in progress, '+esc(complete)+' complete.' : 'Nothing on the book yet.',
-      u.role==='consultant' ? `<button class="btn btn--primary" data-go="new">Open a new search</button>` : '')}
+      state.caps?.createSearch ? `<button class="btn btn--primary" data-go="new">Open a new search</button>` : '')}
     <div class="band"><div class="wrap stack">
+      ${crossWorkspaceNotice()}
       ${searchesNotice()}
+      ${state.caps?.manageMembers && state.team?.invitations?.length ? `<div class="notice notice--info" role="status"><div>
+        <div class="notice__t">${state.team.invitations.length} invitation${state.team.invitations.length===1?'':'s'} waiting to be accepted</div>
+        <div class="notice__b">They are not in the workspace until they accept.</div></div>
+        <button class="btn btn--secondary btn--sm" data-go="team-access">Team &amp; access</button></div>` : ''}
       ${waiting.length ? `<div class="spec"><div class="spec__bar">Waiting on you · ${waiting.length}</div>
         <div class="spec__body stack stack--tight">${waiting.map(w => `<div class="hubrow">
           <div class="hubrow__id"><b>${w.t}</b><div class="t-small">${w.b}</div></div>
@@ -1672,13 +2115,13 @@ function vHome(){
           <tbody>${rows || `<tr><td colspan="${cols}">No search matches “${esc(homeQuery())}”. <button type="button" class="btn btn--ghost btn--sm" data-act="clear-home-filter">Clear filter</button></td></tr>`}</tbody>
         </table></div>` : `<div class="empty">${emptyState('No searches yet',
           'A search starts by seating the committee and asking each member what they are looking for. The profile is built from their answers, and everything else is generated from that.',
-          u.role==='consultant' ? `<button class="btn btn--primary" data-go="new">Open a new search</button>` : '')}</div>`}</div>
+          state.caps?.createSearch ? `<button class="btn btn--primary" data-go="new">Open a new search</button>` : '')}</div>`}</div>
       </div>
-      <div class="row"><button class="btn btn--secondary btn--sm" data-go="archives">Archived searches</button></div>
+      ${state.caps?.viewArchives ? '<div class="row"><button class="btn btn--secondary btn--sm" data-go="archives">Archived searches</button></div>' : ''}
       ${canDelete && managed.length ? `<div class="spec">
         <div class="spec__bar">Start fresh</div>
         <div class="spec__body stack stack--tight">
-          <p>Archive the ${managed.length === 1 ? 'search you manage' : managed.length+' searches you manage'} and open a new search. Your account and Clerk login stay active. Other consultants' searches stay on the book.</p>
+          <p>Archive the ${managed.length === 1 ? 'search you manage' : managed.length+' searches you manage'} in ${esc(orgName())} and open a new search. Your account and your place in this workspace stay exactly as they are. Colleagues' searches stay on the book.</p>
           <p class="t-small">Archived searches leave the active workspace for everyone on their committees. You can restore them from Archived searches.</p>
           <div class="row"><button type="button" class="btn btn--secondary btn--sm" data-act="start-fresh">Start fresh</button></div>
         </div>
@@ -2623,13 +3066,43 @@ function memberRow(m, mgr){
   </div>`;
 }
 
+/**
+ * A seat that is spoken for but not yet occupied.
+ *
+ * Two different pending states, shown as two different things, because they
+ * need two different people to act. "Invitation sent" is waiting on the person.
+ * "Invitation needed" is waiting on an administrator — and saying so plainly is
+ * the difference between a manager who knows to go and ask, and one who waits
+ * a week for an email that was never sent.
+ */
+function pendingSeatRow(p){
+  const sent = p.status === 'invitation-sent';
+  return `<div class="seat seat--held">
+    <span class="seat__init">${esc(initialsOf(p.name || p.email))}</span>
+    <div class="seat__who"><b>${esc(p.name || p.email)}</b><div class="t-small">${esc(p.email)}</div></div>
+    <div class="seat__tags">${pill('wait', sent ? 'Invitation sent' : 'Invitation needed')}</div>
+    <div class="seat__acts">${canManage()
+      ? `<button class="btn btn--ghost btn--sm" data-act="release-seat" data-pending="${esc(p.id)}" data-email="${esc(p.email)}">Release seat</button>`
+      : ''}</div>
+  </div>`;
+}
+
+function initialsOf(name){
+  const parts = String(name || '').trim().split(/[\s@.]+/).filter(Boolean);
+  if (!parts.length) return '??';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
 function vTeam(){
   const s = state.search;
   const list = s.roster || [];
+  const held = s.pending || [];
   const mgr = s.accountManager;
   const confirmed = Boolean(s.team?.confirmedAt);
   const manage = canManage();
   const committeeCount = list.filter(m => m.seat === 'committee').length;
+  const needInvite = held.filter(p => p.status === 'invitation-needed').length;
   return shell(`
     ${head('Step '+stepNo('team'),'Search committee',
       'Everyone who gets a say in this hire, and the one consultant who runs the account. The roster records who contributes to the hire. Committee input is collected in Step '+stepNo('intake')+', and candidates are scored later.')}
@@ -2650,11 +3123,23 @@ function vTeam(){
           <p class="t-small">${esc(SEAT.manager.hint)} Any consultant on the roster can take the account; hand it over from the list below.</p>
         </div></div>` : ''}
 
-      <div class="spec"><div class="spec__bar">Roster ${pill(committeeCount?'ok':'wait', committeeCount+(committeeCount===1?' committee seat':' committee seats'))}</div>
+      <div class="spec"><div class="spec__bar">Search staff and committee ${pill(committeeCount?'ok':'wait', committeeCount+(committeeCount===1?' committee seat':' committee seats'))}</div>
         <div class="spec__body stack">
           ${list.map(m => memberRow(m, mgr)).join('')}
           ${!committeeCount ? `<div class="t-small">No committee members seated yet. A search can run with the firm alone, but then Step ${stepNo('intake')} only collects your own answers.</div>` : ''}
+          <p class="t-small">Consultants and administrators in ${esc(orgName())} can work across this firm's searches. A committee member is assigned to this search individually, so being in the workspace does not by itself put anybody on this roster.</p>
         </div></div>
+
+      ${held.length ? `<div class="spec"><div class="spec__bar">Seats held ${pill('wait', held.length + (held.length===1?' person':' people'))}</div>
+        <div class="spec__body stack">
+          ${held.map(pendingSeatRow).join('')}
+          ${needInvite ? `<div class="notice notice--wait"><div>
+            <div class="notice__t">${needInvite === 1 ? 'One seat is waiting on an invitation' : needInvite + ' seats are waiting on invitations'}</div>
+            <div class="notice__b">No email has been sent. An administrator of ${esc(orgName())} has to invite these addresses to the workspace before the seats open.
+              ${state.caps?.manageMembers ? '<button class="btn btn--secondary btn--sm" data-go="team-access">Team &amp; access</button>' : ''}</div>
+          </div></div>` : ''}
+          <p class="t-small">A held seat becomes a real one the moment that person accepts their workspace invitation and signs in. Until then they can read nothing.</p>
+        </div></div>` : ''}
 
       ${manage ? `<div class="spec"><div class="spec__bar">Seat someone</div>
         <div class="spec__body">
@@ -2667,7 +3152,10 @@ function vTeam(){
               <option value="consultant">Consultant at the firm</option>
             </select>`)}
           </form>
-          <p class="t-small">${esc(SEAT.committee.hint)} A consultant seat is for firm staff and requires an account that already exists.</p>
+          <p class="t-small">${esc(SEAT.committee.hint)} A consultant seat is for somebody already in ${esc(orgName())}.
+            ${state.caps?.inviteMembers
+              ? 'Seating an address that is not in this workspace invites them to it as a committee member and holds their seat.'
+              : 'If the address is not in this workspace, the seat is held and an administrator has to send the invitation.'}</p>
           <div class="row u-mt-3"><button class="btn btn--primary" type="submit" form="newmember">Seat this person</button></div>
         </div></div>` : ''}
 
@@ -3159,7 +3647,7 @@ function packSec(label, text, extra='', photo=''){
 }
 function packPhoto(src, caption){
   if (!src) return '';
-  return `<figure class="pack__fig"><img src="${esc(src)}" alt="${esc(caption||'')}">${caption?`<figcaption>${esc(caption)}</figcaption>`:''}</figure>`;
+  return `<figure class="pack__fig"><img src="${esc(photoSource(src))}" data-media="${esc(src)}" alt="${esc(caption||'')}">${caption?`<figcaption>${esc(caption)}</figcaption>`:''}</figure>`;
 }
 function packChips(kind){
   const rows = labeledKind(kind, state.search?.criteria||[]);
@@ -3213,7 +3701,7 @@ function packSchemeOf(a){
 }
 function packHero(src, theme, extraClass=''){
   if (!src || theme==='classic' || theme==='masthead') return '';
-  return `<div class="pack__hero${extraClass?' '+extraClass:''}"><img src="${esc(src)}" alt=""></div>`;
+  return `<div class="pack__hero${extraClass?' '+extraClass:''}"><img src="${esc(photoSource(src))}" data-media="${esc(src)}" alt=""></div>`;
 }
 function packStudioBar(a){
   const theme = packThemeOf(a);
@@ -3539,7 +4027,7 @@ function renderBrochure(a){
 function photoSlot(slot, label, hint, photos){
   const src = photos[slot];
   return `<div class="photo-slot">
-    <div class="photo-slot__frame">${src ? `<img src="${esc(src)}" alt="">` : '<span>No photo</span>'}</div>
+    <div class="photo-slot__frame">${src ? `<img src="${esc(photoSource(src))}" data-media="${esc(src)}" alt="">` : '<span>No photo</span>'}</div>
     <div class="photo-slot__meta">
       <div class="photo-slot__label">${esc(label)}</div>
       <p class="t-small">${esc(hint)}</p>
@@ -4734,9 +5222,113 @@ function historyRecord(entry){
   return display(entry.body);
 }
 
+/* ===========================================================================
+ * Team & access
+ *
+ * The administrator's side of a workspace: who is in it, what they may do, and
+ * which invitations are still out. Membership and pending invitation are shown
+ * as two separate lists because they are two different states — somebody who
+ * has been emailed is not in the firm yet, and treating them as if they were is
+ * how a search manager ends up waiting on access that was never granted.
+ * ========================================================================= */
+
+async function loadTeam(){
+  state.teamError = null;
+  try { state.team = await api('/api/organization/members'); }
+  catch (error) { state.team = null; state.teamError = error.message; throw error; }
+}
+
+function roleChoices(selected){
+  return Object.entries(ROLE_LABEL).map(([id, label]) =>
+    `<option value="${esc(id)}" ${id===selected?'selected':''}>${esc(label)}</option>`).join('');
+}
+
+function vTeamAccess(){
+  const team = state.team;
+  const sel = state.tab?.access || 'members';
+  const draft = state.inviteDraft || {};
+
+  const rows = (team?.members || []).map(m => `<tr>
+    <th scope="row">${esc(m.name)}${m.you?' <span class="t-small">(you)</span>':''}
+      <span class="candmeta">${esc(m.email)}</span></th>
+    <td data-label="Role in this workspace">${m.supported
+      ? `<select class="input" data-act="set-role" data-member="${esc(m.clerkUserId)}" data-nodirty aria-label="Role for ${esc(m.name)}" ${m.you?'disabled':''}>${roleChoices(m.role)}</select>`
+      : `${pill('wait','Role not mapped')}<span class="candmeta mono">${esc(m.role)}</span>`}</td>
+    <td data-label="Searches">${m.seats ? m.seats + (m.seats===1?' search':' searches') : '<span class="t-small">None</span>'}</td>
+    <td data-label="Remove" class="candacts">${m.you
+      ? '<span class="t-small">Ask another administrator</span>'
+      : `<button class="btn btn--ghost btn--sm" data-act="remove-member" data-member="${esc(m.clerkUserId)}" data-name="${esc(m.name)}" data-seats="${m.seats}">Remove</button>`}</td>
+  </tr>`).join('');
+
+  const invites = (team?.invitations || []).map(i => `<tr>
+    <th scope="row">${esc(i.email)}${i.heldSeats ? `<span class="candmeta">${i.heldSeats} search seat${i.heldSeats===1?'':'s'} held for them</span>` : ''}</th>
+    <td data-label="Invited as">${esc(i.roleLabel || i.role)}</td>
+    <td data-label="Status">${pill('wait','Invitation sent')}${i.expiresAt?`<span class="candmeta">Expires ${esc(String(i.expiresAt).slice(0,10))}</span>`:''}</td>
+    <td data-label="Revoke" class="candacts"><button class="btn btn--ghost btn--sm" data-act="revoke-invite" data-invite="${esc(i.id)}" data-email="${esc(i.email)}">Revoke</button></td>
+  </tr>`).join('');
+
+  const panel = (key, body) => `<div data-tabpanel="access:${key}" role="tabpanel" id="panel-access-${key}" aria-labelledby="tab-access-${key}" tabindex="0" class="stack"${sel===key?'':' hidden'}>${body}</div>`;
+
+  return shell(`
+    ${head('Workspace', 'Team & access',
+      'Who is in ' + esc(orgName()) + ', and what they may do here. Membership opens the workspace; a search manager still seats people on individual searches.')}
+    <div class="band"><div class="wrap stack">
+      ${state.teamError ? `<div class="notice notice--wait" role="alert"><div>
+        <div class="notice__t">This list could not be loaded</div>
+        <div class="notice__b">${esc(state.teamError)}
+          <button class="btn btn--secondary btn--sm" data-act="reload-team">Try again</button></div></div></div>` : ''}
+      ${state.orgError ? `<div class="notice notice--stop" role="alert"><div><div class="notice__b">${esc(state.orgError)}</div></div></div>` : ''}
+      ${state.orgNotice ? `<div class="notice notice--ok" role="status"><div><div class="notice__b">${esc(state.orgNotice)}</div></div></div>` : ''}
+      ${secTabs('access', [
+        { key:'members', label:'Members' + (team ? ' (' + team.members.length + ')' : '') },
+        { key:'invitations', label:'Invitations' + (team ? ' (' + team.invitations.length + ')' : '') }
+      ])}
+      ${panel('members', `
+        ${rows ? `<div class="tablewrap"><table class="candtable">
+          <thead><tr><th scope="col">Person</th><th scope="col">Role in this workspace</th><th scope="col">Searches</th><th scope="col">Remove</th></tr></thead>
+          <tbody>${rows}</tbody></table></div>`
+        : emptyState('Nobody else is here yet','Invite a colleague from the Invitations tab. They join this workspace with the role you give them.')}
+        <p class="t-small">A role change takes effect on that person\u2019s next request. Removing somebody ends their access to every search in this workspace and releases their seats; their scores, notes, and history stay on the record under their name. Somebody who manages a search hands it over first.</p>`)}
+      ${panel('invitations', `
+        <form id="inviteform" class="stack stack--tight">
+          <h2 class="t-section">Invite someone to ${esc(orgName())}</h2>
+          <div class="row">
+            <label class="stack stack--tight" for="invite-email"><span>Email</span>
+              <input class="input" id="invite-email" name="email" type="email" required placeholder="name@firm.example" value="${esc(draft.email || '')}"></label>
+            <label class="stack stack--tight" for="invite-role"><span>Role in this workspace</span>
+              <select class="input" id="invite-role" name="role" required>${roleChoices(draft.role || 'org:committee')}</select></label>
+          </div>
+          <p class="t-small">Send invitation emails this address through Clerk. They join with the role you choose here and cannot pick a different one. A committee member reads and scores only the searches they are seated on.</p>
+          <div class="row"><button class="btn btn--primary" type="submit" ${state.orgBusy?'disabled':''}>${state.orgBusy?'Sending…':'Send invitation'}</button></div>
+        </form>
+        ${invites ? `<div class="tablewrap"><table class="candtable">
+          <thead><tr><th scope="col">Email</th><th scope="col">Invited as</th><th scope="col">Status</th><th scope="col">Revoke</th></tr></thead>
+          <tbody>${invites}</tbody></table></div>`
+        : emptyState('No invitations are waiting','An invitation appears here until the person accepts it or you revoke it.')}
+        <p class="t-small">A pending invitation is not membership. Revoking one does not remove anybody who has already accepted, and it does not release a search seat held for that address.</p>`)}
+    </div></div>`);
+}
+
+/**
+ * Which screen this is.
+ *
+ * The onboarding stages come first and in order, because each one is a
+ * different reason the workspace is not open and each needs its own answer.
+ * Nothing below them renders until somebody has somewhere to work.
+ */
 function page(){
   if (location.pathname.startsWith('/apply/')) return vApply();
   if (!state.user) return vGate();
+  if (state.myAccess) return vMyAccess();
+  if (state.onboarding?.required || state.editAccountSetup) return vOnboarding();
+  if (state.chooseWorkspace) return vWorkspaceChooser();
+  switch (state.onboarding?.stage){
+    case 'membership-lost': return vMembershipLost();
+    case 'workspace': return vWorkspaceChooser();
+    case 'role-pending': return vRolePending();
+    case 'assignment-pending': return vAssignmentPending();
+  }
+  if (state.view === 'team-access') return vTeamAccess();
   if (state.view === 'community') return vCommunity();
   if (state.view === 'brochure') return vBrochure();
   if (STAFF[state.view]) return vStaff(state.view);
@@ -5355,6 +5947,134 @@ document.addEventListener('click', async e => {
     await withBusy(async () => {
       state.search = await api('/api/searches/'+state.search.id+'/candidates/'+t.dataset.cid+'/'+(act==='reopen-survey'?'reopen':'invite'), { method:'POST', body:{ which:t.dataset.which, reason } });
       toast('Copy the new link below and share it with the candidate.');
+    });
+    return;
+  }
+  if (act==='edit-account-setup') {
+    if (state.dirty && !confirm('Leave this page and discard unsaved edits?')) return;
+    state.dirty = false;
+    state.onboardingDraft = null; state.onboardingError = null;
+    state.editAccountSetup = true; render();
+    $('#main')?.focus(); return;
+  }
+  if (act==='cancel-account-setup') {
+    state.editAccountSetup = false; state.onboardingDraft = null; state.onboardingError = null;
+    state.dirty = false; render(); return;
+  }
+  if (act==='check-account-access') {
+    if (state.onboardingSaving) return;
+    state.onboardingSaving = true;
+    try {
+      const blockedBefore = state.onboarding?.stage;
+      state.onboardingError = null;
+      if (!await loadMe()) { state.onboardingError = state.authError || 'We could not read your account.'; }
+      else if (state.onboarding?.blocked) {
+        // Naming the specific wall is the point: "no access" covers four
+        // situations, and the person needs to know which one is theirs.
+        state.onboardingError = state.onboarding.stage === blockedBefore
+          ? ({
+              workspace: 'You are still not in a workspace. An administrator has to invite ' + state.user.email + '.',
+              'role-pending': 'Your role here still does not open search records. An administrator sets it in Team & access.',
+              'assignment-pending': 'No search has been assigned to you yet. Your search consultant seats you on one.',
+              'membership-lost': 'Your access to that workspace has not been restored.'
+            }[state.onboarding.stage] || 'Nothing has changed yet.')
+          : null;
+      } else { state.search = null; await go('home'); }
+    } catch (error) { state.onboardingError = error.message; }
+    finally { state.onboardingSaving = false; render(); }
+    return;
+  }
+
+  /* --- workspaces --------------------------------------------------------- */
+
+  if (act==='open-workspaces') { state.chooseWorkspace = true; state.orgError = null; render(); $('#main')?.focus(); return; }
+  if (act==='my-access') {
+    state.myAccess = true; state.navOpen = false; render(); $('#main')?.focus(); return;
+  }
+  if (act==='close-my-access') { state.myAccess = false; render(); $('#main')?.focus(); return; }
+
+  if (act==='check-invites') {
+    state.orgBusy = true; state.invitesError = null; render();
+    try { state.invites = await window.SlateAuth.invitations(); }
+    catch (error) { state.invites = null; state.invitesError = error.message || 'Invitations could not be read.'; }
+    finally { state.orgBusy = false; render(); }
+    return;
+  }
+
+  if (act==='accept-invite') {
+    const invitation = (state.invites || []).find(i => i.id === t.dataset.invite);
+    if (!invitation) return;
+    state.orgBusy = true; state.orgError = null; render();
+    try {
+      await invitation.accept();
+      await enterWorkspace(invitation.organizationId);
+    } catch (error) {
+      // Expired, revoked, or meant for a different address. Say which without
+      // describing a workspace this account may have no business knowing about.
+      state.orgError = error?.errors?.[0]?.longMessage || error.message
+        || 'That invitation could not be accepted. Ask the administrator to send a new one.';
+      state.invites = null;
+    } finally { state.orgBusy = false; render(); }
+    return;
+  }
+
+  if (act==='switch-workspace') {
+    await enterWorkspace(t.dataset.org);
+    return;
+  }
+
+  if (act==='follow-link') {
+    const link = state.pendingLink;
+    if (!link) return;
+    await enterWorkspace(link.workspace.id, routeFor(link.view, { orgId:link.workspace.id, searchId:link.searchId, sel:link.sel }));
+    return;
+  }
+  if (act==='dismiss-link') { state.pendingLink = null; render(); return; }
+
+  /* --- team & access ------------------------------------------------------ */
+
+  if (act==='reload-team') {
+    state.orgError = null; state.orgNotice = null;
+    try { await loadTeam(); } catch { /* loadTeam records the message */ }
+    render();
+    return;
+  }
+
+  if (act==='remove-member') {
+    const seats = Number(t.dataset.seats) || 0;
+    const warning = 'Remove ' + t.dataset.name + ' from ' + orgName() + '?\n\n'
+      + (seats ? 'They lose their ' + seats + ' search seat' + (seats===1?'':'s') + ' here. ' : '')
+      + 'Their scores, notes, and history stay on the record under their name.';
+    if (!confirm(warning)) return;
+    state.orgBusy = true; state.orgError = null; state.orgNotice = null; render();
+    try {
+      const out = await api('/api/organization/members/' + encodeURIComponent(t.dataset.member), { method:'DELETE' });
+      state.orgNotice = t.dataset.name + ' was removed'
+        + (out.seats ? ', and released ' + out.seats + ' search seat' + (out.seats===1?'':'s') : '') + '.';
+      await loadTeam();
+    } catch (error) { state.orgError = error.message; }
+    finally { state.orgBusy = false; render(); }
+    return;
+  }
+
+  if (act==='revoke-invite') {
+    if (!confirm('Revoke the invitation to ' + t.dataset.email + '?\n\nThey will not be able to join with it. Any search seat held for that address stays held.')) return;
+    state.orgBusy = true; state.orgError = null; state.orgNotice = null; render();
+    try {
+      await api('/api/organization/invitations/' + encodeURIComponent(t.dataset.invite), { method:'DELETE' });
+      state.orgNotice = 'The invitation to ' + t.dataset.email + ' was revoked.';
+      await loadTeam();
+    } catch (error) { state.orgError = error.message; }
+    finally { state.orgBusy = false; render(); }
+    return;
+  }
+
+  if (act==='release-seat') {
+    if (!confirm('Release the held seat for ' + t.dataset.email + '?\n\nThis does not revoke their invitation to the workspace.')) return;
+    await withBusy(async () => {
+      const out = await api('/api/searches/'+state.search.id+'/members/pending/'+encodeURIComponent(t.dataset.pending), { method:'DELETE', body:{} });
+      state.search = out.search;
+      toast('The held seat was released.');
     });
     return;
   }
@@ -6004,6 +6724,56 @@ async function saveScores(){
 
 document.addEventListener('submit', async e => {
   e.preventDefault();
+  if (e.target.id==='createworkspace') {
+    if (state.orgBusy) return;
+    const body = Object.fromEntries(new FormData(e.target).entries());
+    state.orgDraft = body; state.orgBusy = true; state.orgError = null; render();
+    try {
+      const out = await api('/api/organizations', { method:'POST', body });
+      state.orgDraft = null;
+      // Creating a workspace does not put this session in it: Clerk decides
+      // which organization a session is active in, and the switch is the same
+      // deliberate move as any other.
+      await enterWorkspace(out.organization.id);
+    } catch (error) {
+      state.orgError = error.message;
+      state.orgBusy = false;
+      render();
+    }
+    return;
+  }
+
+  if (e.target.id==='inviteform') {
+    if (state.orgBusy) return;
+    const body = Object.fromEntries(new FormData(e.target).entries());
+    state.inviteDraft = body; state.orgBusy = true; state.orgError = null; state.orgNotice = null; render();
+    try {
+      const out = await api('/api/organization/invitations', { method:'POST', body });
+      state.inviteDraft = null;
+      state.orgNotice = 'An invitation was emailed to ' + out.invitation.email + ' as '
+        + out.invitation.roleLabel + '. They are in the workspace once they accept it.';
+      await loadTeam();
+    } catch (error) { state.orgError = error.message; }
+    finally { state.orgBusy = false; render(); }
+    return;
+  }
+
+  if (e.target.id==='onboardingform') {
+    if (state.onboardingSaving) return;
+    const body = Object.fromEntries(new FormData(e.target).entries());
+    state.onboardingDraft = body; state.onboardingError = null; state.onboardingSaving = true;
+    render();
+    try {
+      const result = await api('/api/me/onboarding', { method:'POST', body });
+      state.user = result.user; state.onboarding = result.onboarding;
+      state.editAccountSetup = false; state.onboardingDraft = null; state.dirty = false;
+      await refreshSearches();
+      state.search = null;
+      await go('home');
+    } catch (error) { state.onboardingError = error.message; }
+    finally { state.onboardingSaving = false; render(); $('#main')?.focus(); }
+    return;
+  }
   if (e.target.id==='newsearch'){
     await createSearch();
   }
@@ -6012,7 +6782,11 @@ document.addEventListener('submit', async e => {
     await withBusy(async () => {
       const out = await api('/api/searches/'+state.search.id+'/members', { method:'POST', body });
       state.search = out.search;
-      toast(body.name+' is seated.');
+      e.target.reset();
+      // Never "is seated" for somebody who is not. The server says which of the
+      // three things happened and the toast repeats it rather than summarising
+      // all three as success.
+      toast(out.seated ? body.name + ' is seated.' : (out.note || 'Their seat is held.'));
     }, waitSave('Seating '+(body.name||'them')));
   }
   if (e.target.id==='newcand'){
@@ -6085,6 +6859,29 @@ window.addEventListener('popstate', async event => {
   await applyRoute(parseRoute(location.hash), { push:false });
 });
 
+/**
+ * An address changed in place rather than navigated to.
+ *
+ * Typing or pasting a link into the address bar of an open tab changes the hash
+ * without a history navigation, so `popstate` never fires and the workspace
+ * would sit on the old screen under the new address. It matters more now that
+ * the app rewrites addresses to carry their workspace: the address somebody
+ * arrives with and the one that ends up in the bar are not always the same
+ * string, and only one of them can be what is on screen.
+ */
+window.addEventListener('hashchange', async () => {
+  if (location.pathname.startsWith('/apply/')) return;
+  if (!state.user) return;
+  // Already showing it: this is the app's own rewrite coming back round.
+  if (location.hash === routeFor()) return;
+  if (state.dirty && !confirm('Leave this page and discard unsaved edits?')){
+    history.replaceState({ slateDepth:navDepth }, '', routeFor());
+    return;
+  }
+  state.dirty = false;
+  await applyRoute(parseRoute(location.hash), { push:false });
+});
+
 (async function boot(){
   await loadHealth();
   const m = location.pathname.match(/^\/apply\/([^/]+)/);
@@ -6095,28 +6892,79 @@ window.addEventListener('popstate', async event => {
     return;
   }
   try {
-    await window.SlateAuth.init(state.health?.auth, () => {
-      state.user = null; state.search = null; state.searches = []; state.users = []; state.dirty = false;
-      render();
-      location.reload();
-    });
+    await window.SlateAuth.init(state.health?.auth,
+      () => {
+        state.user = null; state.dirty = false;
+        clearWorkspaceState();
+        render();
+        location.reload();
+      },
+      nextOrganization => {
+        // The active workspace changed somewhere this tab did not ask — another
+        // tab, or Clerk resolving a task. Whatever is on screen belongs to the
+        // workspace we were in, so it comes down before anything else happens.
+        state.dirty = false;
+        clearWorkspaceState();
+        window.removeEventListener('beforeunload', warnUnsaved);
+        location.hash = nextOrganization ? '#/o/' + encodeURIComponent(nextOrganization) + '/home' : '#/home';
+        location.reload();
+      });
   } catch (error) {
     state.authError = error.message;
     render();
     return;
   }
   if (await loadMe()){
-    await refreshSearches();
     navDepth = Number(history.state?.slateDepth) || 0;
-    await applyRoute(parseRoute(location.hash), { push:false });
+    if (state.onboarding?.blocked){
+      // Nowhere to work yet. The onboarding screens are their own thing and do
+      // not belong to a route, so no search index is fetched and no address is
+      // written until there is a workspace behind it.
+      render();
+      $('#main')?.focus();
+    } else {
+      await refreshSearches();
+      await applyRoute(parseRoute(location.hash), { push:false });
+    }
   } else {
     render();
   }
 })();
 
 // Warn before losing unsaved work, including candidate questionnaires.
+// The role select on Team & access commits on change rather than behind a save
+// button: it is one field with one effect, and leaving it looking changed while
+// it is not would be worse than a moment's wait.
+document.addEventListener('change', async e => {
+  const select = e.target.closest('select[data-act="set-role"]');
+  if (!select) return;
+  const member = select.dataset.member;
+  const role = select.value;
+  state.orgBusy = true; state.orgError = null; state.orgNotice = null;
+  try {
+    const out = await api('/api/organization/members/' + encodeURIComponent(member), { method:'PATCH', body:{ role } });
+    state.orgNotice = 'Role changed to ' + out.roleLabel + '. It applies on their next request.';
+    await loadTeam();
+  } catch (error) { state.orgError = error.message; try { await loadTeam(); } catch { /* keep the message */ } }
+  finally { state.orgBusy = false; render(); }
+});
+
 document.addEventListener('input', e => {
   if (!e.target.closest('#app')) return;
+  if (e.target.closest('#createworkspace')) {
+    state.orgDraft = Object.fromEntries(new FormData(e.target.form).entries());
+    return;
+  }
+  if (e.target.closest('#inviteform')) {
+    state.inviteDraft = Object.fromEntries(new FormData(e.target.form).entries());
+    return;
+  }
+  if (e.target.closest('#onboardingform')) {
+    state.onboardingDraft = Object.fromEntries(new FormData(e.target.form).entries());
+    state.dirty = true;
+    if (e.target.name === 'requestedRole') render();
+    return;
+  }
   // Filter controls change what is listed, not what is saved. Treating them as
   // unsaved work would ask the user to confirm leaving a page they only
   // searched in.
@@ -6138,6 +6986,10 @@ function paintApplyProgress(){
   const done = $$('#applyform textarea').filter(t => t.value.trim()).length;
   el.textContent = done + ' of ' + total + ' answered';
 }
-window.addEventListener('beforeunload', e => {
+// Named, because a deliberate workspace switch removes it: the guard has
+// already been answered by then, and leaving it attached would ask the same
+// question twice on the reload that completes the switch.
+function warnUnsaved(e){
   if (state.dirty) { e.preventDefault(); e.returnValue = ''; }
-});
+}
+window.addEventListener('beforeunload', warnUnsaved);

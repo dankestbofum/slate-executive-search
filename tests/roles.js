@@ -49,9 +49,11 @@ async function revisionOf(id, auth) {
   const own = await mk(abe, 'Roles County');
   const other = await mk(mike, 'Other Roles County');
 
-  // Returns the account id, which only appears on the seating response; a later
-  // search read does not carry the roster. Seating issues no credential of its
-  // own: the person signs in with the email on their invitation.
+  // Seating somebody from outside the workspace holds the seat and invites them
+  // to the firm; the seat becomes real when they accept and sign in. This helper
+  // walks that whole path so the rows below are about permission rather than
+  // about invitation state. Seating issues no credential of its own: the person
+  // signs in with the email on their invitation.
   const seat = async (searchId, auth, name, email) => {
     const res = await api('/api/searches/' + searchId + '/members', {
       auth, method: 'POST', revision: await revisionOf(searchId, auth),
@@ -59,9 +61,26 @@ async function revisionOf(id, auth) {
     });
     assert.strictEqual(res.status, 200, 'seating ' + email + ' returned ' + res.status);
     const body = await res.json();
-    const row = (body.roster || []).find(m => m.email === email.toLowerCase());
-    assert.ok(row, 'seated member ' + email + ' was not in the returned roster');
     assert.ok(!Object.hasOwn(body, 'pin'), 'seating handed back a credential of its own');
+    if (!body.seated) {
+      const held = (body.pending || []).find(p => p.email === email.toLowerCase());
+      assert.ok(held, 'seating ' + email + ' neither seated them nor held a seat');
+      if (!body.invitationSent) {
+        // A manager who is not an administrator cannot invite anybody to the
+        // firm, so the seat waits with "Invitation needed" and an administrator
+        // completes it. Two authorities, two steps, on purpose.
+        assert.strictEqual(held.status, 'invitation-needed');
+        const invited = await api('/api/organization/invitations', {
+          auth: abe, method: 'POST', body: { email, role: 'org:committee' }
+        });
+        assert.strictEqual(invited.status, 200, 'the administrator could not invite ' + email);
+      }
+      // Their first request accepts the workspace invitation and takes the seat.
+      assert.strictEqual((await api('/api/me', { auth: sign.headers(email) })).status, 200);
+    }
+    const roster = (await (await api('/api/searches/' + searchId, { auth })).json()).roster || [];
+    const row = roster.find(m => m.email === email.toLowerCase());
+    assert.ok(row, 'seated member ' + email + ' was not on the roster after joining');
     return { userId: row.userId };
   };
 

@@ -246,11 +246,17 @@ async function request(url, method = 'GET', body, auth, revision) {
   assert.equal((await write('', 'DELETE')).status, 200);
   assert.equal((await request(p, 'GET', undefined, auth)).status, 404);
   assert.equal((await request('/api/apply/'+liveInvite)).status, 404);
-  // Archiving retires the account the seat created. The person's Clerk identity
-  // is untouched, so what has to be gone is the Slate account behind it.
+  // Archiving ends the seat, not the membership. This person accepted an
+  // invitation to the firm's workspace, so their account stays: retiring it
+  // would strand a live Clerk membership against nothing and erase the name on
+  // their scores. What has to be gone is their access to this search.
   const archived = JSON.parse(fs.readFileSync(path.join(process.env.SLATE_TEST_DATA, 'slate.json'), 'utf8'));
-  check('archiving retires the committee account that seat created', () =>
-    assert.ok(!archived.users.some(u => u.email === 'archive-integrity@example.test')));
+  check('archiving ends the seat and keeps the account that holds the history', () => {
+    assert.ok(archived.users.some(u => u.email === 'archive-integrity@example.test'));
+    assert.ok(!archived.searches.some(s => (s.members || []).some(m => m.userId
+      && archived.users.find(u => u.id === m.userId)?.email === 'archive-integrity@example.test')),
+      'the archived search left a live seat behind');
+  });
   assert.ok((await request('/api/archives', 'GET', undefined, auth)).body.some(a=>a.id===fresh.body.id));
   const restored = await request('/api/archives/'+fresh.body.id+'/restore', 'POST', {}, auth);
   check('archived searches restore responses, history and fresh links', () => {
@@ -289,7 +295,7 @@ async function request(url, method = 'GET', body, auth, revision) {
   const failureScript = `
     const assert = require('assert/strict'), fs = require('fs'), path = require('path');
     const db = require('./server/db');
-    const s = db.blankSearch({client:'Committed',position:'Manager'}, db.db.users[0]);
+    const s = db.blankSearch({client:'Committed',position:'Manager'}, db.db.users[0], 'org_fixture_integrity');
     db.db.searches.push(s); db.persist();
     const original = fs.renameSync;
     fs.renameSync = () => { throw new Error('Synthetic disk failure'); };
@@ -306,7 +312,7 @@ async function request(url, method = 'GET', body, auth, revision) {
     const assert=require('assert/strict'), fs=require('fs'), path=require('path');
     const db=require('./server/db');
     const file=path.join(db.DATA_DIR,'slate.json');
-    const s=db.blankSearch({client:'Legacy invite',position:'Manager'},db.db.users[0]);
+    const s=db.blankSearch({client:'Legacy invite',position:'Manager'},db.db.users[0],'org_fixture_integrity');
     s.candidates=[{id:'C-legacy',name:'Legacy candidate',invite:'old-exposed-token',survey1:{at:'2025-01-01',answers:{q1:'Old answer'}}}];
     s.artifacts.survey1={questions:[{n:1,prompt:'Current question?'}]};
     db.db.searches.push(s); db.persist();

@@ -199,6 +199,17 @@ function errors(logger = console) {
       logger.warn?.('[' + ref + '] malformed JSON ' + req.method + ' ' + safePath(req.originalUrl));
       return res.status(400).json({ error: 'That request was not valid JSON.', ref });
     }
+    // The identity provider is a dependency, not a bug. An outage reaching it
+    // is a 503 the client can retry, and a refusal it made is its own message,
+    // because "something went wrong" tells an administrator nothing about an
+    // invitation Clerk declined.
+    if (err?.code === 'DIRECTORY_UNAVAILABLE') {
+      logger.warn?.('[' + ref + '] directory unavailable ' + req.method + ' ' + safePath(req.originalUrl));
+      return res.status(503).json({ error: err.message, code: 'DIRECTORY_UNAVAILABLE', ref });
+    }
+    if (err?.code === 'DIRECTORY_REJECTED') {
+      return res.status(err.status || 400).json({ error: err.message, ref });
+    }
 
     logger.error('[' + ref + '] ' + req.method + ' ' + safePath(req.originalUrl) + ' failed: ' + (err?.message || 'unknown error'));
     if (!isProd && err?.stack) logger.error(err.stack);

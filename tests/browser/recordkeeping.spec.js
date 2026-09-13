@@ -256,20 +256,25 @@ test('a committee member is not offered outcomes, verification or closeout', asy
     headers: { 'if-match': await revision(page, search.id) },
     data: { name: 'Pat Lane', email: member, seat: 'committee' }
   });
-
-  await installClerk(page, { email: member });
+  // Seating an address from outside the firm holds the seat and invites them to
+  // the workspace; the seat opens when they join. Their own browser context,
+  // because the workspace a session is active in is stored per origin.
+  const theirs = await page.context().browser().newContext();
+  const them = await theirs.newPage();
+  await installClerk(them, { email: member });
   // These are consultant screens. A committee member who follows a link to one
   // lands on the search rather than on an empty or half-usable page.
   for (const view of ['verify', 'closeout']) {
-    await page.goto('/#/s/' + search.id + '/' + view);
-    await expect(page.locator('#main h1')).toBeVisible({ timeout: 10000 });
-    await expect(page).toHaveURL(new RegExp('#/s/' + search.id + '$'));
+    await them.goto('/#/s/' + search.id + '/' + view);
+    await expect(them.locator('#main h1')).toBeVisible({ timeout: 10000 });
+    await expect(them).toHaveURL(new RegExp('/s/' + search.id + '$'));
   }
 
   const candidates = await (await page.request.get('/api/searches/' + search.id)).json();
-  await page.goto('/#/s/' + search.id + '/person/' + candidates.candidates[0].id);
-  await expect(page.locator('#main h1')).toBeVisible({ timeout: 10000 });
-  await expect(page.getByRole('tab', { name: 'Outcome' })).toHaveCount(0);
-  await expect(page.locator('#docform')).toHaveCount(0);
-  await expect(page.locator('#commform')).toHaveCount(0);
+  await them.goto('/#/s/' + search.id + '/person/' + candidates.candidates[0].id);
+  await expect(them.locator('#main h1')).toBeVisible({ timeout: 10000 });
+  await expect(them.getByRole('tab', { name: 'Outcome' })).toHaveCount(0);
+  await expect(them.locator('#docform')).toHaveCount(0);
+  await expect(them.locator('#commform')).toHaveCount(0);
+  await theirs.close();
 });

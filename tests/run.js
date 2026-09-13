@@ -25,8 +25,19 @@ async function suite(file, suiteEnv) {
       server.once('exit', () => { clearTimeout(timeout); reject(new Error('Test server exited before startup.')); });
       server.once('error', error => { clearTimeout(timeout); reject(error); });
     });
-    const suiteEnv = { ...env, SLATE_URL:'http://127.0.0.1:'+ready.port, SLATE_TEST_DATA:env.DATA_DIR,
-      DATA_DIR:path.join(directory, 'units'), SLATE_TEST_CLERK_KEY:fixture.privateKey };
+    const base = 'http://127.0.0.1:' + ready.port;
+    // One firm workspace, stood up through the same routes the product uses, so
+    // the suites that are about the work rather than about the boundary between
+    // firms have somewhere to do it. tests/organizations.js builds its own
+    // second workspace to test the boundary itself.
+    process.env.SLATE_TEST_CLERK_KEY = fixture.privateKey;
+    const orgId = await identity.bootstrapWorkspace(base, {
+      owner: 'abe@slate.local', staff: ['mike@slate.local', 'team@slate.local']
+    });
+    const suiteEnv = { ...env, SLATE_URL:base, SLATE_TEST_DATA:env.DATA_DIR,
+      DATA_DIR:path.join(directory, 'units'), SLATE_TEST_CLERK_KEY:fixture.privateKey,
+      SLATE_TEST_ORG_ID:orgId };
+    const organizationsSuite = await suite('organizations.js', suiteEnv);
     const auth = await suite('auth.js', suiteEnv);
     const clerkAuth = await suite('clerk-auth.js', suiteEnv);
     const baseline = await suite('bughunt.js', suiteEnv);
@@ -41,7 +52,7 @@ async function suite(file, suiteEnv) {
     const dispo = await suite('disposition.js', suiteEnv);
     const aichecks = await suite('aireliability.js', suiteEnv);
     const regression = await suite('integrity.js', suiteEnv);
-    process.exitCode = auth || clerkAuth || baseline || counties || regression || security || roles || storage || recover || monitoring || exports_ || cands || dispo || aichecks;
+    process.exitCode = organizationsSuite || auth || clerkAuth || baseline || counties || regression || security || roles || storage || recover || monitoring || exports_ || cands || dispo || aichecks;
     console.log('Isolated test data: ' + directory);
   } catch (error) { console.error(error); process.exitCode = 1; }
   finally { server.kill(); }

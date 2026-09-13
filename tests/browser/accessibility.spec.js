@@ -122,7 +122,8 @@ test('the document declares a language and names the screen in one heading', asy
   // One h1, and it says where you are. Counting headings alone passed even
   // when every screen was called the same thing.
   await expect(page.locator('h1')).toHaveCount(1);
-  await expect(page.locator('h1')).toContainText(/your searches/i);
+  // Home is named for the firm whose book it is.
+  await expect(page.locator('h1')).toContainText(/searches$/i);
   await expect(page).toHaveTitle(/home/i);
 
   await page.getByRole('button', { name: /open a new search/i }).first().click();

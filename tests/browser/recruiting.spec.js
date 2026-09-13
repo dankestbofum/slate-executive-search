@@ -150,14 +150,14 @@ test('a destination with nothing behind it is not offered, and its link lands on
 
   await page.goto('/#/s/' + basic.id + '/interviews');
   await expect(page.locator('#main h1')).toBeVisible({ timeout: 10000 });
-  await expect(page).toHaveURL(/#\/s\/[^/]+$/);
+  await expect(page).toHaveURL(/#\/(?:o\/[^/]+\/)?s\/[^/]+$/);
   await expect(page.locator('#toast')).toContainText(/nothing on this search/i);
 
   // An address this build cannot render is not painted under someone else's
   // URL either.
   await page.goto('/#/s/' + basic.id + '/not-a-screen');
   await expect(page.locator('#main h1')).toBeVisible({ timeout: 10000 });
-  await expect(page).toHaveURL(/#\/s\/[^/]+$/);
+  await expect(page).toHaveURL(/#\/(?:o\/[^/]+\/)?s\/[^/]+$/);
 });
 
 test('the destinations reach every included step, and the checklist keeps the rest', async ({ page }, testInfo) => {

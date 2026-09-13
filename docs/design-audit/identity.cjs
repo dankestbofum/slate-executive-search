@@ -14,11 +14,14 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const identity = require('../../tests/identity');
-const { installClerk, authHeaders } = require('../../tests/browser/clerk');
+const { installClerk, authHeaders, useBase, sharedWorkspace } = require('../../tests/browser/clerk');
 
 const keyFile = path.join(os.tmpdir(), 'slate-audit-clerk-v1.json');
 if (!fs.existsSync(keyFile)) fs.writeFileSync(keyFile, JSON.stringify(identity.serverEnv()));
 const fixture = JSON.parse(fs.readFileSync(keyFile, 'utf8'));
 process.env.SLATE_TEST_CLERK_KEY = fixture.privateKey;
 
-module.exports = { serverEnv: fixture.server, installClerk, authHeaders };
+// A search belongs to a workspace, so a tool that builds a fixture through the
+// API has to stand one up first. `useBase` points the shared fixture at
+// whichever server this tool started.
+module.exports = { serverEnv: fixture.server, installClerk, authHeaders, useBase, sharedWorkspace };

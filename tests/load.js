@@ -35,6 +35,9 @@ const os = require('os');
 const path = require('path');
 const { fork } = require('child_process');
 const identity = require('./identity');
+// This measurement runs its own server against its own store, so any workspace
+// the shared harness stood up does not exist here.
+delete process.env.SLATE_TEST_ORG_ID;
 
 const root = path.resolve(__dirname, '..');
 
@@ -98,7 +101,11 @@ function row(label, stats) {
     });
     const BASE = 'http://127.0.0.1:' + ready.port;
     const signer = identity.signer(fixture.privateKey);
-    const owner = signer.headers('abe@slate.local');
+    // One firm workspace, stood up the way a real one is, because a search now
+    // belongs to one. Its id goes into every session this measurement signs.
+    const orgId = await identity.bootstrapWorkspace(BASE,
+      { owner: 'abe@slate.local', name: 'Load Test Partners', privateKey: fixture.privateKey });
+    const owner = signer.inOrg('abe@slate.local', orgId, 'org:admin');
 
     async function call(method, url, body, headers) {
       const res = await fetch(BASE + url, {
@@ -150,7 +157,13 @@ function row(label, stats) {
       const email = 'load-member-' + i + '@example.gov';
       const res = await write('POST', '/api/searches/' + id + '/members',
         { name: 'Load Member ' + i, email, seat: 'committee' });
-      if (res.status === 200) seatEmails.push(email);
+      // Seating somebody outside the workspace invites them and holds the seat;
+      // their first request accepts it and takes the seat up. Do that here so
+      // the measurement runs against real seated members.
+      if (res.status === 200) {
+        await call('GET', '/api/me', undefined, signer.inOrg(email, orgId, 'org:committee'));
+        seatEmails.push(email);
+      }
     }
 
     // Writes are serial by design: one writer, whole-file persist. Measuring
@@ -208,7 +221,8 @@ function row(label, stats) {
 
     async function readerLoop(index) {
       // Committee members and consultants read the same search; both paths run.
-      const headers = index % 4 === 0 ? owner : signer.headers(seatEmails[index % seatEmails.length]);
+      const headers = index % 4 === 0 ? owner
+        : signer.inOrg(seatEmails[index % seatEmails.length], orgId, 'org:committee');
       while (Date.now() < deadline) {
         const started = process.hrtime.bigint();
         const res = await call('GET', '/api/searches/' + id, undefined, headers);

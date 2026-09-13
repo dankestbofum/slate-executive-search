@@ -45,9 +45,9 @@ services:
       # domain. Set it once the service has a URL.
       - key: CLERK_AUTHORIZED_PARTIES
         sync: false
-      # Verified emails eligible for NEW consultant accounts, comma-separated.
-      # It never promotes or re-enables an existing account.
-      - key: SLATE_CLERK_ADMIN_EMAILS
+      # Optional. Where Clerk sends somebody who follows an organization
+      # invitation; unset uses the instance default.
+      - key: SLATE_INVITATION_REDIRECT_URL
         sync: false
 
       # Drafting and city research. The app serves without it; only those two

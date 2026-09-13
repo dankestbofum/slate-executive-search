@@ -1031,6 +1031,10 @@ details.toggle[open] summary::before{transform:rotate(90deg) translateX(-1px)}
 /* The count sits on the selected row’s tint, where the muted ink no longer
    clears 4.5:1; it takes the accent the rest of the row is drawn in. */
 .rail__link[aria-current="page"] .rail__tail{color:var(--accent)}
+/* Hovering a row swaps its ground to --sunken, where the muted ink the count is
+   drawn in falls to 4.19:1. The count takes the body ink there, the same way it
+   takes the accent on the selected row. */
+.rail__link:hover .rail__tail, .rail__toggle:hover .rail__tail{color:var(--ink-2)}
 .rail__label--dest{
   flex:1; min-width:0; text-align:left;
   font-size:var(--ws-label); font-weight:600; letter-spacing:0; text-transform:none; color:inherit;

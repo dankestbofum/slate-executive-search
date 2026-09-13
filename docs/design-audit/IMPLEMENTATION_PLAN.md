@@ -1,5 +1,7 @@
 # Slate UI implementation plan
 
+> **Organization integration:** see the [Organization workspaces and onboarding implementation plan](ORGANIZATION_IMPLEMENTATION_PLAN.md) for the proposed Clerk organization, staff-access, and shared-search work.
+
 > **Next design pass:** see the [Recruiting platform redesign plan](RECRUITING_REDESIGN_PLAN.md) for the planned visual and navigation redesign. This document preserves the earlier usability scope; its implementation is tracked in [Implementation status](IMPLEMENTATION_STATUS.md).
 
 Companion to the [design audit](AUDIT.md). This is a proposed implementation sequence; the application has not been redesigned as part of this audit.
