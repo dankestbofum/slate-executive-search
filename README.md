@@ -86,38 +86,170 @@ plan rather than on a brochure it does not have. The API refuses drafts, saves,
 reviews, photos, and the semifinalist send for steps outside the package
 (`400`). Searches written before packages existed are treated as Executive.
 
-## Roles
+## Workspaces and roles
+
+One firm is one workspace, and a workspace is one Clerk organization. Searches,
+staff, committees, archives and directories never cross between them: a search
+belongs to the workspace it was opened in, permanently, and a search whose
+workspace is unknown is readable by nobody.
+
+Two different questions decide what somebody can do, and keeping them apart is
+the point of the design:
+
+- **Membership** is Clerk's answer, and it decides which firm you are in and
+  what you may do across it.
+- **A seat** is Slate's answer, and it decides which searches you work on.
+
+Being in a firm's workspace does not put you on any of its searches; being on a
+search does not survive losing the membership.
+
+| Workspace role | Clerk role | In the workspace | On a search |
+|---|---|---|---|
+| Organization administrator | `org:admin` | Invites members, sets their roles, sees the whole book | Consultant powers; may take over a search by the ordinary handover |
+| Search consultant | `org:consultant` | Opens searches, sees the whole book | Reads and edits every search here; manager actions still need the manager seat |
+| Committee member | `org:committee` | Sees only their own assignments | Reads and scores the searches they are seated on |
+| Awaiting access | anything else | Nothing | Nothing |
+
+Register `org:consultant` and `org:committee` on the Clerk instance before
+anybody signs in. Slate acts on exactly those two and on `org:admin`; any
+other role, **including Clerk's own `org:member`**, resolves to no access at
+all rather than to a guess, because `org:member` carries directory and billing
+permissions that a committee member should not hold.
+
+Within one workspace the seats are unchanged:
 
 | | Consultant | Account manager | Committee member |
 |---|---|---|---|
-| See every search | yes | yes | only their own |
+| See every search in this workspace | yes | yes | only their own |
 | Edit the search file | yes | yes | no |
 | Seat members, run intake, adopt consensus | no | yes | no |
 | Answer intake, score candidates | yes | yes | yes |
 
-The account manager is whichever consultant holds the seat. **Any consultant can
-join a search and take the account** — who runs a file is a firm decision, not a
-wall between colleagues, and gating it on the current manager would strand a
-search whenever that person is unavailable. Everything else the manager does
-(seating members, running the intake window, adopting consensus) stays with
-whoever holds the seat.
+The account manager is whichever consultant holds the seat. **Any consultant in
+the workspace can join a search and take the account** — who runs a file is a
+firm decision, not a wall between colleagues, and gating it on the current
+manager would strand a search whenever that person is unavailable. Everything
+else the manager does (seating members, running the intake window, adopting
+consensus) stays with whoever holds the seat.
 
-Consultant accounts come from the environment. Committee accounts are created
-per search and retired automatically when the last seat holding them goes away.
+The same person can be a consultant in one firm's workspace and a committee
+member in another's. The answer always comes from the membership verified for
+the request being made, never from anything stored on the account.
 
 ### Opening the workspace
 
-Select **Sign in** or **Sign up** on the landing page. Clerk verifies identity;
-the profile menu manages the account and signs out. Slate keeps its existing
-consultant roles, committee seats, and attribution history. On first sign-in,
-a verified primary email links to the matching Slate account; subsequent
-requests use its persisted Clerk user ID. Disabled accounts remain blocked.
+Sign in → choose workspace → confirm access → start work.
 
-New sign-ups receive committee access and see only searches they are seated on.
-`SLATE_CLERK_ADMIN_EMAILS` may designate verified emails for initial consultant
-provisioning. It applies only when creating a new Slate account; it never
-promotes or re-enables existing accounts. Additional consultants can be created
-with `node scripts/accounts.js create "Full Name" email@example.com "Title"`.
+Select **Sign in** or **Sign up** on the landing page. Clerk verifies identity;
+the profile menu manages the account and signs out. On first sign-in a verified
+primary email links to the matching Slate account; later requests use its
+persisted Clerk user ID. Disabled accounts remain blocked.
+
+Account setup asks for a name, and — only if no workspace has assigned one
+already — which of **Search consultant** or **Committee member** describes what
+they came to do. That choice guides the wording they see and grants nothing:
+somebody arriving on an invitation is told the role it carried instead of being
+invited to contradict it.
+
+After that, the workspace step. Each of the ways it can go is its own screen,
+because "no access" covers several situations that need different answers:
+
+- **A firm owner with no workspace** is offered **Create a workspace**, if this
+  deployment lets them (see below). Creating one makes them its administrator
+  and touches nothing else — it never adopts existing searches.
+- **Somebody waiting on an invitation** is told an administrator has to invite
+  their exact address, with **Check invitations** and a way to sign in as
+  somebody else.
+- **Somebody in several workspaces** gets a chooser naming each and their role
+  in it.
+- **A member whose role Slate does not act on** is told which role they hold and
+  who can change it.
+- **A committee member with no assignment** is told they are part of the firm
+  and that a search manager seats people individually.
+
+#### Who may found a workspace
+
+In production, only the verified emails in `SLATE_WORKSPACE_FOUNDERS`. An empty
+list means nobody, which is the right default for a URL anyone can reach: Clerk's
+sign-up page is public, so without this a stranger could sign up and create a
+firm. They would see nothing of yours — a new workspace is empty and grants
+authority over nothing that already exists — but it is still an account and a
+workspace you did not ask for.
+
+Set it to the first administrator's email to stand a firm up; everybody else
+arrives by invitation. Where creation is closed, the workspace step says so and
+does not show a form that would be refused after it was filled in. Outside
+production it is open, so local development and the test suites need no
+configuration.
+
+This is not the operator allowlist the organization model removed. That one gave
+somebody consultant access to searches that already existed, sitting above
+organization membership and defeating it. This bounds who can bring a new, empty
+firm into being, and grants nothing inside any workspace.
+
+**My access** in the rail shows the role the workspace assigned, the searches
+they are seated on, and who to ask for a change. It is not a control that
+changes anything: roles are set by an administrator in **Team & access**.
+
+### Team & access
+
+An administrator's screen with two lists, kept separate because they are two
+different states. **Members** are in the firm; **Invitations** have been emailed
+and are not. Inviting somebody requires an address and an explicit role, and the
+form says what pressing the button does before it is pressed. Changing a role
+takes effect on that person's next request. Removing somebody ends their access
+to every search in the workspace and releases their seats, while their scores,
+notes and authorship stay on the record under their name; somebody who manages a
+search has to hand it over first. The last administrator cannot be removed or
+demoted.
+
+A search manager who is not an administrator can still prepare a committee: the
+seat is held against the address and shown as **Invitation needed** until an
+administrator sends the invitation. Slate never implies an email went out when
+it did not. A held seat becomes a real one when that person accepts and signs
+in, and grants nothing before that.
+
+### Switching workspaces
+
+The active workspace is part of the Clerk session, so every address carries it:
+`#/o/{organizationId}/s/{searchId}/screen`. An older address without the
+`/o/` segment still resolves — against the workspace you are in, and the search
+it names is still looked up through an authorized request, so a link from
+another firm comes back not-found rather than opening.
+
+**Switch workspace** sits above the rail's links, apart from the account menu,
+and is Slate's own control rather than a prebuilt one: it runs the same
+unsaved-edit guard as everything else and can be cancelled, which a prebuilt
+switcher's selection event cannot. On a switch the page reloads at the new
+workspace's address — the only way to guarantee that no search, candidate,
+filter, draft, cached photo or in-flight response from the previous firm
+survives into the next one. A link belonging to another workspace you can enter
+is offered as a switch rather than followed, and says nothing about what is in
+it.
+
+Brochure photos are fetched with the page's own session rather than by the
+browser, because Clerk's cookie carries whichever workspace was selected most
+recently in **any** tab. The server refuses an image request that arrives
+without a bearer token.
+
+### Administration
+
+`node scripts/accounts.js` still lists accounts and disables or restores them
+— the deployment-level authority that sits above every workspace. It no longer
+grants anything: there is no command that makes somebody a consultant, because
+there is no longer a firm-wide consultant. Membership and roles are managed in
+Team & access and held at Clerk.
+
+`node scripts/organizations.js` maps an existing store onto workspaces:
+
+```bash
+node scripts/organizations.js plan
+node scripts/organizations.js adopt --org org_123 --name "Firm" # dry run
+node scripts/organizations.js adopt --org org_123 --name "Firm" --apply
+```
+
+Run both with the app stopped, against its configured `DATA_DIR`, then restart
+it so the single-process store reloads the change.
 
 Clerk is the only way in. Slate issues no credential, keeps no session table
 and has no sign-in route of its own; identity is proven on every request and
@@ -153,7 +285,8 @@ cp .env.example .env
 npm ci        # lockfile install, same as CI and the image
 clerk auth login
 clerk init --app app_3JCIQzCE9yeVbFBkzQF0qP4LRfS
-# Set SLATE_CLERK_ADMIN_EMAILS to your first consultant's verified email.
+# Enable Organizations on the Clerk instance and add the custom roles
+# org:consultant and org:committee. Then sign in and create your workspace.
 npm start
 ```
 
@@ -202,7 +335,11 @@ you to supply.
    - `CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY`. Without them every
      workspace request answers 503 rather than falling back to open access.
    - `CLERK_AUTHORIZED_PARTIES`, set to the service's own origin once it has
-     one, and `SLATE_CLERK_ADMIN_EMAILS` for initial consultant provisioning.
+     one.
+   - `SLATE_WORKSPACE_FOUNDERS`, the verified email of the first administrator.
+     Without it nobody can create a workspace in production, which is the safe
+     default for a public URL. It grants nothing inside any workspace; everybody
+     else joins by invitation.
    - `ANTHROPIC_API_KEY` for drafts and city research. The app serves without
      it; those two features stop.
    - `SLATE_SUPPORT_EMAIL`, shown to candidates who cannot proceed alone.
@@ -585,6 +722,16 @@ outright rather than downgraded: rolling the app back onto a store it does not
 understand is how a rollback becomes data loss. Roll back the application and
 its matching snapshot together.
 
+Schema 4 introduced workspace ownership. It is the migration where refusing a
+downgrade matters most: rolling an organization-aware store back onto a build
+that predates workspaces would serve several firms through one global
+permission model. Every search it touches comes out **unowned**, which is to say
+readable by nobody, because deciding which firm owns a record that predates
+workspaces is a migration decision (`scripts/organizations.js`) and not
+something the first person to sign in should settle by signing in. Clerk holds
+the organizations, memberships and invitations, so restoring a database snapshot
+does not restore those: they are a separate recovery step.
+
 **Shutdown.** On SIGTERM the app stops accepting writes (reads continue,
 mutations get 503 with `Retry-After`), drains in-flight requests, releases the
 write lock, and exits — with a 10-second ceiling so it exits deliberately
@@ -609,23 +756,33 @@ rather than being killed mid-write.
 
 ## Account administration
 
-Named consultant accounts are managed with a CLI, run inside the deployment
-against its `DATA_DIR`:
+Two levels, deliberately apart.
+
+**Inside a workspace**, an organization administrator manages members,
+invitations and roles from **Team & access** in the app. That is routine work
+and belongs to the firm, not to whoever has shell access.
+
+**Above every workspace** sits one thing a workspace administrator must not be
+able to do: end an account's access to the deployment entirely, whichever firms
+it belongs to. That stays a CLI, run inside the deployment against its
+`DATA_DIR`:
 
 ```bash
-node scripts/accounts.js list
-node scripts/accounts.js create "Dana Ruiz" dana@firm.example "Search consultant"
+node scripts/accounts.js list            # accounts, and the workspaces last seen for each
 node scripts/accounts.js rename u3 "Dana Ruiz-Alvarez"
 node scripts/accounts.js disable u3      # revokes access, keeps the record
 node scripts/accounts.js enable u3
 ```
 
-This is deliberately **not** an HTTP route. Account administration is the
-authority that grants every other authority, and the app has no role above
-consultant to hold it. Over HTTP, any compromised consultant session could
-mint accounts; requiring shell access keeps it behind whatever
-controls the hosting account has. If the county needs delegated in-app
-administration, that is a new role and a new decision, not a flag.
+There is no longer a command that grants consultant access, because there is no
+longer a firm-wide consultant: authority comes from membership in a workspace
+and nothing else. Mapping legacy records onto a workspace is
+`scripts/organizations.js`, which is a dry run until `--apply`.
+
+Keeping the deployment-level controls out of HTTP is deliberate. Over HTTP, a
+compromised administrator session could disable accounts across every firm on
+the deployment; requiring shell access keeps that behind whatever controls the
+hosting account has.
 
 **Disabling keeps the record.** History attributes decisions to accounts, and a
 search must stay readable after someone leaves, so a disabled account retains
@@ -797,9 +954,38 @@ Existing accounts, search memberships, and history stay in place. The old `start
 `login` and `logout` routes are gone, along with the session table behind them;
 a store carrying one loses it on the schema 2 to 3 migration. Legacy PINs and PIN
 hashes were already removed from the active store on startup, and the public
-config lists no accounts. Provision consultant emails before inviting staff,
-configure production Clerk keys, and use each person's verified identity for
-attributable approvals.
+config lists no accounts. Configure production Clerk keys, and use each person's
+verified identity for attributable approvals.
+
+Workspace support (schema 3 to 4) changes where authority comes from. There is
+no longer a firm-wide consultant role, no operator email allowlist, and no
+command that grants access; a person's authority is their membership in a Clerk
+organization, re-read from Clerk on every protected request so that removing
+them there ends their access on their next request rather than whenever their
+session token expires. The cost is one directory call per request, taken
+deliberately for the pilot in preference to a cache whose revocation guarantee
+has not been tested; measure it before adding one.
+
+Cutting over needs both halves in one window, and they are not both in the
+database:
+
+1. Enable Organizations on the Clerk instance and register `org:consultant`
+   and `org:committee`. Map or migrate any existing `org:member` memberships
+   deliberately — Slate reads that role as no access.
+2. Back up and verify the store, then rehearse `scripts/organizations.js plan`
+   and `adopt` against a copy with at least two workspaces.
+3. Deploy the application and the authorization change together. There is no
+   intermediate release that shows a workspace switcher over global permissions.
+4. Map the legacy searches, archives included, to the workspace that owns them.
+   Until that runs they are readable by nobody, which is the safe state, not a
+   fault.
+5. Smoke-test staff collaboration, committee restriction, cross-workspace
+   denial, and the public `/apply` pages, which need no membership and are
+   unchanged.
+
+Rolling back after more than one firm is onboarded would remove isolation. Use
+maintenance mode and an authorized restore, and account for the Clerk side —
+organizations, memberships, invitations — separately from the database snapshot.
 
 The privacy migration replaces legacy candidate invitation links once because
 they were previously included in committee API responses. **After updating, share

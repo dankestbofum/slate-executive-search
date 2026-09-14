@@ -1257,9 +1257,11 @@ async function run(){
       && !appJs.includes('/api/login') && !appJs.includes('/api/start'));
 
   // Home is the portfolio, not a greeting: the page names the book of business
-  // and the rail still returns to it from anywhere.
-  record('Home page is the recruiting portfolio',
-    appJs.includes("head('Workspace','Your searches'") && />Home</.test(appJs)
+  // and the rail still returns to it from anywhere. It is titled with the firm
+  // whose book it is, so two tabs open on two workspaces cannot be mistaken for
+  // each other.
+  record('Home page is the recruiting portfolio, named for its workspace',
+    appJs.includes("orgName() + ' searches'") && />Home</.test(appJs)
       && /function summaryPhase/.test(appJs) && !/How a search runs/.test(appJs));
 
   record('Home can delete more than one search at once',

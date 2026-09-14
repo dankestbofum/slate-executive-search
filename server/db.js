@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const integrity = require('./integrity');
 const backup = require('./backup');
 const jurisdictions = require('./jurisdictions');
+const organizations = require('./organizations');
 
 const isProd = process.env.NODE_ENV === 'production';
 const DATA_DIR = process.env.DATA_DIR
@@ -59,10 +60,14 @@ function initials(name){
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-function blankSearch(input, user){
+function blankSearch(input, user, organizationId){
+  if (!organizationId) throw new Error('A search is opened inside an organization.');
   return {
     id: nid('sr'),
     no: null,
+    // Set once, from the session's verified organization, and never from a
+    // submitted field. A search does not move between firms.
+    organizationId,
     client: input.client || '',
     jurisdictionType: jurisdictions.typeOf(input.jurisdictionType),
     position: input.position || '',
@@ -176,7 +181,7 @@ function releaseWriterLock(){
  * newer release is refused outright: rolling the application back onto a store
  * it does not understand is how a rollback turns into data loss.
  * ------------------------------------------------------------------ */
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 function removeLegacyPins(store){
   const users = [...(store.users || []),
@@ -197,7 +202,20 @@ const MIGRATIONS = [
   removeLegacyPins,
   // 2 -> 3: Clerk holds the session. Slate's own session table is dropped, so
   // an older build cannot open this store and honour a cookie nobody issues.
-  store => { delete store.sessions; }
+  store => { delete store.sessions; },
+  // 3 -> 4: searches belong to an organization. Every existing record is left
+  // unowned on purpose. An unowned search is readable by nobody, which is the
+  // safe answer: deciding which firm owns a legacy file is a migration
+  // decision (scripts/organizations.js), not something the first person to
+  // sign in should be able to settle by signing in. An older build cannot open
+  // this store, which is what stops a rollback from serving several firms
+  // through the pre-organization permission model.
+  store => {
+    organizations.ensureTables(store);
+    for (const s of [...(store.searches || []), ...(store.archivedSearches || [])]) {
+      if (!Object.hasOwn(s, 'organizationId')) s.organizationId = null;
+    }
+  }
 ];
 
 function runMigrations(store){
@@ -261,6 +279,7 @@ function load(){
 function migrate(store){
   store.archivedSearches ||= [];
   store.users = store.users || [];
+  organizations.ensureTables(store);
   for (const u of store.users) {
     if (!u.role) u.role = 'consultant';
     if (!u.init) u.init = initials(u.name);
@@ -269,6 +288,9 @@ function migrate(store){
   // Existing accounts keep their identity and access, but no longer use PINs.
   removeLegacyPins(store);
   for (const s of [...(store.searches || []), ...store.archivedSearches]) {
+    // Unowned is a real state, not a missing field: a search with no
+    // organization is refused everywhere rather than defaulting to somebody's.
+    if (!Object.hasOwn(s, 'organizationId')) s.organizationId = null;
     s.jurisdictionType = jurisdictions.typeOf(s.jurisdictionType);
     s.revision ||= 1;
     s.profileRevision ||= 1;
@@ -361,62 +383,122 @@ function accountManager(search){
   return (search.members || []).find(m => m.seat === 'manager') || null;
 }
 
-function isConsultant(user){
-  return Boolean(user) && user.role === 'consultant';
+/* ------------------------------------------------------------------ *
+ * Permission
+ *
+ * Every one of these takes an access context (server/auth.js builds it), not a
+ * user. The difference is the whole point of organization support: the same
+ * person is a consultant in one firm's workspace and a committee member in
+ * another's, and the answer has to come from the membership that was verified
+ * for this request rather than from a role stored on the account.
+ * ------------------------------------------------------------------ */
+
+/**
+ * The workspace role last verified for somebody, from the membership cache.
+ *
+ * Used only to answer "is this person eligible to hold that seat", never to
+ * decide what the person making the request may do — that answer always comes
+ * from the membership verified for this request. A stale cache entry here can
+ * propose a seat; it cannot open anything, because the holder's own next
+ * request re-reads their membership from the provider.
+ */
+function workspaceRoleOf(userId, orgId){
+  const membership = (db.memberships || []).find(m => m.orgId === orgId && m.userId === userId);
+  return membership ? membership.role : null;
+}
+
+/** Eligible to sit in a consultant or manager seat in this workspace. */
+function isStaffOf(userId, orgId){
+  const role = workspaceRoleOf(userId, orgId);
+  return role === organizations.ADMIN || role === organizations.CONSULTANT;
+}
+
+/** Does this context work across its organization's whole book of business? */
+function isStaff(access){
+  return Boolean(access && access.orgId && access.capabilities && access.capabilities.staff);
+}
+
+/**
+ * The gate every other check stands on: is this search in the workspace the
+ * request is being made in? A search with no owner passes for nobody, so a
+ * legacy record that migration has not mapped is unreadable rather than
+ * public, and a search id from another firm is simply not found.
+ */
+function ownedBy(search, access){
+  return Boolean(search && search.organizationId && access && access.orgId
+    && search.organizationId === access.orgId);
 }
 
 /**
  * Who may open a search file at all.
  *
- * Consultants see the whole book of business; that is how the firm works and it
- * is unchanged. A committee member sees only the searches they are seated on,
- * because their account exists for one search.
+ * Staff see their own firm's whole book; that is how the firm works and inside
+ * one workspace it is unchanged. A committee member sees only the searches
+ * they are seated on, because their seat exists for one search.
  */
-function canView(search, user){
-  if (!user) return false;
-  if (isConsultant(user)) return true;
-  return Boolean(memberOf(search, user.id));
+function canView(search, access){
+  if (!ownedBy(search, access)) return false;
+  if (isStaff(access)) return true;
+  return Boolean(memberOf(search, access.userId));
 }
 
 /** Editing the search file itself stays with the firm, not the committee. */
-function canEdit(search, user){
-  return isConsultant(user) && canView(search, user);
+function canEdit(search, access){
+  return isStaff(access) && canView(search, access);
 }
 
 /** Rostering, intake windows, and adoption belong to the account manager. */
-function canManage(search, user){
-  if (!isConsultant(user)) return false;
+function canManage(search, access){
+  if (!canEdit(search, access)) return false;
   const mgr = accountManager(search);
-  return !mgr || mgr.userId === user.id;
+  return !mgr || mgr.userId === access.userId;
 }
 
 /**
- * Retire committee accounts that are no longer seated anywhere.
+ * Retire unused invitation accounts that are no longer seated anywhere.
  *
  * A committee account exists to serve one search. When that seat goes away,
  * whether the member was removed or the whole search was deleted, the account
  * would otherwise linger as a live email sign-in that opens an app with
  * nothing in it. Consultants are never touched: their accounts belong to the
- * firm, not to a search.
+ * firm, not to a search. Keep accounts with saved setup so their identity and
+ * onboarding choices survive removal of a search seat.
+ *
+ * An account that holds an organization membership is never retired either,
+ * whatever seats it has. The person is in the firm's workspace; losing a seat
+ * on one search is not leaving the firm, and deleting them here would only
+ * strand a live Clerk membership against no Slate account.
  */
 function pruneOrphanCommittee(){
   const seated = new Set();
   for (const s of db.searches) {
     for (const m of s.members || []) seated.add(m.userId);
   }
+  const inWorkspace = new Set((db.memberships || []).map(m => m.userId));
   const orphans = new Set(
-    db.users.filter(u => u.role === 'committee' && !seated.has(u.id)).map(u => u.id)
+    db.users.filter(u => u.role === 'committee' && !u.onboarding
+      && !seated.has(u.id) && !inWorkspace.has(u.id)).map(u => u.id)
   );
   if (!orphans.size) return 0;
   db.users = db.users.filter(u => !orphans.has(u.id));
   return orphans.size;
 }
 
-/** The roster with names attached, ready for the client. */
+/**
+ * The roster with names attached, ready for the client.
+ *
+ * `orgRole` is the workspace role last verified for this person in the firm
+ * that owns the search. It is what the Committee screen labels a seat with,
+ * because the legacy account `role` says nothing about which workspace the
+ * reader is in.
+ */
 function roster(search){
+  const memberships = (db.memberships || []).filter(x => x.orgId === search.organizationId);
   return (search.members || []).map(m => {
     const u = findUserById(m.userId);
+    const membership = memberships.find(x => x.userId === m.userId) || null;
     return {
+      orgRole: membership ? membership.role : null,
       userId: m.userId,
       seat: m.seat,
       addedAt: m.addedAt,
@@ -524,7 +606,7 @@ function blocked(search, step, catalog, cache){
   });
 }
 
-function decorate(search, viewer){
+function decorate(search, access){
   const cache = new Map();
   const catalog = stepsOf(search);
   const steps = catalog.map(s => {
@@ -549,15 +631,20 @@ function decorate(search, viewer){
   };
   // History contains prior private scores and staff notes. It has its own editor-only route.
   delete out.history;
-  if (viewer) {
-    const uid = viewer.id;
+  if (access) {
+    const uid = access.userId;
     const seat = memberOf(search, uid);
     out.you = {
       seat: seat ? seat.seat : null,
       member: Boolean(seat),
-      consultant: isConsultant(viewer),
-      canEdit: canEdit(search, viewer),
-      canManage: canManage(search, viewer)
+      // "Staff" is the organization-scoped successor to the firm-wide
+      // consultant flag. Kept under the old name as well so the client's
+      // existing reads of `you.consultant` keep meaning the same thing.
+      staff: isStaff(access),
+      consultant: isStaff(access),
+      role: access.role || null,
+      canEdit: canEdit(search, access),
+      canManage: canManage(search, access)
     };
     // Intake is answered in confidence. Until the manager closes the window,
     // each person sees only their own submission; showing the room's answers
@@ -577,7 +664,7 @@ function decorate(search, viewer){
     // Sourcing calls and reference conversations are the firm's working notes
     // about people, some of whom are sitting managers who have not told their
     // own council they are looking. A committee member does not read them.
-    if (!isConsultant(viewer)) {
+    if (!isStaff(access)) {
       out.staff = {};
       const fields = ['id', 'name', 'cur', 'org', 'yrs', 'email', 'stage', 'survey1', 'survey2', 'survey2SentAt', 'survey2Deadline', 'addedAt', 'referenceConsentAt', 'referenceConsentBy'];
       out.candidates = (search.candidates || []).map(c => Object.fromEntries(fields.filter(k => k in c).map(k => [k, c[k]])));
@@ -654,8 +741,8 @@ function createUser({ name, email, title, role }){
     email: String(email || '').trim().toLowerCase(),
     name: String(name || '').trim(),
     init: initials(name),
-    role: role === 'consultant' ? 'consultant' : 'committee',
-    title: String(title || '').trim() || 'Committee member',
+    role: ['consultant', 'pending'].includes(role) ? role : 'committee',
+    title: String(title || '').trim() || (role === 'pending' ? 'Account setup' : role === 'consultant' ? 'Search consultant' : 'Committee member'),
     createdAt: now()
   };
   db.users.push(u);
@@ -685,7 +772,10 @@ module.exports = {
   accountManager,
   roster,
   pruneOrphanCommittee,
-  isConsultant,
+  isStaff,
+  ownedBy,
+  workspaceRoleOf,
+  isStaffOf,
   canView,
   canEdit,
   canManage,

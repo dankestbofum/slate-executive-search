@@ -99,13 +99,13 @@ test('an empty search and a step outside the package both land somewhere useful'
   // an explanation, not on a blank page.
   await page.goto('/#/s/' + basic.id + '/brochure');
   await expect(page.locator('#main h1')).toBeVisible({ timeout: 10000 });
-  await expect(page).toHaveURL(/#\/s\/[^/]+$/);
+  await expect(page).toHaveURL(/#\/(?:o\/[^/]+\/)?s\/[^/]+$/);
   await expect(page.locator('#toast')).toContainText(/not part of the/i);
 
   // So does a link to a search that is not on the book.
   await page.goto('/#/s/sr-does-not-exist/team');
-  await expect(page.locator('#main h1')).toContainText(/your searches/i, { timeout: 10000 });
-  await expect(page).toHaveURL(/#\/home/);
+  await expect(page.locator('#main h1')).toContainText(/searches$/i, { timeout: 10000 });
+  await expect(page).toHaveURL(/\/home$/);
 });
 
 test('a committee member is shown their own steps and nothing else', async ({ page, browser }) => {
@@ -147,7 +147,7 @@ test('a committee member is shown their own steps and nothing else', async ({ pa
   // And a link to a consultant's step lands on the overview, explained.
   await member.goto('/#/s/' + search.id + '/brochure');
   await expect(member.locator('#main h1')).toBeVisible({ timeout: 10000 });
-  await expect(member).toHaveURL(/#\/s\/[^/]+$/);
+  await expect(member).toHaveURL(/#\/(?:o\/[^/]+\/)?s\/[^/]+$/);
 
   await context.close();
 });

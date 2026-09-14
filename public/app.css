@@ -1,4 +1,20 @@
 .field--wide,.field--wide .input{max-width:none}
+.onboarding__main{max-width:850px;margin:0 auto;padding:40px 24px 64px}
+.onboarding .t-title{font-family:"Public Sans",sans-serif;font-size:clamp(26px,4vw,34px);line-height:1.2;margin:12px 0}
+.onboarding__identity{max-width:480px;display:grid;gap:12px}
+.onboarding__choices{border:0;padding:0;margin:0;min-width:0}
+.onboarding__choices legend{font-weight:600;margin-bottom:12px}
+.onboarding__grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.onboarding__choice{display:flex;align-items:flex-start;gap:12px;padding:24px;background:var(--paper);border:1px solid var(--line-strong);border-radius:10px;cursor:pointer}
+.onboarding__choice:has(input:checked){border-color:var(--accent);background:var(--accent-tint);box-shadow:inset 0 0 0 1px var(--accent)}
+.onboarding__choice:focus-within{outline:2px solid var(--accent);outline-offset:3px}
+.onboarding__choice input{margin-top:4px;accent-color:var(--accent);width:18px;height:18px;flex-shrink:0}
+.onboarding__choice>span{display:grid;gap:10px;line-height:1.5}
+.onboarding__choice strong{font-size:18px}
+.onboarding__next{background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:24px;line-height:1.6}
+.onboarding__next h2{font-size:18px;margin-bottom:8px}
+.onboarding p{overflow-wrap:anywhere}
+@media(max-width:600px){.onboarding__grid{grid-template-columns:1fr}.onboarding__main{padding:24px 16px 40px}.onboarding__choice,.onboarding__next{padding:20px}.onboarding .gate__bar{padding:16px}}
 .input.ed{min-height:120px; resize:vertical; line-height:1.5}
 .input.ed--lg{min-height:220px; font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:12.5px}
 .busy .page,.busy .rail{opacity:.55; pointer-events:none}
@@ -435,4 +451,56 @@ button.strip__s:hover{background:var(--sunken)}
   .apply-shell{padding:var(--s-5) var(--s-4)}
   .apply-shell .pagehead{padding:var(--s-4) 0 var(--s-3)}
   .apply-shell .wrap{padding:0}
+}
+
+/* --- the workspace this tab is in -----------------------------------------
+   Above the rail's links and visually separate from the account chip in the
+   footer. "Whose records am I looking at" and "who am I signed in as" are
+   different questions; answering them in one control is how a switch goes
+   unnoticed. */
+.ws{
+  gap:2px; padding-bottom:var(--s-3);
+  border-bottom:1px solid var(--line);
+}
+.ws__name{
+  padding:0 8px; font-size:14.5px; font-weight:700; color:var(--ink);
+  line-height:1.3; overflow-wrap:anywhere;
+}
+.ws__role{padding:0 8px; font-size:var(--ws-meta); color:var(--ink-3); overflow-wrap:anywhere}
+.ws__switch{align-self:flex-start; margin:var(--s-2) 8px 0}
+.ws__list{display:flex; flex-direction:column; gap:1px; margin-top:var(--s-2)}
+.ws__list[hidden]{display:none}
+.ws__listrole{display:block; font-size:var(--ws-meta); font-weight:400; color:var(--ink-3)}
+.ws__list .rail__link[aria-current="true"]{color:var(--ink-3); cursor:default}
+/* On a phone the drawer is shut most of the time, so the workspace name also
+   rides in the app bar ahead of the screen context. */
+.appbar__ws{
+  font-weight:700; color:var(--ink);
+}
+.appbar__ws::after{content:" · "; color:var(--ink-3); font-weight:400}
+
+/* --- workspace and invitation lists on the account screens ---------------- */
+.wslist{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:var(--s-2)}
+.wslist__row{
+  display:flex; align-items:center; justify-content:space-between; gap:var(--s-4); flex-wrap:wrap;
+  padding:var(--s-3) var(--s-4);
+  border:1px solid var(--line); border-radius:var(--r-3); background:var(--paper);
+}
+.wslist__id{display:flex; flex-direction:column; gap:2px; min-width:0; overflow-wrap:anywhere}
+.wslist--plain li{
+  padding:var(--s-2) 0; border-bottom:1px solid var(--line);
+}
+.wslist--plain li:last-child{border-bottom:0}
+
+/* A seat that is spoken for but not yet occupied.
+   Marked by an outline rather than by fading the row: dimming carried the
+   initials to 4.09:1 against their own tint, and "not here yet" is not a reason
+   to make a name harder to read. The ink stays the body ink; the dashed ring is
+   what says the seat is still open. */
+.seat--held .seat__init{
+  background:var(--wait-tint); border-style:dashed; border-color:var(--wait); color:var(--ink);
+}
+
+@media (max-width:600px){
+  .wslist__row{align-items:flex-start; flex-direction:column; gap:var(--s-2)}
 }

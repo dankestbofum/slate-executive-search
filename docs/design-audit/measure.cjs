@@ -15,7 +15,7 @@
 const { chromium } = require('@playwright/test');
 const AxeBuilder = require('@axe-core/playwright').default;
 const { spawn } = require('child_process');
-const { serverEnv, installClerk } = require('./identity.cjs');
+const { serverEnv, installClerk, useBase, sharedWorkspace } = require('./identity.cjs');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -43,7 +43,13 @@ async function waitForServer() {
   for (let i = 0; i < 60; i += 1) {
     try {
       const res = await fetch(BASE + '/api/health');
-      if (res.ok) return;
+      if (res.ok) {
+        // A search belongs to a workspace now, so the fixture this tool builds
+        // needs one to belong to. Pointed at this tool's own server.
+        useBase(BASE);
+        await sharedWorkspace();
+        return;
+      }
     } catch { /* not up yet */ }
     await new Promise(r => setTimeout(r, 250));
   }

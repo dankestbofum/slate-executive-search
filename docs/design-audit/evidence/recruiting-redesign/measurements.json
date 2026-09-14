@@ -1,11 +1,11 @@
 {
-  "measuredAt": "2026-09-10T20:23:46.522Z",
+  "measuredAt": "2026-09-13T22:21:42.562Z",
   "quick": false,
   "viewports": {
     "1440x1000": {
       "home": {
         "headingTop": 84,
-        "pageHeight": 1000,
+        "pageHeight": 1024,
         "sidewaysOverflow": 0,
         "railWidth": 240,
         "rowsAboveFold": 3,
@@ -27,12 +27,12 @@
       },
       "candidates": {
         "headingTop": 132,
-        "pageHeight": 1836,
+        "pageHeight": 2072,
         "sidewaysOverflow": 0,
         "railWidth": 240,
-        "rowsAboveFold": 8,
+        "rowsAboveFold": 4,
         "firstPanelTop": 277,
-        "stageBarTop": 277,
+        "stageBarTop": 514,
         "stageBarInFirstViewport": true,
         "listHeaderVisible": true
       },
@@ -137,7 +137,7 @@
       },
       "roster": {
         "headingTop": 132,
-        "pageHeight": 1539,
+        "pageHeight": 1790,
         "sidewaysOverflow": 0,
         "railWidth": 240,
         "rowsAboveFold": 0,
@@ -238,7 +238,7 @@
     "1280x720": {
       "home": {
         "headingTop": 84,
-        "pageHeight": 793,
+        "pageHeight": 1024,
         "sidewaysOverflow": 0,
         "railWidth": 240,
         "rowsAboveFold": 3,
@@ -260,14 +260,14 @@
       },
       "candidates": {
         "headingTop": 132,
-        "pageHeight": 1984,
+        "pageHeight": 2221,
         "sidewaysOverflow": 0,
         "railWidth": 240,
-        "rowsAboveFold": 3,
+        "rowsAboveFold": 0,
         "firstPanelTop": 277,
-        "stageBarTop": 277,
+        "stageBarTop": 514,
         "stageBarInFirstViewport": true,
-        "listHeaderVisible": true
+        "listHeaderVisible": false
       },
       "candidate": {
         "headingTop": 132,
@@ -370,7 +370,7 @@
       },
       "roster": {
         "headingTop": 132,
-        "pageHeight": 1561,
+        "pageHeight": 1790,
         "sidewaysOverflow": 0,
         "railWidth": 240,
         "rowsAboveFold": 0,
@@ -470,35 +470,35 @@
     },
     "768x1024": {
       "home": {
-        "headingTop": 158,
-        "pageHeight": 1024,
+        "headingTop": 129,
+        "pageHeight": 1247,
         "sidewaysOverflow": 0,
         "railWidth": null,
         "rowsAboveFold": 3,
-        "firstPanelTop": 325,
+        "firstPanelTop": 296,
         "stageBarTop": null,
         "stageBarInFirstViewport": null,
         "listHeaderVisible": true
       },
       "overview": {
         "headingTop": 177,
-        "pageHeight": 1324,
+        "pageHeight": 1303,
         "sidewaysOverflow": 0,
         "railWidth": null,
         "rowsAboveFold": 0,
         "firstPanelTop": 347,
-        "stageBarTop": 612,
+        "stageBarTop": 590,
         "stageBarInFirstViewport": true,
         "listHeaderVisible": null
       },
       "candidates": {
         "headingTop": 177,
-        "pageHeight": 2584,
+        "pageHeight": 2886,
         "sidewaysOverflow": 0,
         "railWidth": null,
-        "rowsAboveFold": 3,
+        "rowsAboveFold": 0,
         "firstPanelTop": 369,
-        "stageBarTop": 369,
+        "stageBarTop": 671,
         "stageBarInFirstViewport": true,
         "listHeaderVisible": true
       },
@@ -581,7 +581,7 @@
       },
       "facts": {
         "headingTop": 177,
-        "pageHeight": 1363,
+        "pageHeight": 1415,
         "sidewaysOverflow": 0,
         "railWidth": null,
         "rowsAboveFold": 0,
@@ -603,7 +603,7 @@
       },
       "roster": {
         "headingTop": 177,
-        "pageHeight": 1974,
+        "pageHeight": 2290,
         "sidewaysOverflow": 0,
         "railWidth": null,
         "rowsAboveFold": 0,
@@ -704,36 +704,36 @@
     "390x844": {
       "home": {
         "headingTop": 129,
-        "pageHeight": 1383,
+        "pageHeight": 1818,
         "sidewaysOverflow": 0,
         "railWidth": null,
         "rowsAboveFold": 0,
-        "firstPanelTop": 296,
+        "firstPanelTop": 325,
         "stageBarTop": null,
         "stageBarInFirstViewport": null,
         "listHeaderVisible": true
       },
       "overview": {
         "headingTop": 208,
-        "pageHeight": 1904,
+        "pageHeight": 1807,
         "sidewaysOverflow": 0,
         "railWidth": null,
         "rowsAboveFold": 0,
         "firstPanelTop": 402,
-        "stageBarTop": 751,
+        "stageBarTop": 729,
         "stageBarInFirstViewport": false,
         "listHeaderVisible": null
       },
       "candidates": {
         "headingTop": 208,
-        "pageHeight": 5697,
+        "pageHeight": 6262,
         "sidewaysOverflow": 0,
         "railWidth": null,
         "rowsAboveFold": 0,
         "firstPanelTop": 424,
-        "stageBarTop": 424,
-        "stageBarInFirstViewport": true,
-        "listHeaderVisible": true
+        "stageBarTop": 990,
+        "stageBarInFirstViewport": false,
+        "listHeaderVisible": false
       },
       "candidate": {
         "headingTop": 235,
@@ -759,7 +759,7 @@
       },
       "committee": {
         "headingTop": 208,
-        "pageHeight": 1306,
+        "pageHeight": 1230,
         "sidewaysOverflow": 0,
         "railWidth": null,
         "rowsAboveFold": 0,
@@ -781,7 +781,7 @@
       },
       "activity": {
         "headingTop": 208,
-        "pageHeight": 3869,
+        "pageHeight": 3910,
         "sidewaysOverflow": 0,
         "railWidth": null,
         "rowsAboveFold": 0,
@@ -814,7 +814,7 @@
       },
       "facts": {
         "headingTop": 208,
-        "pageHeight": 1999,
+        "pageHeight": 2051,
         "sidewaysOverflow": 0,
         "railWidth": null,
         "rowsAboveFold": 0,
@@ -836,7 +836,7 @@
       },
       "roster": {
         "headingTop": 235,
-        "pageHeight": 2458,
+        "pageHeight": 2888,
         "sidewaysOverflow": 0,
         "railWidth": null,
         "rowsAboveFold": 0,
@@ -847,7 +847,7 @@
       },
       "intake": {
         "headingTop": 235,
-        "pageHeight": 2150,
+        "pageHeight": 2113,
         "sidewaysOverflow": 0,
         "railWidth": null,
         "rowsAboveFold": 0,
@@ -937,35 +937,35 @@
     "320x720": {
       "home": {
         "headingTop": 129,
-        "pageHeight": 1447,
+        "pageHeight": 1937,
         "sidewaysOverflow": 0,
         "railWidth": null,
         "rowsAboveFold": 0,
-        "firstPanelTop": 296,
+        "firstPanelTop": 325,
         "stageBarTop": null,
         "stageBarInFirstViewport": null,
-        "listHeaderVisible": true
+        "listHeaderVisible": false
       },
       "overview": {
         "headingTop": 208,
-        "pageHeight": 2166,
+        "pageHeight": 2009,
         "sidewaysOverflow": 0,
         "railWidth": null,
         "rowsAboveFold": 0,
         "firstPanelTop": 442,
-        "stageBarTop": 813,
+        "stageBarTop": 769,
         "stageBarInFirstViewport": false,
         "listHeaderVisible": null
       },
       "candidates": {
         "headingTop": 208,
-        "pageHeight": 6234,
+        "pageHeight": 6833,
         "sidewaysOverflow": 0,
         "railWidth": null,
         "rowsAboveFold": 0,
         "firstPanelTop": 449,
-        "stageBarTop": 449,
-        "stageBarInFirstViewport": true,
+        "stageBarTop": 1048,
+        "stageBarInFirstViewport": false,
         "listHeaderVisible": false
       },
       "candidate": {
@@ -992,7 +992,7 @@
       },
       "committee": {
         "headingTop": 208,
-        "pageHeight": 1412,
+        "pageHeight": 1298,
         "sidewaysOverflow": 0,
         "railWidth": null,
         "rowsAboveFold": 0,
@@ -1014,7 +1014,7 @@
       },
       "activity": {
         "headingTop": 208,
-        "pageHeight": 5648,
+        "pageHeight": 5668,
         "sidewaysOverflow": 0,
         "railWidth": null,
         "rowsAboveFold": 0,
@@ -1047,7 +1047,7 @@
       },
       "facts": {
         "headingTop": 208,
-        "pageHeight": 2060,
+        "pageHeight": 2112,
         "sidewaysOverflow": 0,
         "railWidth": null,
         "rowsAboveFold": 0,
@@ -1069,7 +1069,7 @@
       },
       "roster": {
         "headingTop": 235,
-        "pageHeight": 2673,
+        "pageHeight": 3207,
         "sidewaysOverflow": 0,
         "railWidth": null,
         "rowsAboveFold": 0,
@@ -1080,7 +1080,7 @@
       },
       "intake": {
         "headingTop": 235,
-        "pageHeight": 2291,
+        "pageHeight": 2180,
         "sidewaysOverflow": 0,
         "railWidth": null,
         "rowsAboveFold": 0,
@@ -1172,7 +1172,7 @@
     "committee-home": {
       "heading": "Your assignments",
       "rail": [],
-      "address": "#/home"
+      "address": "#/o/org_fixture1/home"
     },
     "committee-overview": {
       "heading": "City Manager",
@@ -1183,7 +1183,7 @@
         "Activity",
         "Process checklist"
       ],
-      "address": "#/s/sr-e914a870"
+      "address": "#/o/org_fixture1/s/sr-b3451020"
     },
     "committee-intake": {
       "heading": "What are you looking for?",
@@ -1194,7 +1194,7 @@
         "Activity",
         "Process checklist"
       ],
-      "address": "#/s/sr-e914a870/intake"
+      "address": "#/o/org_fixture1/s/sr-b3451020/intake"
     },
     "committee-candidates": {
       "heading": "Candidates",
@@ -1205,7 +1205,7 @@
         "Activity",
         "Process checklist"
       ],
-      "address": "#/s/sr-e914a870/screen"
+      "address": "#/o/org_fixture1/s/sr-b3451020/screen"
     },
     "committee-denied-plan": {
       "heading": "City Manager",
@@ -1216,7 +1216,7 @@
         "Activity",
         "Process checklist"
       ],
-      "address": "#/s/sr-e914a870"
+      "address": "#/o/org_fixture1/s/sr-b3451020"
     },
     "basic-excluded-brochure": {
       "heading": "Town Manager",
@@ -1228,7 +1228,7 @@
         "Activity",
         "Process checklist"
       ],
-      "address": "#/s/sr-d688d3f4"
+      "address": "#/o/org_fixture1/s/sr-ce03461e"
     },
     "questionnaire-mobile": {
       "heading": "Initial candidate survey"

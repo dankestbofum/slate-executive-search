@@ -27,6 +27,10 @@ const keyFile = path.join(os.tmpdir(), 'slate-browser-clerk-v1.json');
 if (!fs.existsSync(keyFile)) fs.writeFileSync(keyFile, JSON.stringify(identity.serverEnv()));
 const fixture = JSON.parse(fs.readFileSync(keyFile, 'utf8'));
 process.env.SLATE_TEST_CLERK_KEY = fixture.privateKey;
+// Where tests/browser/clerk.js stands the fixture workspace up, which it does
+// over HTTP rather than by writing the store: a workspace is now the
+// precondition for every screen that is not account setup.
+process.env.SLATE_BROWSER_BASE = 'http://127.0.0.1:' + PORT;
 
 module.exports = defineConfig({
   testDir: './tests/browser',
@@ -71,6 +75,10 @@ module.exports = defineConfig({
     url: 'http://127.0.0.1:' + PORT + '/api/health',
     reuseExistingServer: false,
     timeout: 30000,
+    // Ask first, then force. Without this Playwright goes straight to a hard
+    // kill of the process tree, which is where the runner's teardown was
+    // timing out against a server still draining browser keep-alives.
+    gracefulShutdown: { signal: 'SIGTERM', timeout: 5000 },
     env: {
       NODE_ENV: 'test',
       ...fixture.server,
@@ -79,7 +87,11 @@ module.exports = defineConfig({
       DATA_DIR: dataDir,
       ANTHROPIC_API_KEY: '',
       SLATE_SUPPORT_EMAIL: 'recruitment@example.gov',
-      SLATE_SUPPORT_HOURS: 'Weekdays 8am-5pm Arizona time'
+      SLATE_SUPPORT_HOURS: 'Weekdays 8am-5pm Arizona time',
+      // Playwright gives this process a stdin pipe. Closing it is what tells
+      // the server to go when the runner is interrupted, instead of leaving a
+      // listener behind that makes the next run fail on a used port.
+      SLATE_EXIT_WITH_PARENT: 'true'
     }
   }
 });

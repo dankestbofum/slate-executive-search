@@ -42,12 +42,12 @@ test('a search created in this session is on Home straight away', async ({ page 
   await page.locator('#newsearch [name="client"]').fill(client);
   await page.locator('#newsearch [name="position"]').fill('City Manager');
   await page.getByRole('button', { name: /create search/i }).click();
-  await page.waitForURL(/#\/s\/[^/]+\/team/, { timeout: 10000 });
+  await page.waitForURL(/\/s\/[^/]+\/team$/, { timeout: 10000 });
 
   // Home without a reload. The audit's D03 was that this list was not
   // refetched, so the search someone had just opened was missing from it.
   await page.locator('#crumbs button', { hasText: 'Home' }).click();
-  await page.waitForURL(/#\/home/);
+  await page.waitForURL(/\/home$/);
   await expect(page.locator('.hometable tbody tr').filter({ hasText: client })).toHaveCount(1);
 });
 
@@ -109,7 +109,7 @@ test('a step opened by link survives a reload and browser Back returns to it', a
   expect(page.url()).toContain('/profile');
 
   await page.locator('#crumbs button', { hasText: 'Linkable County' }).click();
-  await page.waitForURL(/#\/s\/[^/]+$/);
+  await page.waitForURL(/\/s\/[^/]+$/);
   await page.goBack();
   await expect(page.locator('#main h1')).toContainText('Candidate profile');
 });

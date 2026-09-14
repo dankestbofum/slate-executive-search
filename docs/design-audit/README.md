@@ -1,11 +1,16 @@
 # Design audit deliverables
 
+- [Organization workspaces and onboarding implementation plan](ORGANIZATION_IMPLEMENTATION_PLAN.md) — organization selection, staff invitations, shared searches, permissions, and migration work.
+- [Organization workspaces status](ORGANIZATION_IMPLEMENTATION_STATUS.md) — what that plan built, how it was verified, and what still needs a hosted Clerk instance.
+
 - [Recruiting platform redesign plan](RECRUITING_REDESIGN_PLAN.md) — the second design pass: visual system, recruiting navigation, portfolio, pipeline, and candidate profiles.
 - [Recruiting redesign status](RECRUITING_REDESIGN_STATUS.md) — what that plan built, the measurements after, and what is still open.
 
 - [Audit and screenshot evidence](AUDIT.md)
 - [Implementation plan](IMPLEMENTATION_PLAN.md)
 - [Implementation status](IMPLEMENTATION_STATUS.md) — what was built, the measurements after, and what is still open
+
+`evidence/recruiting-redesign/` and `evidence/after-measurements.json` were regenerated after the organization work, so they show the workspace shell — the firm's name and the **Switch workspace** control above the rail's links, and Home titled for the firm whose book it is. The baseline set (`metrics.json` and the screenshots beside it) is untouched, because it is the *before* and regenerating it would erase what the audit found.
 
 The screenshots and `metrics.json` describe the interface **as audited**, before the plan was implemented. `evidence/after-measurements.json` describes it afterwards; regenerate it with `node docs/design-audit/measure.cjs`, which starts its own server on a throwaway store and needs no separate terminal.
 

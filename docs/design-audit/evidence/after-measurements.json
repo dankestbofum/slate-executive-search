@@ -1,265 +1,265 @@
 {
-  "measuredAt": "2026-09-10T05:15:15.965Z",
+  "measuredAt": "2026-09-13T22:20:23.668Z",
   "viewports": {
     "1440x1000": {
       "home": {
-        "headingTop": 105,
-        "firstActionTop": 192,
+        "headingTop": 84,
+        "firstActionTop": 282,
+        "pageHeight": 1000,
+        "sidewaysOverflow": 0,
+        "widestTable": 1054
+      },
+      "new search": {
+        "headingTop": 132,
+        "firstActionTop": 595,
         "pageHeight": 1000,
         "sidewaysOverflow": 0,
         "widestTable": null
       },
-      "new search": {
-        "headingTop": 153,
-        "firstActionTop": 873,
-        "pageHeight": 1164,
-        "sidewaysOverflow": 0,
-        "widestTable": 0
-      },
       "overview": {
-        "headingTop": 153,
-        "firstActionTop": 323,
-        "pageHeight": 1673,
+        "headingTop": 132,
+        "firstActionTop": 595,
+        "pageHeight": 1000,
         "sidewaysOverflow": 0,
         "widestTable": null
       },
       "screening": {
-        "headingTop": 153,
-        "firstActionTop": 338,
-        "pageHeight": 1945,
+        "headingTop": 132,
+        "firstActionTop": 595,
+        "pageHeight": 1000,
         "sidewaysOverflow": 0,
-        "widestTable": 1054
+        "widestTable": null
       },
       "profile": {
-        "headingTop": 153,
-        "firstActionTop": 587,
-        "pageHeight": 2666,
+        "headingTop": 132,
+        "firstActionTop": 595,
+        "pageHeight": 1000,
         "sidewaysOverflow": 0,
         "widestTable": null
       },
       "search facts": {
-        "headingTop": 153,
-        "firstActionTop": 1175,
-        "pageHeight": 1349,
+        "headingTop": 132,
+        "firstActionTop": 1138,
+        "pageHeight": 1328,
         "sidewaysOverflow": 0,
         "widestTable": 0
       },
       "initial survey": {
-        "headingTop": 153,
-        "firstActionTop": 706,
-        "pageHeight": 1586,
+        "headingTop": 132,
+        "firstActionTop": 685,
+        "pageHeight": 1581,
         "sidewaysOverflow": 0,
         "widestTable": null
       }
     },
     "1280x720": {
       "home": {
-        "headingTop": 105,
-        "firstActionTop": 192,
-        "pageHeight": 720,
+        "headingTop": 132,
+        "firstActionTop": 685,
+        "pageHeight": 1614,
         "sidewaysOverflow": 0,
         "widestTable": null
       },
       "new search": {
-        "headingTop": 153,
-        "firstActionTop": 894,
-        "pageHeight": 1186,
+        "headingTop": 132,
+        "firstActionTop": 595,
+        "pageHeight": 822,
         "sidewaysOverflow": 0,
-        "widestTable": 0
+        "widestTable": null
       },
       "overview": {
-        "headingTop": 153,
-        "firstActionTop": 323,
-        "pageHeight": 1673,
+        "headingTop": 132,
+        "firstActionTop": 264,
+        "pageHeight": 1040,
         "sidewaysOverflow": 0,
         "widestTable": null
       },
       "screening": {
-        "headingTop": 153,
-        "firstActionTop": 338,
-        "pageHeight": 1945,
+        "headingTop": 132,
+        "firstActionTop": 264,
+        "pageHeight": 1040,
         "sidewaysOverflow": 0,
-        "widestTable": 964
+        "widestTable": null
       },
       "profile": {
-        "headingTop": 153,
-        "firstActionTop": 587,
-        "pageHeight": 2666,
+        "headingTop": 132,
+        "firstActionTop": 561,
+        "pageHeight": 2689,
         "sidewaysOverflow": 0,
         "widestTable": null
       },
       "search facts": {
-        "headingTop": 153,
-        "firstActionTop": 1175,
-        "pageHeight": 1349,
+        "headingTop": 132,
+        "firstActionTop": 1138,
+        "pageHeight": 1328,
         "sidewaysOverflow": 0,
         "widestTable": 0
       },
       "initial survey": {
-        "headingTop": 153,
-        "firstActionTop": 706,
-        "pageHeight": 1619,
+        "headingTop": 132,
+        "firstActionTop": 685,
+        "pageHeight": 1614,
         "sidewaysOverflow": 0,
         "widestTable": null
       }
     },
     "768x1024": {
       "home": {
-        "headingTop": 289,
-        "firstActionTop": 364,
-        "pageHeight": 1024,
+        "headingTop": 177,
+        "firstActionTop": 720,
+        "pageHeight": 1671,
         "sidewaysOverflow": 0,
         "widestTable": null
       },
       "new search": {
-        "headingTop": 206,
-        "firstActionTop": 957,
-        "pageHeight": 1249,
+        "headingTop": 260,
+        "firstActionTop": 713,
+        "pageHeight": 1024,
         "sidewaysOverflow": 0,
-        "widestTable": 0
+        "widestTable": null
       },
       "overview": {
-        "headingTop": 206,
-        "firstActionTop": 957,
-        "pageHeight": 1249,
+        "headingTop": 260,
+        "firstActionTop": 713,
+        "pageHeight": 1024,
         "sidewaysOverflow": 0,
-        "widestTable": 0
+        "widestTable": null
       },
       "screening": {
-        "headingTop": 206,
-        "firstActionTop": 513,
-        "pageHeight": 3811,
+        "headingTop": 260,
+        "firstActionTop": 713,
+        "pageHeight": 1024,
         "sidewaysOverflow": 0,
-        "widestTable": 730
+        "widestTable": null
       },
       "profile": {
-        "headingTop": 206,
-        "firstActionTop": 872,
-        "pageHeight": 4242,
+        "headingTop": 260,
+        "firstActionTop": 713,
+        "pageHeight": 1024,
         "sidewaysOverflow": 0,
         "widestTable": null
       },
       "search facts": {
-        "headingTop": 206,
-        "firstActionTop": 1216,
-        "pageHeight": 1390,
+        "headingTop": 177,
+        "firstActionTop": 1173,
+        "pageHeight": 1415,
         "sidewaysOverflow": 0,
         "widestTable": 0
       },
       "initial survey": {
-        "headingTop": 206,
-        "firstActionTop": 747,
-        "pageHeight": 1683,
+        "headingTop": 177,
+        "firstActionTop": 720,
+        "pageHeight": 1671,
         "sidewaysOverflow": 0,
         "widestTable": null
       }
     },
     "390x844": {
       "home": {
-        "headingTop": 175,
-        "firstActionTop": 250,
-        "pageHeight": 844,
+        "headingTop": 235,
+        "firstActionTop": 844,
+        "pageHeight": 1886,
         "sidewaysOverflow": 0,
         "widestTable": null
       },
       "new search": {
-        "headingTop": 206,
-        "firstActionTop": 1574,
-        "pageHeight": 1942,
+        "headingTop": 208,
+        "firstActionTop": 885,
+        "pageHeight": 1189,
         "sidewaysOverflow": 0,
-        "widestTable": 0
+        "widestTable": null
       },
       "overview": {
-        "headingTop": 237,
-        "firstActionTop": 475,
-        "pageHeight": 2454,
+        "headingTop": 208,
+        "firstActionTop": 410,
+        "pageHeight": 1471,
         "sidewaysOverflow": 0,
         "widestTable": null
       },
       "screening": {
-        "headingTop": 237,
-        "firstActionTop": 597,
-        "pageHeight": 6301,
+        "headingTop": 208,
+        "firstActionTop": 410,
+        "pageHeight": 1471,
         "sidewaysOverflow": 0,
-        "widestTable": 324
+        "widestTable": null
       },
       "profile": {
-        "headingTop": 237,
-        "firstActionTop": 1105,
-        "pageHeight": 4617,
+        "headingTop": 235,
+        "firstActionTop": 1076,
+        "pageHeight": 4565,
         "sidewaysOverflow": 0,
         "widestTable": null
       },
       "search facts": {
-        "headingTop": 237,
-        "firstActionTop": 1741,
-        "pageHeight": 2019,
+        "headingTop": 208,
+        "firstActionTop": 1705,
+        "pageHeight": 2051,
         "sidewaysOverflow": 0,
         "widestTable": 0
       },
       "initial survey": {
-        "headingTop": 237,
-        "firstActionTop": 841,
-        "pageHeight": 1867,
+        "headingTop": 235,
+        "firstActionTop": 844,
+        "pageHeight": 1886,
         "sidewaysOverflow": 0,
         "widestTable": null
       }
     },
     "320x720": {
       "home": {
-        "headingTop": 158,
-        "firstActionTop": 233,
-        "pageHeight": 860,
+        "headingTop": 235,
+        "firstActionTop": 868,
+        "pageHeight": 1985,
         "sidewaysOverflow": 0,
         "widestTable": null
       },
       "new search": {
-        "headingTop": 206,
-        "firstActionTop": 1738,
-        "pageHeight": 2164,
+        "headingTop": 177,
+        "firstActionTop": 968,
+        "pageHeight": 1293,
         "sidewaysOverflow": 0,
-        "widestTable": 0
+        "widestTable": null
       },
       "overview": {
-        "headingTop": 255,
-        "firstActionTop": 548,
-        "pageHeight": 3133,
+        "headingTop": 177,
+        "firstActionTop": 968,
+        "pageHeight": 1293,
         "sidewaysOverflow": 0,
         "widestTable": null
       },
       "screening": {
-        "headingTop": 283,
-        "firstActionTop": 729,
-        "pageHeight": 6881,
+        "headingTop": 177,
+        "firstActionTop": 968,
+        "pageHeight": 1293,
         "sidewaysOverflow": 0,
-        "widestTable": 254
+        "widestTable": null
       },
       "profile": {
-        "headingTop": 283,
-        "firstActionTop": 1256,
-        "pageHeight": 4989,
+        "headingTop": 177,
+        "firstActionTop": 968,
+        "pageHeight": 1293,
         "sidewaysOverflow": 0,
         "widestTable": null
       },
       "search facts": {
-        "headingTop": 255,
-        "firstActionTop": 1823,
-        "pageHeight": 2101,
+        "headingTop": 208,
+        "firstActionTop": 1766,
+        "pageHeight": 2112,
         "sidewaysOverflow": 0,
         "widestTable": 0
       },
       "initial survey": {
-        "headingTop": 283,
-        "firstActionTop": 1013,
-        "pageHeight": 2113,
+        "headingTop": 235,
+        "firstActionTop": 868,
+        "pageHeight": 1985,
         "sidewaysOverflow": 0,
         "widestTable": null
       }
     }
   },
   "newSearch": {
-    "clientFieldTop": 388,
-    "formHeight": 825,
+    "clientFieldTop": 364,
+    "formHeight": 497,
     "formColumns": 2
   },
   "accessibility": {

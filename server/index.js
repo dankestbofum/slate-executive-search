@@ -28,6 +28,7 @@ const exporter = require('./export');
 const candidates = require('./candidates');
 const disposition = require('./disposition');
 const aibudget = require('./aibudget');
+const organizations = require('./organizations');
 const {
   assembleBrochure, applyBrochureDefaults, packTheme, packScheme,
   PLACE_FIELDS, GOV_FIELDS, PACK_THEMES, PACK_SCHEMES
@@ -167,9 +168,9 @@ function clientIp(req){
  * else sees it once the manager closes the window, so nobody can watch the
  * tally move and time their own submission against it.
  */
-function consensusFor(search, user){
+function consensusFor(search, access){
   const closed = (search.intake || {}).status === 'closed';
-  if (!db.isConsultant(user) && !(closed && db.memberOf(search, user.id))) return null;
+  if (!db.isStaff(access) && !(closed && db.memberOf(search, access.userId))) return null;
   return committee.aggregate(search, id => {
     const u = db.findUserById(id);
     return u ? u.name : 'Removed member';
@@ -177,8 +178,15 @@ function consensusFor(search, user){
 }
 
 function painted(req, search){
-  const out = db.decorate(search, req.user);
-  out.consensus = consensusFor(search, req.user);
+  const out = db.decorate(search, req.access);
+  out.consensus = consensusFor(search, req.access);
+  // Which workspace this record belongs to, so the client can refuse to paint
+  // it under a different one after a switch.
+  out.organization = req.access?.organization || null;
+  // Seats that are spoken for but not yet occupied. On every read, not only on
+  // the response to seating somebody: a manager who opens the Committee screen
+  // tomorrow has to see who is still outstanding.
+  out.pending = heldSeats(search);
   // Which authority facts are confirmed and which are still assertions. Shown
   // on every read so the gap is visible while the work is happening, not
   // discovered when the county reads the brochure.
@@ -210,10 +218,18 @@ function claudeFail(err){
 }
 
 // Clerk is the only way into the workspace. Identity is proven by the request's
-// Clerk session; Slate resolves it to the account that holds the roles and seats.
+// Clerk session; Slate resolves it to the account, and the session's active
+// organization to a verified role inside that firm's workspace.
 function requireUser(req, res, next){
   return auth.requireUser(req, res, next);
 }
+
+// Everything that reads or writes a firm's records. Account setup, the
+// workspace chooser and organization creation deliberately sit outside it.
+const requireWorkspace = [requireUser, (req, res, next) => auth.requireWorkspace(req, res, next)];
+
+// Invitations, roles, and removals within the active organization.
+const requireOrgAdmin = [...requireWorkspace, (req, res, next) => auth.requireOrgAdmin(req, res, next)];
 
 function clampWeight(w){
   const n = (w === '' || w === null || w === undefined) ? 3 : Number(w);
@@ -228,9 +244,11 @@ const CRIT_SOURCES = new Set(['committee', 'draft', 'consultant']);
 function requireSearch(req, res, next){
   const s = db.findSearch(req.params.id);
   if (!s) return res.status(404).json({ error:'Search not found.' });
-  // A committee member seated on a different search must not learn this one
-  // exists, so an unauthorized read looks the same as a missing file.
-  if (!db.canView(s, req.user)) return res.status(404).json({ error:'Search not found.' });
+  // A committee member seated on a different search, or anybody at all in
+  // another firm's workspace, must not learn this one exists: an unauthorized
+  // read looks the same as a missing file. A search whose owning organization
+  // is unknown is refused on the same terms rather than falling through.
+  if (!db.canView(s, req.access)) return res.status(404).json({ error:'Search not found.' });
   req.search = s;
   if (!['GET', 'HEAD'].includes(req.method) && req.headers['if-match'] === undefined) {
     return res.status(428).json({ error:'Reload this search before saving.', code:'REVISION_REQUIRED' });
@@ -253,15 +271,31 @@ function requireSearch(req, res, next){
 
 /** Writing to the search file is the firm's work, not the committee's. */
 function requireEditor(req, res, next){
-  if (!db.canEdit(req.search, req.user)) {
+  if (!db.canEdit(req.search, req.access)) {
     return res.status(403).json({ error:'Committee members read the search file. A consultant edits it.' });
   }
   next();
 }
 
+/**
+ * Is the authority this request started with still the authority it has?
+ *
+ * A draft can take a minute to come back. In that minute the search can be
+ * archived, the person can be removed from the workspace, or — the case
+ * organization support introduces — the browser can have switched to a
+ * different firm. The job keeps the search and organization it began with and
+ * refuses to commit into anything else, so a late response never lands in a
+ * workspace nobody asked it to.
+ */
+function stillAuthorized(req){
+  const current = db.findSearch(req.search.id);
+  if (!current || current !== req.search) return false;
+  return db.canEdit(current, req.access);
+}
+
 /** Rostering, the intake window, and adoption sit with the account manager. */
 function requireManager(req, res, next){
-  if (!db.canManage(req.search, req.user)) {
+  if (!db.canManage(req.search, req.access)) {
     const mgr = db.accountManager(req.search);
     const who = mgr ? (db.findUserById(mgr.userId)?.name || 'the account manager') : 'the account manager';
     return res.status(403).json({ error: who + ' runs this search. Ask them, or reassign the account.' });
@@ -397,22 +431,69 @@ app.get('/api/config', (_req, res) => {
   res.json(body);
 });
 
-// The directory a viewer needs to put names to ids. Consultants work across the
-// whole book; a committee member only ever needs the people seated beside them.
-function visibleUsers(user){
-  if (db.isConsultant(user)) return db.db.users;
-  const ids = new Set([user.id]);
-  for (const s of db.db.searches) {
-    if (!db.memberOf(s, user.id)) continue;
-    for (const m of s.members || []) ids.add(m.userId);
+/**
+ * The directory a viewer needs to put names to ids.
+ *
+ * Never the whole user table. Staff see the people in their own workspace —
+ * anyone holding a membership there, plus anyone seated on one of its searches
+ * — and a committee member sees only the people seated beside them. Another
+ * firm's staff list is not a name, a count, or an absence somebody can
+ * subtract: they are simply not in the answer.
+ */
+function visibleUsers(access){
+  if (!access.orgId || !access.role) return [access.user];
+  const ids = new Set([access.userId]);
+  const ours = db.db.searches.filter(s => s.organizationId === access.orgId);
+  if (db.isStaff(access)) {
+    for (const m of db.db.memberships) if (m.orgId === access.orgId) ids.add(m.userId);
+    for (const s of ours) for (const m of s.members || []) ids.add(m.userId);
+  } else {
+    for (const s of ours) {
+      if (!db.memberOf(s, access.userId)) continue;
+      for (const m of s.members || []) ids.add(m.userId);
+    }
   }
   return db.db.users.filter(u => ids.has(u.id));
 }
 
-app.get('/api/me', requireUser, (req, res) => {
+const onboarding = require('./onboarding');
+
+/** Every workspace this person can switch into, named, with their role in each. */
+async function workspacesFor(access){
+  const list = await auth.directory.userOrganizations(access.clerkUserId);
+  return list.map(o => ({
+    id: o.id,
+    name: o.name,
+    role: organizations.isSupportedRole(o.role) ? o.role : null,
+    roleLabel: organizations.isSupportedRole(o.role) ? organizations.ROLE_LABEL[o.role] : null,
+    providerRole: o.role,
+    active: o.id === access.orgId
+  })).sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+}
+
+app.get('/api/me', requireUser, async (req, res) => {
+  let workspaces = null;
+  try {
+    workspaces = await workspacesFor(req.access);
+  } catch (error) {
+    // The workspace chooser is missing, which is a recoverable state the client
+    // can retry. It is not a reason to refuse the rest of the answer, and it is
+    // never a reason to show the workspace as if there were none.
+    if (error?.code !== 'DIRECTORY_UNAVAILABLE') throw error;
+  }
   res.json({
     user: db.publicUser(req.user),
-    users: visibleUsers(req.user).map(db.publicUser),
+    onboarding: onboarding.status(db, req.access),
+    organization: req.access.organization,
+    role: req.access.role,
+    capabilities: req.access.capabilities,
+    // Deliberately outside `capabilities`, which describe what somebody may do
+    // inside the workspace they are in. This is about founding a new one, which
+    // is a property of the deployment rather than of any membership.
+    canCreateWorkspace: auth.mayCreateWorkspace(req.user),
+    workspaces,
+    workspacesError: workspaces ? null : 'We could not list your workspaces. Try again shortly.',
+    users: visibleUsers(req.access).map(db.publicUser),
     health: {
       model: process.env.CLAUDE_MODEL || 'claude-sonnet-5',
       premium: process.env.CLAUDE_MODEL_PREMIUM || 'claude-opus-5',
@@ -421,9 +502,238 @@ app.get('/api/me', requireUser, (req, res) => {
   });
 });
 
-app.get('/api/searches', requireUser, (req, res) => {
-  res.json(db.db.searches.filter(s => db.canView(s, req.user)).map(s => {
-    const d = db.decorate(s, req.user);
+/**
+ * Account setup: who you are, and — only if nobody has told us yet — what you
+ * came here to do.
+ *
+ * Somebody arriving on an invitation already has a role: the one the
+ * invitation carried and Clerk recorded. Asking them to pick one would invite
+ * them to contradict it, so the choice is not accepted from them at all. What
+ * they are asked for is their name, which is what the roster shows.
+ */
+app.post('/api/me/onboarding', requireUser, (req, res) => {
+  const { name, requestedRole } = req.body || {};
+  if (typeof name !== 'string' || !name.trim() || name.trim().length > 120) {
+    return res.status(400).json({ error: 'Enter your name (up to 120 characters).' });
+  }
+  const assigned = Boolean(req.access.role);
+  if (!assigned && !onboarding.ROLES.includes(requestedRole)) {
+    return res.status(400).json({ error: 'Choose how you will use Slate.' });
+  }
+  const user = req.user;
+  user.name = name.trim();
+  user.init = db.initials(user.name);
+  user.onboarding = {
+    // A stated preference, never a grant. It shapes the guidance shown while
+    // somebody waits for access, and is ignored the moment a workspace assigns
+    // them a real role.
+    requestedRole: assigned ? (user.onboarding?.requestedRole || null) : requestedRole,
+    completedAt: db.now()
+  };
+  user.title = req.access.role ? organizations.ROLE_LABEL[req.access.role] : 'Awaiting access';
+  db.persist();
+  res.json({ user: db.publicUser(user), onboarding: onboarding.status(db, req.access) });
+});
+
+/* ---------------------------------------------------------------------------
+ * Organizations
+ *
+ * The workspace a firm shares. Creating one, listing the ones a person can
+ * enter, and — for an administrator — managing who is in the one they are in.
+ * Switching between them happens at Clerk in the browser, because the active
+ * organization is part of the session; the server's job is to answer for
+ * whichever one the session names.
+ * ------------------------------------------------------------------------- */
+
+const ORG_NAME_MAX = 100;
+
+app.get('/api/organizations', requireUser, async (req, res) => {
+  res.json({ workspaces: await workspacesFor(req.access), active: req.access.orgId });
+});
+
+/**
+ * Create a firm's workspace.
+ *
+ * Authority over a new workspace and authority over an existing one are not
+ * the same thing: creating one makes the creator its administrator and touches
+ * nothing else. It never claims unowned legacy searches — mapping those is a
+ * migration decision made with scripts/organizations.js, where somebody can
+ * see what they are about to hand over.
+ *
+ * Who may do it at all is bounded in production (see `workspaceFounders` in
+ * server/auth.js), because the sign-up page is reachable by anyone who has the
+ * URL and a workspace nobody asked for is still a workspace.
+ */
+app.post('/api/organizations', requireUser, async (req, res) => {
+  if (!auth.mayCreateWorkspace(req.user)) {
+    return res.status(403).json({
+      error: 'New workspaces are created by the operator of this deployment. '
+        + 'If a firm invited you, ask them to send the invitation to ' + req.user.email + '.',
+      code: 'WORKSPACE_CREATION_CLOSED'
+    });
+  }
+  const name = String(req.body?.name || '').trim();
+  if (!name || name.length > ORG_NAME_MAX) {
+    return res.status(400).json({ error: 'Name the workspace (up to ' + ORG_NAME_MAX + ' characters).' });
+  }
+  const created = await auth.directory.createOrganization({
+    name, createdByClerkUserId: req.access.clerkUserId, createdByEmail: req.user.email
+  });
+  organizations.rememberOrganization(db.db, { id: created.id, name: created.name, slug: created.slug, createdBy: req.user.id });
+  organizations.rememberMembership(db.db, { orgId: created.id, userId: req.user.id, role: organizations.ADMIN });
+  db.persist();
+  // The session does not become active in the new workspace here: the browser
+  // has to ask Clerk to switch, and the next request carries the result.
+  res.json({ organization: created, role: organizations.ADMIN });
+});
+
+app.get('/api/organization', ...requireWorkspace, (req, res) => {
+  res.json({
+    organization: req.access.organization,
+    role: req.access.role,
+    roleLabel: organizations.ROLE_LABEL[req.access.role],
+    capabilities: req.access.capabilities,
+    roles: organizations.ROLES.map(r => ({ id: r, label: organizations.ROLE_LABEL[r], summary: organizations.ROLE_SUMMARY[r] }))
+  });
+});
+
+/** The people in this workspace, and the invitations still out. */
+app.get('/api/organization/members', ...requireOrgAdmin, async (req, res) => {
+  const [members, invitations] = await Promise.all([
+    auth.directory.members(req.access.orgId),
+    auth.directory.invitations(req.access.orgId)
+  ]);
+  const rows = members.map(m => {
+    const local = db.db.users.find(u => u.clerkUserId === m.clerkUserId)
+      || (m.email ? db.findUserByEmail(m.email) : null);
+    const supported = organizations.isSupportedRole(m.role);
+    return {
+      clerkUserId: m.clerkUserId,
+      userId: local ? local.id : null,
+      name: local?.name || m.name || m.email || 'Invited member',
+      email: m.email || local?.email || '',
+      role: m.role,
+      roleLabel: supported ? organizations.ROLE_LABEL[m.role] : null,
+      supported,
+      you: m.clerkUserId === req.access.clerkUserId,
+      // Seats are Slate's side of the record. They say what removing this
+      // person would actually end.
+      seats: local ? db.db.searches.filter(s => s.organizationId === req.access.orgId && db.memberOf(s, local.id)).length : 0
+    };
+  }).sort((a, b) => a.name.localeCompare(b.name));
+  res.json({
+    members: rows,
+    invitations: invitations.map(i => ({
+      ...i,
+      roleLabel: organizations.isSupportedRole(i.role) ? organizations.ROLE_LABEL[i.role] : null,
+      // Seats already held for this address, so revoking an invitation shows
+      // what else it would strand.
+      heldSeats: organizations.pendingForEmail(db.db, i.email).filter(p => p.orgId === req.access.orgId).length
+    })),
+    admins: rows.filter(r => r.role === organizations.ADMIN).length
+  });
+});
+
+app.post('/api/organization/invitations', ...requireOrgAdmin, async (req, res) => {
+  const email = organizations.normalizeEmail(req.body?.email);
+  const role = String(req.body?.role || '');
+  if (!EMAIL_RE.test(email)) return res.status(400).json({ error: 'Enter the email this person will sign in with.' });
+  if (!organizations.isSupportedRole(role)) {
+    return res.status(400).json({ error: 'Choose the role this person will hold in this workspace.' });
+  }
+  const invitation = await auth.directory.invite(req.access.orgId, {
+    email, role, inviterClerkUserId: req.access.clerkUserId,
+    redirectUrl: auth.config.invitationRedirectUrl || undefined
+  });
+  res.json({
+    invitation: { ...invitation, roleLabel: organizations.ROLE_LABEL[role], heldSeats: organizations.pendingForEmail(db.db, email).filter(p => p.orgId === req.access.orgId).length },
+    sent: true
+  });
+});
+
+app.delete('/api/organization/invitations/:id', ...requireOrgAdmin, async (req, res) => {
+  await auth.directory.revokeInvitation(req.access.orgId, String(req.params.id), req.access.clerkUserId);
+  res.json({ ok: true });
+});
+
+/** Change somebody's role in this workspace. */
+app.patch('/api/organization/members/:clerkUserId', ...requireOrgAdmin, async (req, res) => {
+  const target = String(req.params.clerkUserId);
+  const role = String(req.body?.role || '');
+  if (!organizations.isSupportedRole(role)) return res.status(400).json({ error: 'Choose a role.' });
+  const members = await auth.directory.members(req.access.orgId);
+  const member = members.find(m => m.clerkUserId === target);
+  if (!member) return res.status(404).json({ error: 'That person is not in this workspace.' });
+  // A workspace with no administrator cannot invite anybody or repair itself.
+  const admins = members.filter(m => m.role === organizations.ADMIN);
+  if (member.role === organizations.ADMIN && role !== organizations.ADMIN && admins.length <= 1) {
+    return res.status(409).json({ error: 'This workspace needs an administrator. Promote someone else first.' });
+  }
+  await auth.directory.setRole(req.access.orgId, target, role);
+  const local = db.db.users.find(u => u.clerkUserId === target) || (member.email ? db.findUserByEmail(member.email) : null);
+  if (local) {
+    organizations.rememberMembership(db.db, { orgId: req.access.orgId, userId: local.id, role });
+    db.persist();
+  }
+  res.json({ ok: true, role, roleLabel: organizations.ROLE_LABEL[role] });
+});
+
+/**
+ * Remove somebody from the workspace.
+ *
+ * Their search seats go with their membership, because a seat that outlives
+ * the membership is access nobody can see. What they did stays: activity,
+ * scores, and authorship name them exactly as before, which is why the account
+ * is kept rather than deleted.
+ */
+app.delete('/api/organization/members/:clerkUserId', ...requireOrgAdmin, async (req, res) => {
+  const target = String(req.params.clerkUserId);
+  if (target === req.access.clerkUserId) {
+    return res.status(409).json({ error: 'You cannot remove yourself. Ask another administrator.' });
+  }
+  const members = await auth.directory.members(req.access.orgId);
+  const member = members.find(m => m.clerkUserId === target);
+  if (!member) return res.status(404).json({ error: 'That person is not in this workspace.' });
+  const admins = members.filter(m => m.role === organizations.ADMIN);
+  if (member.role === organizations.ADMIN && admins.length <= 1) {
+    return res.status(409).json({ error: 'This workspace needs an administrator. Promote someone else first.' });
+  }
+
+  const local = db.db.users.find(u => u.clerkUserId === target) || (member.email ? db.findUserByEmail(member.email) : null);
+  // Checked before the provider call, so a search is never left managerless by
+  // a removal that already succeeded at Clerk.
+  const managed = local
+    ? db.db.searches.filter(s => s.organizationId === req.access.orgId && db.accountManager(s)?.userId === local.id)
+    : [];
+  if (managed.length) {
+    return res.status(409).json({
+      error: (local.name || 'That person') + ' manages ' + managed.map(s => s.client || s.no).join(', ')
+        + '. Hand ' + (managed.length === 1 ? 'that search' : 'those searches') + ' to someone else, then remove them.'
+    });
+  }
+
+  await auth.directory.removeMember(req.access.orgId, target);
+
+  let seats = 0;
+  if (local) {
+    organizations.forgetMembership(db.db, req.access.orgId, local.id);
+    for (const search of db.db.searches.filter(s => s.organizationId === req.access.orgId)) {
+      if (!db.memberOf(search, local.id)) continue;
+      search.members = search.members.filter(m => m.userId !== local.id);
+      if (search.intake?.submissions) delete search.intake.submissions[local.id];
+      db.touch(search, req.user, 'removed ' + local.name + ' from the search with their workspace access');
+      seats += 1;
+    }
+    db.db.pendingAssignments = db.db.pendingAssignments
+      .filter(p => !(p.orgId === req.access.orgId && p.email === local.email));
+    db.persist();
+  }
+  res.json({ ok: true, seats });
+});
+
+app.get('/api/searches', ...requireWorkspace, (req, res) => {
+  res.json(db.db.searches.filter(s => db.canView(s, req.access)).map(s => {
+    const d = db.decorate(s, req.access);
     const seat = db.memberOf(s, req.user.id);
     const intake = s.intake || {};
     return {
@@ -448,8 +758,8 @@ app.get('/api/searches', requireUser, (req, res) => {
   }).sort((a,b)=> (b.updatedAt||'').localeCompare(a.updatedAt||'')));
 });
 
-app.post('/api/searches', requireUser, (req, res) => {
-  if (req.user.role !== 'consultant') return res.status(403).json({ error:'The consultant opens a search.' });
+app.post('/api/searches', ...requireWorkspace, (req, res) => {
+  if (!req.access.capabilities.createSearch) return res.status(403).json({ error:'A search consultant or an administrator opens a search in this workspace.' });
   const body = req.body || {};
   if (body.jurisdictionType !== undefined && (typeof body.jurisdictionType !== 'string' || !Object.hasOwn(jurisdictions.TYPES, body.jurisdictionType))) return res.status(400).json({ error:'Choose City or town, or County.' });
   if (!String(body.client || '').trim() || !String(body.position || '').trim()) {
@@ -458,14 +768,15 @@ app.post('/api/searches', requireUser, (req, res) => {
   if (body.package !== undefined && body.package !== '' && !Object.hasOwn(db.PACKAGES, body.package)) {
     return res.status(400).json({ error:'Pick a package: Basic, Enhanced, or Executive.' });
   }
-  const s = db.blankSearch(body, req.user);
+  // Ownership comes from the verified session, never from the submitted body.
+  const s = db.blankSearch(body, req.user, req.access.orgId);
   s.no = db.nextNo();
   db.db.searches.unshift(s);
   db.persist();
   res.json(painted(req, s));
 });
 
-app.get('/api/searches/:id', requireUser, requireSearch, (req, res) => {
+app.get('/api/searches/:id', ...requireWorkspace, requireSearch, (req, res) => {
   res.json(painted(req, req.search));
 });
 
@@ -478,44 +789,145 @@ app.get('/api/searches/:id', requireUser, requireSearch, (req, res) => {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+/**
+ * The roster, plus the seats that are held but not yet filled.
+ *
+ * Three states are shown separately because they need three different actions:
+ * an active assignment (accepted membership and a seat), an assignment waiting
+ * on somebody to accept an organization invitation, and a seat a manager has
+ * proposed for an address nobody has invited yet. The last one says
+ * "Invitation needed" rather than implying an email went out.
+ */
 function rosterOnly(search){
-  return { roster: db.roster(search), accountManager: db.accountManager(search) };
+  return {
+    roster: db.roster(search),
+    accountManager: db.accountManager(search),
+    pending: heldSeats(search)
+  };
 }
 
-app.post('/api/searches/:id/members', requireUser, requireSearch, requireManager, (req, res) => {
+function heldSeats(search){
+  return organizations.pendingFor(db.db, search.organizationId, search.id).map(p => ({
+    id: p.id, email: p.email, name: p.name, seat: p.seat,
+    status: p.invitationId ? 'invitation-sent' : 'invitation-needed',
+    createdAt: p.createdAt
+  }));
+}
+
+/**
+ * Seat somebody on this search.
+ *
+ * A seat is only ever given to a member of the firm that owns the search.
+ * Somebody outside it gets a held seat instead, waiting on an organization
+ * invitation: an administrator sending that invitation is a separate authority
+ * from a manager rostering a committee, and pretending otherwise would let a
+ * search manager add people to the firm. Where the manager is also an
+ * administrator the two steps happen together, and the response says which of
+ * them actually occurred.
+ */
+app.post('/api/searches/:id/members', ...requireWorkspace, requireSearch, requireManager, async (req, res) => {
   const b = req.body || {};
   const seat = committee.seatOf(b.seat);
   const name = String(b.name || '').trim();
-  const email = String(b.email || '').trim().toLowerCase();
+  const email = organizations.normalizeEmail(b.email);
   if (!name) return res.status(400).json({ error:'Name is required.' });
   if (!EMAIL_RE.test(email)) return res.status(400).json({ error:'Enter a working email. It is their sign-in.' });
-
-  let user = db.findUserByEmail(email);
-  if (user) {
-    if (String(user.name || '').trim() !== name) {
-      return res.status(409).json({
-        error: email + ' already signs in as ' + user.name + '. Seat them under that name, or use a different email.'
-      });
-    }
-  } else {
-    // Only the firm seats consultants. A manager rostering a client contact
-    // cannot mint a colleague with run-of-the-app powers.
-    const created = db.createUser({ name, email, title: b.title, role: 'committee' });
-    user = created.user;
-  }
-  if (db.memberOf(req.search, user.id)) {
-    return res.status(409).json({ error: name + ' is already seated on this search.' });
-  }
   if (seat === 'manager') {
     return res.status(400).json({ error:'Seat them first, then hand over the account.' });
   }
-  req.search.members.push({ userId: user.id, seat, addedAt: db.now(), addedBy: req.user.id });
-  // The roster changed, so a confirmation given before this person existed no
-  // longer describes the committee. Ask for it again.
-  req.search.team = { confirmedAt: null, confirmedBy: null };
-  db.touch(req.search, req.user, 'seated ' + name + ' as ' + committee.SEAT_LABEL[seat].toLowerCase());
+
+  const orgId = req.access.orgId;
+  const existing = db.findUserByEmail(email);
+  if (existing && String(existing.name || '').trim() !== name) {
+    return res.status(409).json({
+      error: email + ' already signs in as ' + existing.name + '. Seat them under that name, or use a different email.'
+    });
+  }
+  if (existing && db.memberOf(req.search, existing.id)) {
+    return res.status(409).json({ error: name + ' is already seated on this search.' });
+  }
+
+  // Membership in the owning organization is what separates a seat from a held
+  // seat, and it is read from the provider rather than from the local cache so
+  // that somebody removed at Clerk cannot be seated straight back in. The
+  // lookup falls back to the email because a colleague can be in the firm's
+  // Clerk organization without ever having opened Slate.
+  let member = existing?.clerkUserId
+    ? await auth.directory.membership(orgId, existing.clerkUserId)
+    : null;
+  if (!member) {
+    member = (await auth.directory.members(orgId)).find(m => m.email === email) || null;
+  }
+
+  if (member && organizations.isSupportedRole(member.role)) {
+    if (seat === 'consultant' && !organizations.capabilitiesFor(member.role).staff) {
+      return res.status(400).json({ error: name + ' is a committee member in this workspace. Change their role first, or seat them on the committee.' });
+    }
+    // A verified member of this workspace who has no Slate account yet gets
+    // one now. Their Clerk identity binds to it on their first request, which
+    // is the same path every other account takes.
+    const person = existing || db.createUser({ name, email, title: b.title, role: 'committee' }).user;
+    req.search.members.push({ userId: person.id, seat, addedAt: db.now(), addedBy: req.user.id });
+    // The roster changed, so a confirmation given before this person joined no
+    // longer describes the committee. Ask for it again.
+    req.search.team = { confirmedAt: null, confirmedBy: null };
+    db.touch(req.search, req.user, 'seated ' + name + ' as ' + committee.SEAT_LABEL[seat].toLowerCase());
+    db.persist();
+    return res.json({ search: painted(req, req.search), ...rosterOnly(req.search), email, seated: true });
+  }
+
+  if (seat !== 'committee') {
+    return res.status(400).json({ error: 'A consultant seat goes to somebody already in this workspace. Invite them from Team & access first.' });
+  }
+
+  let invitation = null;
+  let inviteError = null;
+  if (req.access.capabilities.inviteMembers) {
+    try {
+      invitation = await auth.directory.invite(orgId, {
+        email, role: organizations.COMMITTEE, inviterClerkUserId: req.access.clerkUserId,
+        redirectUrl: auth.config.invitationRedirectUrl || undefined
+      });
+    } catch (error) {
+      // An address that already has an invitation out is not a failure of this
+      // request: the held seat is still worth recording against it.
+      if (error?.code !== 'DIRECTORY_REJECTED') throw error;
+      inviteError = error.message;
+    }
+  }
+
+  const held = organizations.addPendingAssignment(db.db, {
+    orgId, searchId: req.search.id, email, name, seat,
+    invitedBy: req.user.id, invitationId: invitation?.id || null
+  });
+  db.touch(req.search, req.user, invitation
+    ? 'invited ' + name + ' to the workspace and held a committee seat'
+    : 'held a committee seat for ' + name + ', pending a workspace invitation');
   db.persist();
-  res.json({ search: painted(req, req.search), ...rosterOnly(req.search), email: user.email });
+  res.json({
+    search: painted(req, req.search), ...rosterOnly(req.search), email,
+    seated: false,
+    // Said plainly, because "pending" without this is indistinguishable from an
+    // email that was actually sent.
+    invitationSent: Boolean(invitation),
+    invitationNeeded: !invitation,
+    note: invitation
+      ? 'An invitation was sent to ' + email + '. Their seat opens when they accept it.'
+      : (inviteError || 'The seat is held for ' + email + '. An organization administrator must invite them before it opens.')
+  });
+});
+
+/** Release a held seat that has not been taken up. */
+app.delete('/api/searches/:id/members/pending/:pid', ...requireWorkspace, requireSearch, requireManager, (req, res) => {
+  const held = organizations.pendingFor(db.db, req.access.orgId, req.search.id).find(p => p.id === req.params.pid);
+  if (!held) return res.status(404).json({ error:'That held seat is no longer waiting.' });
+  organizations.removePendingAssignment(db.db, held.id);
+  db.touch(req.search, req.user, 'released the held seat for ' + (held.name || held.email));
+  db.persist();
+  // Deliberately does not revoke the organization invitation: being invited to
+  // the firm and being seated on one search are different decisions, and this
+  // route only undoes the second.
+  res.json({ search: painted(req, req.search), ...rosterOnly(req.search) });
 });
 
 // Seat changes. Handing over or claiming the account is open to any consultant
@@ -526,7 +938,7 @@ app.post('/api/searches/:id/members', requireUser, requireSearch, requireManager
 // A consultant putting themselves on a search they can already see. Needed
 // because seating is otherwise the manager's job, which would leave a
 // colleague unable to join a file in order to pick it up.
-app.post('/api/searches/:id/members/self', requireUser, requireSearch, requireEditor, (req, res) => {
+app.post('/api/searches/:id/members/self', ...requireWorkspace, requireSearch, requireEditor, (req, res) => {
   if (db.memberOf(req.search, req.user.id)) {
     return res.status(409).json({ error:'You are already on this search.' });
   }
@@ -536,15 +948,15 @@ app.post('/api/searches/:id/members/self', requireUser, requireSearch, requireEd
   res.json({ search: painted(req, req.search), ...rosterOnly(req.search) });
 });
 
-app.patch('/api/searches/:id/members/:uid', requireUser, requireSearch, requireEditor, (req, res) => {
+app.patch('/api/searches/:id/members/:uid', ...requireWorkspace, requireSearch, requireEditor, (req, res) => {
   const m = db.memberOf(req.search, req.params.uid);
   if (!m) return res.status(404).json({ error:'That person is not on this search.' });
   const seat = committee.seatOf(req.body?.seat);
   const user = db.findUserById(m.userId);
 
   if (seat === 'manager') {
-    if (!db.isConsultant(user)) {
-      return res.status(400).json({ error:'The account manager is a consultant at the firm.' });
+    if (!db.isStaffOf(user.id, req.access.orgId)) {
+      return res.status(400).json({ error:'The account manager is a consultant or administrator in this workspace.' });
     }
     // Exactly one manager. The outgoing one stays on the search as a
     // consultant rather than losing their seat.
@@ -554,7 +966,7 @@ app.patch('/api/searches/:id/members/:uid', requireUser, requireSearch, requireE
     m.seat = 'manager';
     db.touch(req.search, req.user, 'handed the account to ' + user.name);
   } else {
-    if (!db.canManage(req.search, req.user)) {
+    if (!db.canManage(req.search, req.access)) {
       const mgr = db.accountManager(req.search);
       const who = mgr ? (db.findUserById(mgr.userId)?.name || 'the account manager') : 'the account manager';
       return res.status(403).json({ error: who + ' runs this search. Take the account first, or ask them.' });
@@ -562,8 +974,8 @@ app.patch('/api/searches/:id/members/:uid', requireUser, requireSearch, requireE
     if (m.seat === 'manager') {
       return res.status(400).json({ error:'Hand the account to someone else first. A search always has a manager.' });
     }
-    if (seat === 'consultant' && !db.isConsultant(user)) {
-      return res.status(400).json({ error:'Only firm accounts sit in a consultant seat.' });
+    if (seat === 'consultant' && !db.isStaffOf(user.id, req.access.orgId)) {
+      return res.status(400).json({ error:'Only this workspace\u2019s consultants and administrators sit in a consultant seat.' });
     }
     m.seat = seat;
     db.touch(req.search, req.user, 'moved ' + user.name + ' to ' + committee.SEAT_LABEL[seat].toLowerCase());
@@ -572,7 +984,7 @@ app.patch('/api/searches/:id/members/:uid', requireUser, requireSearch, requireE
   res.json({ search: painted(req, req.search), ...rosterOnly(req.search) });
 });
 
-app.delete('/api/searches/:id/members/:uid', requireUser, requireSearch, requireManager, (req, res) => {
+app.delete('/api/searches/:id/members/:uid', ...requireWorkspace, requireSearch, requireManager, (req, res) => {
   const m = db.memberOf(req.search, req.params.uid);
   if (!m) return res.status(404).json({ error:'That person is not on this search.' });
   if (m.seat === 'manager') {
@@ -590,7 +1002,7 @@ app.delete('/api/searches/:id/members/:uid', requireUser, requireSearch, require
   res.json({ search: painted(req, req.search), ...rosterOnly(req.search) });
 });
 
-app.post('/api/searches/:id/team/confirm', requireUser, requireSearch, requireManager, (req, res) => {
+app.post('/api/searches/:id/team/confirm', ...requireWorkspace, requireSearch, requireManager, (req, res) => {
   const confirm = req.body?.confirmed !== false;
   req.search.team = confirm
     ? { confirmedAt: db.now(), confirmedBy: req.user.id }
@@ -608,7 +1020,7 @@ app.post('/api/searches/:id/team/confirm', requireUser, requireSearch, requireMa
  * has spoken. Closing is what publishes consensus to the room.
  * ------------------------------------------------------------------------- */
 
-app.post('/api/searches/:id/intake/status', requireUser, requireSearch, requireManager, (req, res) => {
+app.post('/api/searches/:id/intake/status', ...requireWorkspace, requireSearch, requireManager, (req, res) => {
   const want = String(req.body?.status || '');
   if (!['draft', 'open', 'closed'].includes(want)) {
     return res.status(400).json({ error:'Intake is draft, open, or closed.' });
@@ -629,7 +1041,7 @@ app.post('/api/searches/:id/intake/status', requireUser, requireSearch, requireM
   res.json(painted(req, req.search));
 });
 
-app.put('/api/searches/:id/intake', requireUser, requireSearch, (req, res) => {
+app.put('/api/searches/:id/intake', ...requireWorkspace, requireSearch, (req, res) => {
   const seat = db.memberOf(req.search, req.user.id);
   if (!seat) return res.status(403).json({ error:'You are not seated on this search.' });
   if (!committee.INTAKE_SEATS.has(committee.seatOf(seat.seat))) {
@@ -659,7 +1071,7 @@ app.put('/api/searches/:id/intake', requireUser, requireSearch, (req, res) => {
   res.json(painted(req, req.search));
 });
 
-app.post('/api/searches/:id/intake/adopt', requireUser, requireSearch, requireManager, (req, res) => {
+app.post('/api/searches/:id/intake/adopt', ...requireWorkspace, requireSearch, requireManager, (req, res) => {
   const agg = committee.aggregate(req.search, id => db.findUserById(id)?.name || '');
   if (!agg.submitted) {
     return res.status(400).json({ error:'No committee input on file yet. Nothing to adopt.' });
@@ -672,20 +1084,24 @@ app.post('/api/searches/:id/intake/adopt', requireUser, requireSearch, requireMa
 
 function removeSearch(search){
   search.archivedAt = db.now();
+  // Held seats belong to a live search. Archiving one would otherwise leave an
+  // invitation that seats somebody on a file nobody can open.
+  organizations.clearPendingForSearch(db.db, search.id);
   search.archivedUsers = db.db.users.filter(u => (search.members || []).some(m => m.userId === u.id) && u.role === 'committee').map(integrity.clone);
   db.db.archivedSearches.push(search);
   db.db.searches = db.db.searches.filter(s => s.id !== search.id);
 }
 
-app.post('/api/account/start-fresh', requireUser, (req, res) => {
-  if (!db.isConsultant(req.user)) return res.status(403).json({ error:'Only a consultant can archive managed searches.' });
+app.post('/api/account/start-fresh', ...requireWorkspace, (req, res) => {
+  if (!db.isStaff(req.access)) return res.status(403).json({ error:'Only a consultant can archive managed searches.' });
   const ids = req.body?.ids;
   if (!Array.isArray(ids) || !ids.length || ids.some(id => typeof id !== 'string') || new Set(ids).size !== ids.length) {
     return res.status(400).json({ error:'Confirm the searches to archive.' });
   }
   // Confirm exactly the managed searches shown to this person. New searches or
   // a reassigned manager must prompt a fresh review, never expand the reset.
-  const searches = db.db.searches.filter(s => db.accountManager(s)?.userId === req.user.id);
+  const searches = db.db.searches.filter(s => s.organizationId === req.access.orgId
+    && db.accountManager(s)?.userId === req.user.id);
   if (searches.length !== ids.length || searches.some(s => !ids.includes(s.id))) {
     return res.status(409).json({ error:'Your managed searches changed. Refresh Home and review them before starting fresh.' });
   }
@@ -699,14 +1115,19 @@ app.post('/api/account/start-fresh', requireUser, (req, res) => {
   res.json({ ok:true, archived:searches.length, ids });
 });
 
-app.get('/api/archives', requireUser, (req, res) => {
-  if (!db.isConsultant(req.user)) return res.status(403).json({ error:'A consultant manages archived searches.' });
-  res.json(db.db.archivedSearches.map(s => ({ id:s.id, no:s.no, client:s.client, position:s.position, archivedAt:s.archivedAt })));
+// The archive is part of a firm's book of business, so it is scoped exactly
+// like the live one: another workspace's archived search is not listed, not
+// restorable, and not distinguishable from one that does not exist.
+app.get('/api/archives', ...requireWorkspace, (req, res) => {
+  if (!db.isStaff(req.access)) return res.status(403).json({ error:'A consultant manages archived searches.' });
+  res.json(db.db.archivedSearches
+    .filter(s => s.organizationId === req.access.orgId)
+    .map(s => ({ id:s.id, no:s.no, client:s.client, position:s.position, archivedAt:s.archivedAt })));
 });
 
-app.post('/api/archives/:id/restore', requireUser, (req, res) => {
-  if (!db.isConsultant(req.user)) return res.status(403).json({ error:'A consultant restores a search.' });
-  const s = db.db.archivedSearches.find(s => s.id === req.params.id);
+app.post('/api/archives/:id/restore', ...requireWorkspace, (req, res) => {
+  if (!db.isStaff(req.access)) return res.status(403).json({ error:'A consultant restores a search.' });
+  const s = db.db.archivedSearches.find(s => s.id === req.params.id && s.organizationId === req.access.orgId);
   if (!s) return res.status(404).json({ error:'Archived search not found.' });
   for (const u of s.archivedUsers || []) {
     const current = db.findUserByEmail(u.email);
@@ -753,7 +1174,7 @@ app.post('/api/archives/:id/restore', requireUser, (req, res) => {
  * ------------------------------------------------------------------------- */
 
 /** Record an outcome for one candidate. */
-app.post('/api/searches/:id/candidates/:cid/disposition', requireUser, requireSearch, requireEditor, (req, res) => {
+app.post('/api/searches/:id/candidates/:cid/disposition', ...requireWorkspace, requireSearch, requireEditor, (req, res) => {
   const candidate = candidateOr404(req, res);
   if (!candidate) return;
 
@@ -777,7 +1198,7 @@ app.post('/api/searches/:id/candidates/:cid/disposition', requireUser, requireSe
 });
 
 /** Close or cancel the search. */
-app.post('/api/searches/:id/close', requireUser, requireSearch, requireEditor, (req, res) => {
+app.post('/api/searches/:id/close', ...requireWorkspace, requireSearch, requireEditor, (req, res) => {
   if (disposition.isFrozen(req.search)) {
     return res.status(409).json({ error: 'This search is already ' + disposition.lifecycleOf(req.search) + '.' });
   }
@@ -800,7 +1221,7 @@ app.post('/api/searches/:id/close', requireUser, requireSearch, requireEditor, (
 });
 
 /** Reopen a closed search, deliberately and with a reason. */
-app.post('/api/searches/:id/reopen', requireUser, requireSearch, requireEditor, (req, res) => {
+app.post('/api/searches/:id/reopen', ...requireWorkspace, requireSearch, requireEditor, (req, res) => {
   if (!disposition.isFrozen(req.search)) {
     return res.status(409).json({ error: 'This search is already active.' });
   }
@@ -816,7 +1237,7 @@ app.post('/api/searches/:id/reopen', requireUser, requireSearch, requireEditor, 
 });
 
 /** How the search concluded. */
-app.get('/api/searches/:id/disposition', requireUser, requireSearch, requireEditor, (req, res) => {
+app.get('/api/searches/:id/disposition', ...requireWorkspace, requireSearch, requireEditor, (req, res) => {
   res.json(disposition.summary(req.search));
 });
 
@@ -841,7 +1262,7 @@ function candidateOr404(req, res){
   return candidate;
 }
 
-app.post('/api/searches/:id/candidates/:cid/documents', requireUser, requireSearch, requireEditor, (req, res) => {
+app.post('/api/searches/:id/candidates/:cid/documents', ...requireWorkspace, requireSearch, requireEditor, (req, res) => {
   const candidate = candidateOr404(req, res);
   if (!candidate) return;
 
@@ -854,7 +1275,7 @@ app.post('/api/searches/:id/candidates/:cid/documents', requireUser, requireSear
   res.json(painted(req, req.search));
 });
 
-app.delete('/api/searches/:id/candidates/:cid/documents/:docId', requireUser, requireSearch, requireEditor, (req, res) => {
+app.delete('/api/searches/:id/candidates/:cid/documents/:docId', ...requireWorkspace, requireSearch, requireEditor, (req, res) => {
   const candidate = candidateOr404(req, res);
   if (!candidate) return;
 
@@ -867,7 +1288,7 @@ app.delete('/api/searches/:id/candidates/:cid/documents/:docId', requireUser, re
   res.json(painted(req, req.search));
 });
 
-app.post('/api/searches/:id/candidates/:cid/communications', requireUser, requireSearch, requireEditor, (req, res) => {
+app.post('/api/searches/:id/candidates/:cid/communications', ...requireWorkspace, requireSearch, requireEditor, (req, res) => {
   const candidate = candidateOr404(req, res);
   if (!candidate) return;
 
@@ -881,11 +1302,11 @@ app.post('/api/searches/:id/candidates/:cid/communications', requireUser, requir
 });
 
 /** Who has not been contacted, and whose follow-up date has passed. */
-app.get('/api/searches/:id/follow-ups', requireUser, requireSearch, requireEditor, (req, res) => {
+app.get('/api/searches/:id/follow-ups', ...requireWorkspace, requireSearch, requireEditor, (req, res) => {
   res.json(candidates.followUps(req.search));
 });
 
-app.put('/api/searches/:id/verification', requireUser, requireSearch, requireEditor, (req, res) => {
+app.put('/api/searches/:id/verification', ...requireWorkspace, requireSearch, requireEditor, (req, res) => {
   const invalid = jurisdictions.validateVerification(req.body);
   if (invalid) return res.status(400).json({ error: invalid });
 
@@ -910,7 +1331,7 @@ app.put('/api/searches/:id/verification', requireUser, requireSearch, requireEdi
   res.json(painted(req, req.search));
 });
 
-app.get('/api/searches/:id/export', requireUser, requireSearch, requireEditor, (req, res) => {
+app.get('/api/searches/:id/export', ...requireWorkspace, requireSearch, requireEditor, (req, res) => {
   const bundle = exporter.build(req.search, {
     viewer: req.user,
     users: db.db.users,
@@ -931,7 +1352,7 @@ app.get('/api/searches/:id/export', requireUser, requireSearch, requireEditor, (
   res.json(bundle);
 });
 
-app.get('/api/searches/:id/history', requireUser, requireSearch, requireEditor, (req, res) => {
+app.get('/api/searches/:id/history', ...requireWorkspace, requireSearch, requireEditor, (req, res) => {
   const history = (req.search.history || []).map(entry => {
     if (!entry.scores && !entry.notesBy) return entry;
     const visible = entry.released || (entry.revision === req.search.profileRevision && req.search.released);
@@ -941,7 +1362,7 @@ app.get('/api/searches/:id/history', requireUser, requireSearch, requireEditor, 
   res.json({ history, activity: req.search.activity || [] });
 });
 
-app.post('/api/searches/:id/history/:entry/restore', requireUser, requireSearch, requireEditor, (req, res) => {
+app.post('/api/searches/:id/history/:entry/restore', ...requireWorkspace, requireSearch, requireEditor, (req, res) => {
   const entry = /^\d+$/.test(req.params.entry) && req.search.history[Number(req.params.entry)];
   if (!entry || !['artifact', 'profile', 'facts'].includes(entry.kind)) return res.status(400).json({ error:'Choose a saved document, profile, or search facts.' });
   if (entry.kind === 'artifact') {
@@ -954,7 +1375,7 @@ app.post('/api/searches/:id/history/:entry/restore', requireUser, requireSearch,
   res.json(painted(req, req.search));
 });
 
-app.post('/api/searches/bulk-delete', requireUser, (req, res) => {
+app.post('/api/searches/bulk-delete', ...requireWorkspace, (req, res) => {
   if (req.user.role !== 'consultant') return res.status(403).json({ error:'The consultant deletes a search.' });
   const raw = Array.isArray(req.body?.ids) ? req.body.ids : [];
   const ids = [...new Set(raw.map(id => String(id || '').trim()).filter(Boolean))];
@@ -962,7 +1383,7 @@ app.post('/api/searches/bulk-delete', requireUser, (req, res) => {
   const deleted = [];
   for (const id of ids) {
     const s = db.db.searches.find(x => x.id === id);
-    if (!s || !db.canEdit(s, req.user)) continue;
+    if (!s || !db.canEdit(s, req.access)) continue;
     removeSearch(s);
     deleted.push(id);
   }
@@ -972,7 +1393,7 @@ app.post('/api/searches/bulk-delete', requireUser, (req, res) => {
   res.json({ ok:true, deleted: deleted.length, ids: deleted });
 });
 
-app.delete('/api/searches/:id', requireUser, requireSearch, requireEditor, (req, res) => {
+app.delete('/api/searches/:id', ...requireWorkspace, requireSearch, requireEditor, (req, res) => {
   if (req.user.role !== 'consultant') return res.status(403).json({ error:'The consultant deletes a search.' });
   removeSearch(req.search);
   // Committee accounts existed for this search. With it gone they are live
@@ -988,7 +1409,7 @@ const PATCH_FIELDS = [
   { key: 'released', role: 'consultant', roleError: 'The consultant releases scores.' }
 ];
 
-app.patch('/api/searches/:id', requireUser, requireSearch, requireEditor, (req, res) => {
+app.patch('/api/searches/:id', ...requireWorkspace, requireSearch, requireEditor, (req, res) => {
   const body = req.body || {};
   if ('jurisdictionType' in body && (typeof body.jurisdictionType !== 'string' || !Object.hasOwn(jurisdictions.TYPES, body.jurisdictionType))) return res.status(400).json({ error:'Choose City or town, or County.' });
   if ('package' in body && !Object.hasOwn(db.PACKAGES, body.package)) return res.status(400).json({ error:'Pick a package: Basic, Enhanced, or Executive.' });
@@ -1026,7 +1447,7 @@ app.patch('/api/searches/:id', requireUser, requireSearch, requireEditor, (req, 
   res.json(painted(req, req.search));
 });
 
-app.put('/api/searches/:id/profile', requireUser, requireSearch, requireEditor, (req, res) => {
+app.put('/api/searches/:id/profile', ...requireWorkspace, requireSearch, requireEditor, (req, res) => {
   const criteria = Array.isArray(req.body?.criteria) ? req.body.criteria : [];
   if (criteria.some(c => !c || typeof c !== 'object')) return res.status(400).json({ error:'Invalid profile criterion.' });
   const next = criteria.map((c,i) => ({
@@ -1051,7 +1472,7 @@ function clearReview(search, key){
   if (search.reviews) delete search.reviews[key];
 }
 
-app.put('/api/searches/:id/artifact/:key', requireUser, requireSearch, requireEditor, artifactOnFile, (req, res) => {
+app.put('/api/searches/:id/artifact/:key', ...requireWorkspace, requireSearch, requireEditor, artifactOnFile, (req, res) => {
   if (!ARTIFACTS.has(req.params.key)) return res.status(400).json({ error:'Unknown artifact.' });
   const incoming = req.body?.body ?? req.body;
   if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) return res.status(400).json({ error:'Provide an artifact object.' });
@@ -1072,7 +1493,7 @@ app.put('/api/searches/:id/artifact/:key', requireUser, requireSearch, requireEd
   res.json(painted(req, req.search));
 });
 
-app.post('/api/searches/:id/artifact/:key/review', requireUser, requireSearch, requireEditor, artifactOnFile, (req, res) => {
+app.post('/api/searches/:id/artifact/:key/review', ...requireWorkspace, requireSearch, requireEditor, artifactOnFile, (req, res) => {
   const key = req.params.key;
   if (!db.REVIEW_STEPS.has(key)) return res.status(400).json({ error:'That step does not take a review.' });
   if (req.user.role !== 'consultant') return res.status(403).json({ error:'A consultant signs off on recruiting copy.' });
@@ -1091,7 +1512,7 @@ app.post('/api/searches/:id/artifact/:key/review', requireUser, requireSearch, r
   res.json(painted(req, req.search));
 });
 
-app.post('/api/searches/:id/assemble', requireUser, requireSearch, requireEditor, kindOnFile, (req, res) => {
+app.post('/api/searches/:id/assemble', ...requireWorkspace, requireSearch, requireEditor, kindOnFile, (req, res) => {
   const kind = req.body?.kind;
   if (kind !== 'brochure') return res.status(400).json({ error:'Unknown assemble kind.' });
   const community = req.search.artifacts.community;
@@ -1109,12 +1530,19 @@ function photoDir(searchId){
   return path.join(db.DATA_DIR, 'media', searchId);
 }
 
+function requireMediaAuthorization(req, res, next){
+  if (!/^Bearer\s+\S/i.test(String(req.headers.authorization || ''))) {
+    return res.status(401).json({ error:'Open this image from the workspace.', code:'BEARER_REQUIRED' });
+  }
+  next();
+}
+
 // wipeSlotFiles was removed in DEP-04. It deleted the committed photo before
 // the replacement record was saved, so a failed save rolled the record back
 // over an image that no longer existed. server/media.js stages, commits, then
 // sweeps instead.
 
-app.post('/api/searches/:id/media', requireUser, requireSearch, requireEditor, mediaLimit, requireStepOnFile(() => 'brochure'), (req, res) => {
+app.post('/api/searches/:id/media', ...requireWorkspace, requireSearch, requireEditor, mediaLimit, requireStepOnFile(() => 'brochure'), (req, res) => {
   const slot = String(req.body?.slot || '');
   if (!PHOTO_SLOTS.has(slot)) return res.status(400).json({ error:'Unknown photo slot.' });
 
@@ -1149,7 +1577,7 @@ app.post('/api/searches/:id/media', requireUser, requireSearch, requireEditor, m
   res.json(painted(req, req.search));
 });
 
-app.delete('/api/searches/:id/media/:slot', requireUser, requireSearch, requireEditor, (req, res) => {
+app.delete('/api/searches/:id/media/:slot', ...requireWorkspace, requireSearch, requireEditor, (req, res) => {
   const slot = String(req.params.slot || '');
   if (!PHOTO_SLOTS.has(slot)) return res.status(400).json({ error:'Unknown photo slot.' });
 
@@ -1171,7 +1599,17 @@ app.delete('/api/searches/:id/media/:slot', requireUser, requireSearch, requireE
   res.json(painted(req, req.search));
 });
 
-app.get('/media/:id/:file', requireUser, requireSearch, (req, res) => {
+/**
+ * A brochure photo, fetched with the session the page is holding.
+ *
+ * An <img src> would carry the session cookie, and Clerk's cookie reflects
+ * whichever organization was selected most recently in any tab — not
+ * necessarily the one this page is showing. That is exactly the request that
+ * must not be allowed to resolve against the wrong workspace, so the header is
+ * required and the client fetches the image rather than letting the browser do
+ * it ambiently.
+ */
+app.get('/media/:id/:file', requireMediaAuthorization, ...requireWorkspace, requireSearch, (req, res) => {
   const file = path.basename(String(req.params.file || ''));
   if (!PHOTO_FILE_RE.test(file)) return res.status(404).end();
   const dir = photoDir(req.search.id);
@@ -1189,7 +1627,7 @@ app.get('/media/:id/:file', requireUser, requireSearch, (req, res) => {
 });
 
 
-app.post('/api/searches/:id/generate', requireUser, requireSearch, requireEditor, generateLimit, withinAiBudget, kindOnFile, async (req, res) => {
+app.post('/api/searches/:id/generate', ...requireWorkspace, requireSearch, requireEditor, generateLimit, withinAiBudget, kindOnFile, async (req, res) => {
   const kind = req.body?.kind;
   const premium = Boolean(req.body?.premium);
   const revision = req.search.revision;
@@ -1216,8 +1654,8 @@ app.post('/api/searches/:id/generate', requireUser, requireSearch, requireEditor
       aibudget.record({ searchId: req.search.id, model: null, usage: null, ok: false });
       throw error;
     }
-    if (!db.findSearch(req.search.id)) {
-      return res.status(409).json({ error:'This search was deleted while the draft was generating.' });
+    if (!stillAuthorized(req)) {
+      return res.status(409).json({ error:'This search was closed to you while the draft was generating. Nothing was saved.' });
     }
     if (req.search.revision !== revision) return res.status(409).json({ error:'This search changed while the draft was generating. The newer work was kept. Reload the search before drafting again.', code:'STALE_SEARCH' });
     const invalid = kind === 'profile' ? integrity.validateCriteria(out.json.criteria)
@@ -1254,7 +1692,7 @@ app.post('/api/searches/:id/generate', requireUser, requireSearch, requireEditor
   }
 });
 
-app.post('/api/searches/:id/research', requireUser, requireSearch, requireEditor, researchLimit, withinAiBudget, async (req, res) => {
+app.post('/api/searches/:id/research', ...requireWorkspace, requireSearch, requireEditor, researchLimit, withinAiBudget, async (req, res) => {
   const body = req.body || {};
   const revision = req.search.revision;
   const city = String(Object.prototype.hasOwnProperty.call(body, 'city') ? body.city : (req.search.client || '')).trim();
@@ -1280,8 +1718,8 @@ app.post('/api/searches/:id/research', requireUser, requireSearch, requireEditor
       aibudget.record({ searchId: req.search.id, model: null, usage: null, ok: false });
       throw error;
     }
-    if (!db.findSearch(req.search.id)) {
-      return res.status(409).json({ error:'This search was deleted while research was running.' });
+    if (!stillAuthorized(req)) {
+      return res.status(409).json({ error:'This search was closed to you while research was running. Nothing was saved.' });
     }
     if (req.search.revision !== revision) return res.status(409).json({ error:'This search changed during research. The newer work was kept. Reload before researching again.', code:'STALE_SEARCH' });
     const facts = (out.json && out.json.facts) || {};
@@ -1318,7 +1756,7 @@ app.post('/api/searches/:id/research', requireUser, requireSearch, requireEditor
   }
 });
 
-app.post('/api/searches/:id/candidates', requireUser, requireSearch, requireEditor, (req, res) => {
+app.post('/api/searches/:id/candidates', ...requireWorkspace, requireSearch, requireEditor, (req, res) => {
   const b = req.body || {};
   const invalid = integrity.validateCandidate(b);
   if (invalid) return res.status(400).json({ error: invalid });
@@ -1344,7 +1782,7 @@ app.post('/api/searches/:id/candidates', requireUser, requireSearch, requireEdit
   res.json(painted(req, req.search));
 });
 
-app.patch('/api/searches/:id/candidates/:cid', requireUser, requireSearch, requireEditor, (req, res) => {
+app.patch('/api/searches/:id/candidates/:cid', ...requireWorkspace, requireSearch, requireEditor, (req, res) => {
   const c = req.search.candidates.find(x=>x.id===req.params.cid);
   if (!c) return res.status(404).json({ error:'Candidate not found.' });
   const body = req.body || {};
@@ -1431,7 +1869,7 @@ function staffCandidateFor(req, res){
   return { ok: true, candidate: c };
 }
 
-app.post('/api/searches/:id/staff/:key/log', requireUser, requireSearch, requireEditor, requireStaffStep, (req, res) => {
+app.post('/api/searches/:id/staff/:key/log', ...requireWorkspace, requireSearch, requireEditor, requireStaffStep, (req, res) => {
   const text = String(req.body?.text || '').trim().slice(0, LOG_MAX);
   if (!text) return res.status(400).json({ error:'Write down what was done.' });
   const who = staffCandidateFor(req, res);
@@ -1456,7 +1894,7 @@ app.post('/api/searches/:id/staff/:key/log', requireUser, requireSearch, require
   res.json(painted(req, req.search));
 });
 
-app.delete('/api/searches/:id/staff/:key/log/:lid', requireUser, requireSearch, requireEditor, requireStaffStep, (req, res) => {
+app.delete('/api/searches/:id/staff/:key/log/:lid', ...requireWorkspace, requireSearch, requireEditor, requireStaffStep, (req, res) => {
   const before = req.staff.log.length;
   req.staff.log = req.staff.log.filter(e => e.id !== req.params.lid);
   if (req.staff.log.length === before) return res.status(404).json({ error:'That entry is not on the log.' });
@@ -1465,14 +1903,14 @@ app.delete('/api/searches/:id/staff/:key/log/:lid', requireUser, requireSearch, 
   res.json(painted(req, req.search));
 });
 
-app.put('/api/searches/:id/staff/:key', requireUser, requireSearch, requireEditor, requireStaffStep, (req, res) => {
+app.put('/api/searches/:id/staff/:key', ...requireWorkspace, requireSearch, requireEditor, requireStaffStep, (req, res) => {
   req.staff.notes = String(req.body?.notes || '').slice(0, 8000);
   db.touch(req.search, req.user, 'updated ' + req.staffKey + ' notes');
   db.persist();
   res.json(painted(req, req.search));
 });
 
-app.post('/api/searches/:id/staff/:key/complete', requireUser, requireSearch, requireEditor, requireStaffStep, (req, res) => {
+app.post('/api/searches/:id/staff/:key/complete', ...requireWorkspace, requireSearch, requireEditor, requireStaffStep, (req, res) => {
   if (req.user.role !== 'consultant') return res.status(403).json({ error:'A consultant signs off on staff work.' });
   const done = Boolean(req.body?.done);
   const step = db.STEPS.find(s => s.key === req.staffKey);
@@ -1500,7 +1938,7 @@ app.post('/api/searches/:id/staff/:key/complete', requireUser, requireSearch, re
 
 // Consent to contact references is recorded on the candidate, so it survives
 // the step being reopened and is visible wherever the person is shown.
-app.post('/api/searches/:id/candidates/:cid/consent', requireUser, requireSearch, requireEditor, (req, res) => {
+app.post('/api/searches/:id/candidates/:cid/consent', ...requireWorkspace, requireSearch, requireEditor, (req, res) => {
   const c = (req.search.candidates || []).find(x => x.id === req.params.cid);
   if (!c) return res.status(404).json({ error:'Candidate not found.' });
   const consent = Boolean(req.body?.consent);
@@ -1519,7 +1957,7 @@ app.post('/api/searches/:id/candidates/:cid/consent', requireUser, requireSearch
 
 const send2OnFile = requireStepOnFile(() => 'send2');
 
-app.post('/api/searches/:id/candidates/:cid/send2', requireUser, requireSearch, requireEditor, send2OnFile, (req, res) => {
+app.post('/api/searches/:id/candidates/:cid/send2', ...requireWorkspace, requireSearch, requireEditor, send2OnFile, (req, res) => {
   if (req.user.role !== 'consultant') return res.status(403).json({ error:'The consultant sends the semifinalist survey.' });
   const c = req.search.candidates.find(x=>x.id===req.params.cid);
   if (!c) return res.status(404).json({ error:'Candidate not found.' });
@@ -1532,7 +1970,7 @@ app.post('/api/searches/:id/candidates/:cid/send2', requireUser, requireSearch, 
   res.json(painted(req, req.search));
 });
 
-app.post('/api/searches/:id/send2', requireUser, requireSearch, requireEditor, send2OnFile, (req, res) => {
+app.post('/api/searches/:id/send2', ...requireWorkspace, requireSearch, requireEditor, send2OnFile, (req, res) => {
   if (req.user.role !== 'consultant') return res.status(403).json({ error:'The consultant sends the semifinalist survey.' });
   const deadline = req.body?.deadline;
   const eligible = req.search.candidates.filter(isSemifinalistOrFinalist);
@@ -1546,7 +1984,7 @@ app.post('/api/searches/:id/send2', requireUser, requireSearch, requireEditor, s
   res.json(painted(req, req.search));
 });
 
-app.put('/api/searches/:id/scores/:cid', requireUser, requireSearch, (req, res) => {
+app.put('/api/searches/:id/scores/:cid', ...requireWorkspace, requireSearch, (req, res) => {
   const c = req.search.candidates.find(x=>x.id===req.params.cid);
   if (!c) return res.status(404).json({ error:'Candidate not found.' });
   // Scores already recorded stay: they are evidence of how the committee
@@ -1589,7 +2027,7 @@ function issueSurvey(search, candidate, key) {
   return candidate.issuedSurveys[key];
 }
 
-app.post('/api/searches/:id/candidates/:cid/invite', requireUser, requireSearch, requireEditor, (req, res) => {
+app.post('/api/searches/:id/candidates/:cid/invite', ...requireWorkspace, requireSearch, requireEditor, (req, res) => {
   const c = req.search.candidates.find(c => c.id === req.params.cid);
   if (!c) return res.status(404).json({ error:'Candidate not found.' });
   c.invite = crypto.randomBytes(24).toString('hex');
@@ -1598,7 +2036,7 @@ app.post('/api/searches/:id/candidates/:cid/invite', requireUser, requireSearch,
   res.json(painted(req, req.search));
 });
 
-app.post('/api/searches/:id/candidates/:cid/reopen', requireUser, requireSearch, requireEditor, (req, res) => {
+app.post('/api/searches/:id/candidates/:cid/reopen', ...requireWorkspace, requireSearch, requireEditor, (req, res) => {
   const c = req.search.candidates.find(c => c.id === req.params.cid);
   const which = req.body?.which;
   const reason = String(req.body?.reason || '').trim().slice(0, 2000);
@@ -1810,6 +2248,11 @@ function shutdown(signal){
     process.exit(1);
   }, 10000).unref();
 
+  // Keep-alive connections a browser is holding open would otherwise keep
+  // `close` waiting for the full drain ceiling on every shutdown. Idle ones go
+  // at once; a request still in flight finishes.
+  server.closeIdleConnections?.();
+
   server.close(() => {
     clearTimeout(forced);
     recovery.stop();
@@ -1821,3 +2264,18 @@ function shutdown(signal){
 }
 
 for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, () => shutdown(signal));
+
+// Leave when whoever started us does, if they asked for that.
+//
+// Windows has no process groups and no real signals, so a test runner that is
+// interrupted cannot reliably signal this process — it is left listening, and
+// the next run fails on a port that is "already used" by a server nobody
+// remembers starting. A parent that hands us a stdin pipe can set
+// SLATE_EXIT_WITH_PARENT, and the end of that pipe becomes the one
+// cross-platform notice that the parent has gone. Opt-in, because a parent
+// that gives us no stdin at all would otherwise look like one that had left.
+if (process.env.SLATE_EXIT_WITH_PARENT === 'true') {
+  process.stdin.on('end', () => shutdown('parent exit'));
+  process.stdin.on('close', () => shutdown('parent exit'));
+  process.stdin.resume();
+}
