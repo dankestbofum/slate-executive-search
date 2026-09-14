@@ -8,11 +8,11 @@ Nineteen steps in three phases. The catalog lives in `server/steps.js`; both the
 store and the Claude prompts read step numbers from there, so renumbering the
 process is a one-file change.
 
-**Phase 0 — seat the committee and hear them.**
+**Phase 0 — assemble the committee and hear them.**
 
 1. **Search committee.** Everyone who gets a say, plus one account manager.
-   Seating someone without an account creates one. They sign in with their email.
-2. **Committee input.** The manager opens a window; each seated member answers
+   Adding someone without an account creates one. They sign in with their email.
+2. **Committee input.** The manager opens a window; each committee member answers
    privately what they are looking for. Answers fold into one ranked read of the
    room, and the manager closes the window to publish it.
 
@@ -204,10 +204,17 @@ search has to hand it over first. The last administrator cannot be removed or
 demoted.
 
 A search manager who is not an administrator can still prepare a committee: the
-seat is held against the address and shown as **Invitation needed** until an
-administrator sends the invitation. Slate never implies an email went out when
-it did not. A held seat becomes a real one when that person accepts and signs
-in, and grants nothing before that.
+place is held against the address and shown under **Waiting to join** as
+**Invitation needed** until an administrator sends the invitation. Slate never
+implies an email went out when it did not. A held place becomes a real one when
+that person accepts and signs in, and grants nothing before that.
+
+People are added several at a time. The form on the committee step stays
+collapsed until asked for, takes as many rows as the manager types, and puts
+one request per person to the server, because each address needs its own
+membership lookup and may need its own invitation. A row the server refuses
+stays on screen with the reason against it while the rest go through, so a
+retry cannot add anybody twice.
 
 ### Switching workspaces
 
@@ -702,8 +709,17 @@ processes against one volume do not merge — the second writer's save discards
 everything the first committed since it loaded. Slate takes a lock
 (`DATA_DIR/.writer.lock`) at startup and refuses to run if a live process
 already holds it. **Do not run multiple replicas, and do not use PM2 cluster
-mode.** A lock left by a crashed process is detected and taken over, with a
-warning in the log.
+mode.**
+
+The holder proves it is alive by touching that lock every 30 seconds, and names
+itself with a token rather than a process ID. A PID is not an identity: the
+operating system reuses the number, so a crashed writer's PID can belong to an
+unrelated program by the time the replacement boots, and across containers on
+one volume it names a process the claimant cannot see at all. A lock whose
+heartbeat has stopped is taken over with a warning in the log; a writer that
+crashed on the same host is reclaimed at once, because its PID is provably
+gone. If a running instance ever finds the lock taken by another, it exits
+rather than let two processes overwrite each other.
 
 **Photos are content addressed and never overwritten.** Files are named
 `slot.<hash>.jpg`. Replacing a photo stages the new file under a name nothing

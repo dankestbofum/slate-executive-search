@@ -154,7 +154,7 @@ const DOC_KEYS = ['profile','community','plan','brochure','ads','survey1','surve
 const HUB_VIEWS = ['interviews','committee','documents','activity','process'];
 
 const SEAT = {
-  manager:   { label:'Account manager', hint:'Runs the search. Seats the committee, opens and closes intake, adopts the profile.' },
+  manager:   { label:'Account manager', hint:'Runs the search. Adds people, opens and closes intake, adopts the profile.' },
   consultant:{ label:'Consultant',      hint:'Works the file alongside the manager.' },
   committee: { label:'Committee member',hint:'Answers intake and scores candidates. Reads the file; does not edit it.' }
 };
@@ -209,6 +209,9 @@ const state = {
   // DOM so a re-render never drops what somebody typed. Cleared when the
   // search changes or the answers are saved.
   intake:null,
+  // The people being typed into the add-people form, held here rather than
+  // read back off the DOM only at submit, so a re-render never drops a row.
+  newPeople:null,
   // A just-issued sign-in, shown once on the roster page.
   newPin:null,
   // Which pay-level sample the Packages page is showing, and the package
@@ -318,7 +321,7 @@ function catalogSteps(){
 }
 function catalogPhases(){
   return state.health?.phases || [
-    { id:0, key:'convene', t:'Seat the committee and hear them', lede:'Who is on this search, who runs it, and what each member is actually looking for.' },
+    { id:0, key:'convene', t:'Assemble the committee and hear them', lede:'Who is on this search, who runs it, and what each member is actually looking for.' },
     { id:1, key:'recruit', t:'Prepare and post', lede:'Profile, community, surveys, and the ad plan. Then the brochure and ads you actually post.' },
     { id:2, key:'people', t:'Once there are candidates', lede:'Screening is where applicants enter the file. Everything after that waits until someone is on it.' }
   ];
@@ -1393,7 +1396,7 @@ function clearWorkspaceState(){
   state.media = {};
   state.search = null; state.searches = []; state.users = [];
   state.sel = null; state.picked = []; state.archives = null; state.history = null;
-  state.followUps = null; state.intake = null; state.newPin = null;
+  state.followUps = null; state.intake = null; state.newPin = null; state.newPeople = null;
   state.filters = {}; state.open = {}; state.mode = {}; state.tab = {};
   state.scrollMem = {}; state.homeQ = ''; state.searchesError = null;
   state.team = null; state.teamError = null; state.inviteDraft = null;
@@ -1485,7 +1488,7 @@ async function refreshSearches(){
 async function loadSearch(id){
   // An in-progress intake draft belongs to one search. Drop it when the file
   // changes so answers cannot bleed from one committee into another.
-  if (state.search?.id !== id) { state.intake = null; state.newPin = null; }
+  if (state.search?.id !== id) { state.intake = null; state.newPin = null; state.newPeople = null; }
   state.search = await api('/api/searches/'+id);
 }
 
@@ -1740,7 +1743,7 @@ function vGate(){
     </header>
     <div class="wrap gate__hero">
       <h1 class="t-title">A guided executive search</h1>
-      <p class="t-body">Every engagement seats the search committee, asks each member what they are looking for, and builds the candidate profile from their answers. Recruiting, screening, and interviews all run against that profile.</p>
+      <p class="t-body">Every engagement assembles the search committee, asks each member what they are looking for, and builds the candidate profile from their answers. Recruiting, screening, and interviews all run against that profile.</p>
     </div>
     <div class="wrap gate__table stack">
       <p class="t-body">Sign in to work with your search team. New here? Create an account, tell us your role, and we will guide you through getting started. If you were invited, use the email on your invitation.</p>${state.authError ? `<p role="alert">${esc(state.authError)}</p><button class="btn" data-act="auth-retry">Try again</button>` : ''}
@@ -1906,7 +1909,7 @@ function vAssignmentPending(){
     <h1 class="t-title">You are part of ${esc(org)}</h1>
     <p class="t-body">Your search assignment is pending. A search manager adds committee members to one search at a time, so being in the workspace is not by itself an assignment.</p></div>
     <section class="onboarding__next stack stack--tight">
-      <p>Ask your search consultant to seat <strong>${esc(state.user.email)}</strong> on the search you are serving on.</p>
+      <p>Ask your search consultant to add <strong>${esc(state.user.email)}</strong> to the search you are serving on.</p>
       <p class="t-small">Nothing is sent by pressing the button below; it re-reads your assignments.</p></section>
     ${state.onboardingError ? `<p role="alert">${esc(state.onboardingError)}</p>` : ''}
     <div class="row"><button class="btn btn--primary" data-act="check-account-access">Check for assignments</button>
@@ -1931,8 +1934,8 @@ function vMyAccess(){
       ${o.roleLabel ? `<p>Your role here is <strong>${esc(o.roleLabel)}</strong>. ${esc(o.roleSummary || '')}</p>` : '<p>You have no role in an active workspace.</p>'}
       <p class="t-small">Roles are set by an administrator of this workspace in Team &amp; access. To change yours, ask one of them.</p></section>
     <section class="stack stack--tight"><h2 class="t-section">Your searches</h2>
-      ${seats ? `<ul class="wslist wslist--plain" role="list">${seats}</ul>` : '<p class="t-small">You are not seated on any search in this workspace.</p>'}
-      <p class="t-small">A search manager seats people on individual searches. Being in the workspace is a separate thing from being on a search.</p></section>
+      ${seats ? `<ul class="wslist wslist--plain" role="list">${seats}</ul>` : '<p class="t-small">You are not on any search in this workspace.</p>'}
+      <p class="t-small">A search manager adds people to individual searches. Being in the workspace is a separate thing from being on a search.</p></section>
     ${others.length ? `<section class="stack stack--tight"><h2 class="t-section">Your other workspaces</h2>
       <ul class="wslist" role="list">${others.map(w => `<li class="wslist__row"><span class="wslist__id"><strong>${esc(w.name)}</strong><span class="t-small">${esc(w.roleLabel)}</span></span>
         <button class="btn btn--secondary btn--sm" data-act="switch-workspace" data-org="${esc(w.id)}">Switch</button></li>`).join('')}</ul></section>` : ''}
@@ -1973,7 +1976,7 @@ function vHomeCommittee(){
         <div class="spec__body spec__body--flush">${list.length ? `<div class="tablewrap"><table class="candtable hometable">
           <thead><tr><th scope="col">Search</th><th scope="col">Your part</th><th scope="col">Open</th></tr></thead>
           <tbody>${rows}</tbody>
-        </table></div>` : `<div class="empty">${emptyState('Nothing yet','When a consultant seats you on a search, it appears here.')}</div>`}</div>
+        </table></div>` : `<div class="empty">${emptyState('Nothing yet','When a consultant adds you to a search, it appears here.')}</div>`}</div>
       </div>
     </div></div>`);
 }
@@ -2125,7 +2128,7 @@ function vHome(){
           <thead><tr>${manage?'<th scope="col"><span class="u-sr">Select</span></th>':''}<th scope="col">Search</th><th scope="col">Phase</th><th scope="col">Candidates</th><th scope="col">Account manager</th><th scope="col">Next action</th>${manage?'<th scope="col"><span class="u-sr">Archive</span></th>':''}</tr></thead>
           <tbody>${rows || `<tr><td colspan="${cols}">No search matches “${esc(homeQuery())}”. <button type="button" class="btn btn--ghost btn--sm" data-act="clear-home-filter">Clear filter</button></td></tr>`}</tbody>
         </table></div>` : `<div class="empty">${emptyState('No searches yet',
-          'A search starts by seating the committee and asking each member what they are looking for. The profile is built from their answers, and everything else is generated from that.',
+          'A search starts by assembling the committee and asking each member what they are looking for. The profile is built from their answers, and everything else is generated from that.',
           state.caps?.createSearch ? `<button class="btn btn--primary" data-go="new">Open a new search</button>` : '')}</div>`}</div>
       </div>
       ${state.caps?.viewArchives ? '<div class="row"><button class="btn btn--secondary btn--sm" data-go="archives">Archived searches</button></div>' : ''}
@@ -2173,7 +2176,7 @@ function vNew(){
   const jurisdiction = jurisdictionInfo({ jurisdictionType:state.newJurisdiction || 'municipality' });
   const moreOpen = Boolean(state.open.newmore);
   return shell(`
-    ${head('New search','Who is hiring, and for what','Open the file, then seat the search committee. The profile comes after the committee has told you what they are looking for.')}
+    ${head('New search','Who is hiring, and for what','Open the file, then add the search committee. The profile comes after the committee has told you what they are looking for.')}
     <div class="band"><div class="wrap"><form id="newsearch" class="stack">
       ${/* The service package is not asked for here. A new file opens on the
             default level and the package is set on Search facts, except when
@@ -2216,7 +2219,7 @@ function nextHint(next){
     return 'Finish the earlier step first. Later documents are only as good as the profile they inherit.';
   }
   const hints = {
-    team:'Seat every governing-body or committee member who gets a say, and name the account manager. People on the roster are included in the search.',
+    team:'Add every governing-body or committee member who gets a say, and name the account manager. People on the roster are included in the search.',
     intake:'Open the window and let each member answer on their own. You will see who has responded, not what they said, until you close it.',
     profile:'Build the matrix from what the committee said, then edit. Everything downstream inherits this.',
     community:'Enter the jurisdiction and its official website. Claude looks up public facts and fills the community and form-of-government profile. Check every number.',
@@ -2317,7 +2320,7 @@ function rosterPanel(s){
       <div class="rosterline">${(s.roster||[]).map(m =>
         `<span class="rosterchip${m.seat==='manager'?' rosterchip--mgr':''}" title="${esc(SEAT[m.seat]?.label||m.seat)}">
           <span class="rosterchip__i">${esc(m.init)}</span>${esc(m.name)}${intakeDoneBy(m.userId)?' '+ico('check'):''}
-        </span>`).join('') || '<span class="t-small">Nobody seated yet.</span>'}
+        </span>`).join('') || '<span class="t-small">Nobody added yet.</span>'}
       </div>
       <p class="t-small">${s.accountManager?esc(s.accountManager.name)+' runs this account. ':''}${state.preview?'':'<button class="btn btn--ghost btn--sm" data-go="team">Open the roster</button>'}</p>
     </div></div>`;
@@ -2374,7 +2377,7 @@ const DASH = {
     return `<div class="spec"><div class="spec__bar">Committee and profile</div>
       <div class="spec__body stack">
         <div class="rosterline">${(s.roster||[]).map(m =>
-          `<span class="rosterchip${m.seat==='manager'?' rosterchip--mgr':''}" title="${esc(SEAT[m.seat]?.label||m.seat)}"><span class="rosterchip__i">${esc(m.init)}</span>${esc(m.name)}${intakeDoneBy(m.userId)?' '+ico('check'):''}</span>`).join('') || '<span class="t-small">Nobody seated yet.</span>'}
+          `<span class="rosterchip${m.seat==='manager'?' rosterchip--mgr':''}" title="${esc(SEAT[m.seat]?.label||m.seat)}"><span class="rosterchip__i">${esc(m.init)}</span>${esc(m.name)}${intakeDoneBy(m.userId)?' '+ico('check'):''}</span>`).join('') || '<span class="t-small">Nobody added yet.</span>'}
         </div>
         ${kv('Roster', statusPill(team))}
         ${kv('Intake', statusPill(intake)+(s.intake?.status==='open'?' <span class="t-small">'+answered+' of '+(s.roster||[]).length+' answered</span>':''))}
@@ -2722,7 +2725,7 @@ function vCommittee(){
   const due = s.intake?.dueBy || '';
   return shell(`
     ${head('This search','Committee',
-      'Who is seated, what they were asked, and the profile their answers produced.',
+      'Who is on the committee, what they were asked, and the profile their answers produced.',
       seated && open && !(mine && mine.submitted) && canOpenStep('intake')
         ? `<button class="btn btn--primary" data-go="intake-mine">Answer your questionnaire</button>` : '')}
     <div class="band"><div class="wrap stack">
@@ -3078,7 +3081,7 @@ function memberRow(m, mgr){
 }
 
 /**
- * A seat that is spoken for but not yet occupied.
+ * A place that is spoken for but not yet taken.
  *
  * Two different pending states, shown as two different things, because they
  * need two different people to act. "Invitation sent" is waiting on the person.
@@ -3093,7 +3096,7 @@ function pendingSeatRow(p){
     <div class="seat__who"><b>${esc(p.name || p.email)}</b><div class="t-small">${esc(p.email)}</div></div>
     <div class="seat__tags">${pill('wait', sent ? 'Invitation sent' : 'Invitation needed')}</div>
     <div class="seat__acts">${canManage()
-      ? `<button class="btn btn--ghost btn--sm" data-act="release-seat" data-pending="${esc(p.id)}" data-email="${esc(p.email)}">Release seat</button>`
+      ? `<button class="btn btn--ghost btn--sm" data-act="release-seat" data-pending="${esc(p.id)}" data-email="${esc(p.email)}">Remove</button>`
       : ''}</div>
   </div>`;
 }
@@ -3105,6 +3108,78 @@ function initialsOf(name){
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
+/* ---------------------------------------------------------------------------
+ * Adding people
+ *
+ * A committee is assembled in one sitting, not one person at a time: the
+ * manager has the whole list in front of them. So the form holds as many
+ * people as they want to type, and the server is asked once per person,
+ * because each address needs its own membership lookup and may need its own
+ * invitation. Whatever fails stays on screen with the reason against it, and
+ * whatever succeeded is gone, so a retry can never add somebody twice.
+ * ------------------------------------------------------------------------- */
+function blankPerson(){ return { name:'', email:'', title:'', seat:'committee', error:null }; }
+
+function peopleDraft(){
+  if (!Array.isArray(state.newPeople) || !state.newPeople.length) state.newPeople = [blankPerson()];
+  return state.newPeople;
+}
+
+// Read the rows back off the DOM before any re-render, the same way the intake
+// and criteria editors do, so nothing typed is lost to a redraw.
+function collectPeople(){
+  const rows = $$('#newpeople [data-row]');
+  if (!rows.length) return;
+  state.newPeople = rows.map(row => ({
+    name: row.querySelector('[data-f="name"]')?.value || '',
+    email: row.querySelector('[data-f="email"]')?.value || '',
+    title: row.querySelector('[data-f="title"]')?.value || '',
+    seat: row.querySelector('[data-f="seat"]')?.value || 'committee',
+    error: null
+  }));
+}
+
+// What actually happened to each address. Reporting a mix of memberships and
+// invitations as "3 added" would collapse three different outcomes into one,
+// and only one of them means the person can see the search today.
+function addPeopleSummary(done, failed){
+  if (done.length === 1 && !failed.length) {
+    const only = done[0];
+    // The server distinguishes seated, invited, and held; its wording is
+    // better than anything reconstructed from flags out here.
+    return only.seated ? only.name.trim() + ' is on the search.' : (only.note || 'Their place is held.');
+  }
+  const onSearch = done.filter(x => x.seated);
+  const invited = done.filter(x => !x.seated && x.invitationSent);
+  const waiting = done.filter(x => !x.seated && !x.invitationSent);
+  const parts = [];
+  if (onSearch.length) parts.push(onSearch.length + (onSearch.length === 1 ? ' person is' : ' people are') + ' on the search.');
+  if (invited.length) parts.push(invited.length === 1 ? 'One invitation was sent.' : invited.length + ' invitations were sent.');
+  if (waiting.length) parts.push((waiting.length === 1 ? 'One place is' : waiting.length + ' places are')
+    + ' held, waiting on an administrator to invite them.');
+  if (failed.length) parts.push((failed.length === 1 ? 'One person was' : failed.length + ' people were')
+    + ' not added; the reason is on the row.');
+  return parts.join(' ') || 'Nothing was added.';
+}
+
+function personDraftRow(p, i, total){
+  return `<div class="person-row" data-row="${i}">
+    <div class="formgrid">
+      ${field('Name','', `<input class="input" data-f="name" value="${esc(p.name||'')}" placeholder="Dana Reyes" autocomplete="off">`)}
+      ${field('Email','Their contact email for this search.', `<input class="input" data-f="email" type="email" value="${esc(p.email||'')}" placeholder="dreyes@example.gov" autocomplete="off">`)}
+      ${field('Title','', `<input class="input" data-f="title" value="${esc(p.title||'')}" placeholder="Board or committee member">`)}
+      ${field('Role on this search','', `<select class="input" data-f="seat">
+        <option value="committee"${p.seat === 'consultant' ? '' : ' selected'}>Committee member</option>
+        <option value="consultant"${p.seat === 'consultant' ? ' selected' : ''}>Consultant at the firm</option>
+      </select>`)}
+    </div>
+    <div class="person-row__foot">
+      ${p.error ? `<span class="person-row__err">${esc(p.error)}</span>` : '<span></span>'}
+      ${total > 1 ? `<button type="button" class="btn btn--ghost btn--sm" data-persondel="${i}">Remove</button>` : ''}
+    </div>
+  </div>`;
+}
+
 function vTeam(){
   const s = state.search;
   const list = s.roster || [];
@@ -3114,13 +3189,15 @@ function vTeam(){
   const manage = canManage();
   const committeeCount = list.filter(m => m.seat === 'committee').length;
   const needInvite = held.filter(p => p.status === 'invitation-needed').length;
+  const people = peopleDraft();
+  const addOpen = Boolean(state.open.addpeople);
   return shell(`
     ${head('Step '+stepNo('team'),'Search committee',
       'Everyone who gets a say in this hire, and the one consultant who runs the account. The roster records who contributes to the hire. Committee input is collected in Step '+stepNo('intake')+', and candidates are scored later.')}
     <div class="band"><div class="wrap stack">
       ${you().consultant && !you().member ? `<div class="notice notice--info"><div>
         <div class="notice__t">You are not on this search</div>
-        <div class="notice__b">You can read and edit it as a consultant, but seating people and running intake belong to whoever holds the account. Join the file to take it over.
+        <div class="notice__b">You can read and edit it as a consultant, but adding people and running intake belong to whoever holds the account. Join the file to take it over.
           <button class="btn btn--secondary btn--sm" data-act="join-search">Join this search</button></div>
       </div></div>` : ''}
       ${mgr ? `<div class="spec"><div class="spec__bar">Account manager</div>
@@ -3134,59 +3211,64 @@ function vTeam(){
           <p class="t-small">${esc(SEAT.manager.hint)} Any consultant on the roster can take the account; hand it over from the list below.</p>
         </div></div>` : ''}
 
-      <div class="spec"><div class="spec__bar">Search staff and committee ${pill(committeeCount?'ok':'wait', committeeCount+(committeeCount===1?' committee seat':' committee seats'))}</div>
+      <div class="spec"><div class="spec__bar">Search staff and committee ${pill(committeeCount?'ok':'wait', committeeCount+(committeeCount===1?' committee member':' committee members'))}</div>
         <div class="spec__body stack">
           ${list.map(m => memberRow(m, mgr)).join('')}
-          ${!committeeCount ? `<div class="t-small">No committee members seated yet. A search can run with the firm alone, but then Step ${stepNo('intake')} only collects your own answers.</div>` : ''}
-          <p class="t-small">Consultants and administrators in ${esc(orgName())} can work across this firm's searches. A committee member is assigned to this search individually, so being in the workspace does not by itself put anybody on this roster.</p>
+          ${!committeeCount ? `<div class="t-small">No committee members yet. A search can run with the firm alone, but then Step ${stepNo('intake')} only collects your own answers.</div>` : ''}
+          <p class="t-small">Consultants and administrators in ${esc(orgName())} can work across this firm's searches. A committee member is added to this search individually, so being in the workspace does not by itself put anybody on this roster.</p>
         </div></div>
 
-      ${held.length ? `<div class="spec"><div class="spec__bar">Seats held ${pill('wait', held.length + (held.length===1?' person':' people'))}</div>
+      ${held.length ? `<div class="spec"><div class="spec__bar">Waiting to join ${pill('wait', held.length + (held.length===1?' person':' people'))}</div>
         <div class="spec__body stack">
           ${held.map(pendingSeatRow).join('')}
           ${needInvite ? `<div class="notice notice--wait"><div>
-            <div class="notice__t">${needInvite === 1 ? 'One seat is waiting on an invitation' : needInvite + ' seats are waiting on invitations'}</div>
-            <div class="notice__b">No email has been sent. An administrator of ${esc(orgName())} has to invite these addresses to the workspace before the seats open.
+            <div class="notice__t">${needInvite === 1 ? 'One person is waiting on an invitation' : needInvite + ' people are waiting on invitations'}</div>
+            <div class="notice__b">No email has been sent. An administrator of ${esc(orgName())} has to invite these addresses to the workspace before they can join.
               ${state.caps?.manageMembers ? '<button class="btn btn--secondary btn--sm" data-go="team-access">Team &amp; access</button>' : ''}</div>
           </div></div>` : ''}
-          <p class="t-small">A held seat becomes a real one the moment that person accepts their workspace invitation and signs in. Until then they can read nothing.</p>
+          <p class="t-small">Somebody waiting joins the roster the moment they accept their workspace invitation and sign in. Until then they can read nothing.</p>
         </div></div>` : ''}
 
-      ${manage ? `<div class="spec"><div class="spec__bar">Seat someone</div>
-        <div class="spec__body">
-          <form id="newmember" class="formgrid">
-            ${field('Name','', `<input class="input" name="name" placeholder="Dana Reyes" required>`)}
-            ${field('Email','Their contact email for this search.', `<input class="input" name="email" type="email" placeholder="dreyes@example.gov" required>`)}
-            ${field('Title','', `<input class="input" name="title" placeholder="Board or committee member">`)}
-            ${field('Seat','', `<select class="input" name="seat">
-              <option value="committee">Committee member</option>
-              <option value="consultant">Consultant at the firm</option>
-            </select>`)}
-          </form>
-          <p class="t-small">${esc(SEAT.committee.hint)} A consultant seat is for somebody already in ${esc(orgName())}.
+      ${manage ? `<div class="spec"><div class="spec__bar">Add people</div>
+        <div class="spec__body stack">
+          <p class="t-small">${esc(SEAT.committee.hint)} The consultant role is for somebody already in ${esc(orgName())}.
             ${state.caps?.inviteMembers
-              ? 'Seating an address that is not in this workspace invites them to it as a committee member and holds their seat.'
-              : 'If the address is not in this workspace, the seat is held and an administrator has to send the invitation.'}</p>
-          <div class="row u-mt-3"><button class="btn btn--primary" type="submit" form="newmember">Seat this person</button></div>
+              ? 'Adding an address that is not in this workspace invites them to it as a committee member and holds their place until they accept.'
+              : 'If the address is not in this workspace, their place is held and an administrator has to send the invitation.'}</p>
+          <div class="row">
+            <button type="button" class="btn btn--primary" data-panel="addpeople" aria-expanded="${addOpen}" aria-controls="addpeople"
+              data-open-label="Add people" data-close-label="Close this form">${addOpen?'Close this form':'Add people'}</button>
+          </div>
+          <div id="addpeople" class="addpeople"${addOpen?'':' hidden'}>
+            <form id="newpeople" class="stack stack--tight">
+              ${people.map((p, i) => personDraftRow(p, i, people.length)).join('')}
+              <div class="row">
+                <button type="button" class="btn btn--secondary btn--sm" data-personadd="1">Add another person</button>
+              </div>
+              <div class="row u-mt-3">
+                <button class="btn btn--primary" type="submit">${people.length === 1 ? 'Add this person' : 'Add these ' + people.length + ' people'}</button>
+              </div>
+            </form>
+          </div>
         </div></div>` : ''}
 
       <div class="notice notice--${confirmed?'ok':'info'}"><div>
         <div class="notice__t">${confirmed?'Roster confirmed':'Confirm the roster before opening intake'}</div>
         <div class="notice__b">${confirmed
-          ? 'Step '+stepNo('intake')+' can open. Seating anyone new reopens this step, because a person added later would miss the window.'
-          : 'Everyone who should get a say needs a seat first. Once you confirm, you can open the intake window.'}</div>
+          ? 'Step '+stepNo('intake')+' can open. Adding anyone new reopens this step, because a person added later would miss the window.'
+          : 'Everyone who should get a say needs to be on the roster first. Once you confirm, you can open the intake window.'}</div>
       </div></div>
       ${manage
         ? actionBar(
             confirmed
               ? nextBtn('team')
               : withTip(`<button type="button" class="btn btn--primary" data-act="confirm-team">Roster is set</button>`,
-                  'Lock the roster so committee input can open. Seating anyone new reopens it.'),
+                  'Lock the roster so committee input can open. Adding anyone new reopens it.'),
             confirmed
               ? withTip(`<button type="button" class="btn btn--secondary" data-act="confirm-team">Reopen the roster</button>`,
-                  'Unlock the roster to seat or remove someone.')
+                  'Unlock the roster to add or remove someone.')
               : nextBtn('team').replace('btn--primary','btn--secondary'),
-            confirmed ? 'Roster confirmed.' : committeeCount+' committee seat'+(committeeCount===1?'':'s')+' so far.')
+            confirmed ? 'Roster confirmed.' : committeeCount+' committee member'+(committeeCount===1?'':'s')+' so far.')
         : actionBar(nextBtn('team'))}
     </div></div>`);
 }
@@ -3194,7 +3276,7 @@ function vTeam(){
 /* ===========================================================================
  * Step 2 — committee intake
  *
- * Two pages behind one route. A seated member answers; the account manager
+ * Two pages behind one route. A committee member answers; the account manager
  * runs the window and reads the room. A consultant who is both sees both.
  * ========================================================================= */
 
@@ -3388,7 +3470,7 @@ function vIntakeManage(){
     <div class="band"><div class="wrap stack">
       ${!confirmed ? `<div class="notice notice--info"><div>
         <div class="notice__t">Confirm the roster first</div>
-        <div class="notice__b">Anyone seated after the window opens would miss it. Finish Step ${stepNo('team')}, then open intake.</div>
+        <div class="notice__b">Anyone added after the window opens would miss it. Finish Step ${stepNo('team')}, then open intake.</div>
       </div></div>` : ''}
 
       <div class="tiles">
@@ -3408,12 +3490,12 @@ function vIntakeManage(){
 
       ${waiting.length ? `<div class="spec"><div class="spec__bar">Still waiting on</div>
         <div class="spec__body"><div class="waiting">${waiting.map(p => `<span class="chip">${esc(p.name||'A member')}</span>`).join('')}</div>
-        <p class="t-small">You can close the window without them. Their seat still scores candidates later.</p>
+        <p class="t-small">You can close the window without them. They can still score candidates later.</p>
         </div></div>` : ''}
 
       ${!mine?.submitted && you().member ? `<div class="notice notice--info"><div>
         <div class="notice__t">You have not answered yet</div>
-        <div class="notice__b">Your seat is counted in the tally too. <button class="btn btn--ghost btn--sm" data-go="intake-mine">Answer now</button></div>
+        <div class="notice__b">Your own answers are counted in the tally too. <button class="btn btn--ghost btn--sm" data-go="intake-mine">Answer now</button></div>
       </div></div>` : ''}
 
       ${!closed ? `<div class="notice notice--info"><div>
@@ -5282,7 +5364,7 @@ function vTeamAccess(){
 
   return shell(`
     ${head('Workspace', 'Team & access',
-      'Who is in ' + esc(orgName()) + ', and what they may do here. Membership opens the workspace; a search manager still seats people on individual searches.')}
+      'Who is in ' + esc(orgName()) + ', and what they may do here. Membership opens the workspace; a search manager still adds people to individual searches.')}
     <div class="band"><div class="wrap stack">
       ${state.teamError ? `<div class="notice notice--wait" role="alert"><div>
         <div class="notice__t">This list could not be loaded</div>
@@ -5299,7 +5381,7 @@ function vTeamAccess(){
           <thead><tr><th scope="col">Person</th><th scope="col">Role in this workspace</th><th scope="col">Searches</th><th scope="col">Remove</th></tr></thead>
           <tbody>${rows}</tbody></table></div>`
         : emptyState('Nobody else is here yet','Invite a colleague from the Invitations tab. They join this workspace with the role you give them.')}
-        <p class="t-small">A role change takes effect on that person\u2019s next request. Removing somebody ends their access to every search in this workspace and releases their seats; their scores, notes, and history stay on the record under their name. Somebody who manages a search hands it over first.</p>`)}
+        <p class="t-small">A role change takes effect on that person\u2019s next request. Removing somebody ends their access to every search in this workspace and releases their places on searches; their scores, notes, and history stay on the record under their name. Somebody who manages a search hands it over first.</p>`)}
       ${panel('invitations', `
         <form id="inviteform" class="stack stack--tight">
           <h2 class="t-section">Invite someone to ${esc(orgName())}</h2>
@@ -5309,14 +5391,14 @@ function vTeamAccess(){
             <label class="stack stack--tight" for="invite-role"><span>Role in this workspace</span>
               <select class="input" id="invite-role" name="role" required>${roleChoices(draft.role || 'org:committee')}</select></label>
           </div>
-          <p class="t-small">Send invitation emails this address through Clerk. They join with the role you choose here and cannot pick a different one. A committee member reads and scores only the searches they are seated on.</p>
+          <p class="t-small">Send invitation emails this address through Clerk. They join with the role you choose here and cannot pick a different one. A committee member reads and scores only the searches they are on.</p>
           <div class="row"><button class="btn btn--primary" type="submit" ${state.orgBusy?'disabled':''}>${state.orgBusy?'Sending…':'Send invitation'}</button></div>
         </form>
         ${invites ? `<div class="tablewrap"><table class="candtable">
           <thead><tr><th scope="col">Email</th><th scope="col">Invited as</th><th scope="col">Status</th><th scope="col">Revoke</th></tr></thead>
           <tbody>${invites}</tbody></table></div>`
         : emptyState('No invitations are waiting','An invitation appears here until the person accepts it or you revoke it.')}
-        <p class="t-small">A pending invitation is not membership. Revoking one does not remove anybody who has already accepted, and it does not release a search seat held for that address.</p>`)}
+        <p class="t-small">A pending invitation is not membership. Revoking one does not remove anybody who has already accepted, and it does not release a place held for that address on a search.</p>`)}
     </div></div>`);
 }
 
@@ -5705,7 +5787,7 @@ document.addEventListener('click', async e => {
     const radio = hit.closest('.pkgmx')?.querySelector(`thead th:nth-child(${hit.cellIndex + 1}) input[name="package"]`);
     if (radio) radio.checked = true;
   }
-  const t = e.target.closest('[data-go],[data-open],[data-act],[data-add],[data-del],[data-w],button[data-theme],[data-cand],[data-score],[data-pick],[data-ipick],[data-iadd],[data-idel],[data-iw],[data-phase],[data-panel],[data-mode],[data-artadd],[data-artdel],[data-tab],[data-col]');
+  const t = e.target.closest('[data-go],[data-open],[data-act],[data-add],[data-del],[data-w],button[data-theme],[data-cand],[data-score],[data-pick],[data-ipick],[data-iadd],[data-idel],[data-iw],[data-phase],[data-panel],[data-personadd],[data-persondel],[data-mode],[data-artadd],[data-artdel],[data-tab],[data-col]');
   if (!t) return;
 
   if (t.dataset.tab){
@@ -5844,6 +5926,21 @@ document.addEventListener('click', async e => {
       return;
     }
     state.search.criteria.push({ id: nextCritId(kind), kind, label:'', weight:3, note:'' });
+    render(); return;
+  }
+  if (t.dataset.personadd){
+    collectPeople();
+    peopleDraft().push(blankPerson());
+    render();
+    // Land the caret in the row just created rather than making them find it.
+    const rows = $('#newpeople [data-row]');
+    rows[rows.length - 1]?.querySelector('[data-f="name"]')?.focus();
+    return;
+  }
+  if (t.dataset.persondel){
+    collectPeople();
+    peopleDraft().splice(Number(t.dataset.persondel), 1);
+    if (!state.newPeople.length) state.newPeople = [blankPerson()];
     render(); return;
   }
   if (t.dataset.del){
@@ -5986,7 +6083,7 @@ document.addEventListener('click', async e => {
           ? ({
               workspace: 'You are still not in a workspace. An administrator has to invite ' + state.user.email + '.',
               'role-pending': 'Your role here still does not open search records. An administrator sets it in Team & access.',
-              'assignment-pending': 'No search has been assigned to you yet. Your search consultant seats you on one.',
+              'assignment-pending': 'No search has been assigned to you yet. Your search consultant adds you to one.',
               'membership-lost': 'Your access to that workspace has not been restored.'
             }[state.onboarding.stage] || 'Nothing has changed yet.')
           : null;
@@ -6054,7 +6151,7 @@ document.addEventListener('click', async e => {
   if (act==='remove-member') {
     const seats = Number(t.dataset.seats) || 0;
     const warning = 'Remove ' + t.dataset.name + ' from ' + orgName() + '?\n\n'
-      + (seats ? 'They lose their ' + seats + ' search seat' + (seats===1?'':'s') + ' here. ' : '')
+      + (seats ? 'They lose their ' + seats + ' search assignment' + (seats===1?'':'s') + ' here. ' : '')
       + 'Their scores, notes, and history stay on the record under their name.';
     if (!confirm(warning)) return;
     state.orgBusy = true; state.orgError = null; state.orgNotice = null; render();
@@ -6069,7 +6166,7 @@ document.addEventListener('click', async e => {
   }
 
   if (act==='revoke-invite') {
-    if (!confirm('Revoke the invitation to ' + t.dataset.email + '?\n\nThey will not be able to join with it. Any search seat held for that address stays held.')) return;
+    if (!confirm('Revoke the invitation to ' + t.dataset.email + '?\n\nThey will not be able to join with it. Any place held for that address on a search stays held.')) return;
     state.orgBusy = true; state.orgError = null; state.orgNotice = null; render();
     try {
       await api('/api/organization/invitations/' + encodeURIComponent(t.dataset.invite), { method:'DELETE' });
@@ -6788,17 +6885,39 @@ document.addEventListener('submit', async e => {
   if (e.target.id==='newsearch'){
     await createSearch();
   }
-  if (e.target.id==='newmember'){
-    const body = Object.fromEntries(new FormData(e.target).entries());
+  if (e.target.id==='newpeople'){
+    collectPeople();
+    const rows = peopleDraft();
+    // A row nobody typed in is not an omission, it is an empty row.
+    const filled = rows.filter(r => r.name.trim() || r.email.trim());
+    if (!filled.length) { toast('Enter a name and an email first.'); return; }
+    if (filled.some(r => !r.name.trim() || !r.email.trim())) {
+      toast('Everyone needs both a name and an email.');
+      return;
+    }
     await withBusy(async () => {
-      const out = await api('/api/searches/'+state.search.id+'/members', { method:'POST', body });
-      state.search = out.search;
-      e.target.reset();
-      // Never "is seated" for somebody who is not. The server says which of the
-      // three things happened and the toast repeats it rather than summarising
-      // all three as success.
-      toast(out.seated ? body.name + ' is seated.' : (out.note || 'Their seat is held.'));
-    }, waitSave('Seating '+(body.name||'them')));
+      const done = [];
+      const failed = [];
+      for (const person of filled) {
+        try {
+          const out = await api('/api/searches/'+state.search.id+'/members', {
+            method:'POST',
+            body:{ name:person.name.trim(), email:person.email.trim(), title:person.title.trim(), seat:person.seat }
+          });
+          // Each reply carries the next revision, and the request after this
+          // one has to send it or the server rejects it as a stale write.
+          state.search = out.search;
+          done.push({ ...person, seated:out.seated, invitationSent:out.invitationSent, note:out.note });
+        } catch (error) {
+          failed.push({ ...person, error: error.message });
+        }
+      }
+      // Only what failed stays in the form. Retrying cannot add anybody twice,
+      // and the reason sits against the row it belongs to.
+      state.newPeople = failed.length ? failed : [blankPerson()];
+      state.open.addpeople = failed.length > 0;
+      toast(addPeopleSummary(done, failed));
+    }, waitSave(filled.length === 1 ? 'Adding '+(filled[0].name.trim()||'them') : 'Adding '+filled.length+' people'));
   }
   if (e.target.id==='newcand'){
     const body = Object.fromEntries(new FormData(e.target).entries());
@@ -6845,7 +6964,7 @@ async function createSearch(){
     // A search now opens on the roster, not the profile. Seating the committee
     // is what makes the profile something other than one person's guess.
     go('team');
-    toast('Search '+state.search.no+' is open. Seat the committee first.');
+    toast('Search '+state.search.no+' is open. Add the committee first.');
   } finally {
     creating = false;
   }

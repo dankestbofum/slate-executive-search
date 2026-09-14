@@ -11,14 +11,14 @@
 // puts the committee on the file first and collects each member's own answer
 // before anybody drafts a profile.
 const PHASES = [
-  { id:0, key:'convene', t:'Seat the committee and hear them', lede:'Who is on this search, who runs it, and what each member is actually looking for. The profile is built from their answers, not from one person recalling the workshop.' },
+  { id:0, key:'convene', t:'Assemble the committee and hear them', lede:'Who is on this search, who runs it, and what each member is actually looking for. The profile is built from their answers, not from one person recalling the workshop.' },
   { id:1, key:'recruit', t:'Prepare and post', lede:'Profile, community, surveys, and the ad plan. Then the brochure and ads you actually post.' },
   { id:2, key:'people', t:'Once there are candidates', lede:'Screening is where applicants enter the file. Everything after that waits until someone is on it.' }
 ];
 
 // The three service packages the firm sells. A search carries one, chosen when
 // the file is opened, and it decides how much of the process runs. The
-// committee is never the thing that scales: every package seats the people who
+// committee is never the thing that scales: every package adds the people who
 // will hire and builds the profile from their answers. What a cheaper package
 // leaves out is the later work (community research, brochure, assessment
 // center, contract, evaluation), not the room.
@@ -91,7 +91,7 @@ const PACKAGES = {
     view: {
       layout: 'spec',
       kicker: 'Retained executive search',
-      lede: 'The full process. Seat the committee, build the profile from their answers, research and post, recruit, screen, interview, check references, and hand over a contract and a first-year evaluation.',
+      lede: 'The full process. Assemble the committee, build the profile from their answers, research and post, recruit, screen, interview, check references, and hand over a contract and a first-year evaluation.',
       panels: [],
       steps: 'phases'
     }
@@ -136,7 +136,7 @@ const COMPARE = [
 // Nothing is drafted for these; a consultant logs what was done and marks the
 // step complete. Slate is the record, not the worker.
 const STEPS = [
-  { n:1,  key:'team',       t:'Seat the search committee and name the account manager', opt:false, phase:0, needs:[], pkg:'basic' },
+  { n:1,  key:'team',       t:'Add the search committee and name the account manager', opt:false, phase:0, needs:[], pkg:'basic' },
   { n:2,  key:'intake',     t:'Collect what each member is looking for', opt:false, phase:0, needs:['team'], pkg:'basic' },
   { n:3,  key:'profile',    t:'Adopt the candidate profile', opt:false, phase:1, needs:['intake'], pkg:'basic' },
   { n:4,  key:'community',  t:'Develop community and form-of-government profile', opt:false, phase:1, needs:['profile'], pkg:'enhanced' },

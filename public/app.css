@@ -358,6 +358,25 @@ button.strip__s:hover{background:var(--sunken)}
 }
 .intake-row:last-child{border-bottom:0}
 
+/* One person being added. The rows stack rather than sitting in a table,
+   because each is a small form and a table row cannot hold a hint or the
+   reason the server refused this particular address. */
+.person-row{padding:var(--s-4) 0; border-bottom:1px solid var(--line)}
+.person-row:first-child{padding-top:0}
+.person-row:last-of-type{border-bottom:0}
+.person-row__foot{
+  display:flex; gap:var(--s-3); align-items:center; justify-content:space-between;
+  margin-top:var(--s-3);
+}
+.person-row__err{font-size:13px; color:var(--stop)}
+
+/* The page action bar is sticky at the bottom of the viewport, so without
+   clearance it comes to rest directly over this form's own submit — putting
+   "Roster is set" exactly where "Add these people" appears to be. The panel
+   reserves the bar's height so its primary action is never the thing
+   underneath. */
+.addpeople{padding-bottom:76px}
+
 /* Suggestions lifted from the committee's own answers, marked so nobody
    mistakes them for the stock list underneath. */
 .pick--room button{border-color:var(--accent); background:var(--accent-tint); color:var(--ink)}

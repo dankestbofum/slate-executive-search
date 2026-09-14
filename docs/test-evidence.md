@@ -3,7 +3,7 @@
 What has actually been verified, by what, and what has not. Written so that a
 green build is not mistaken for a broader claim than it supports.
 
-Last updated: 2026-09-12.
+Last updated: 2026-09-13.
 
 ---
 
@@ -11,9 +11,9 @@ Last updated: 2026-09-12.
 
 | Suite | Command | Count | Runs in CI |
 |---|---|---|---|
-| Syntax | `npm run check` | 56 files parsed | yes |
-| Isolated server suite | `npm test` | **482 checks** | yes |
-| Browser, accessibility, policy | `npm run test:browser` | **162 checks** (54 each: Chromium desktop, WebKit desktop, mobile Chromium emulation) | yes |
+| Syntax | `npm run check` | 65 files parsed | yes |
+| Isolated server suite | `npm test` | **518 checks** | yes |
+| Browser, accessibility, policy | `npm run test:browser` | **213 checks** (71 each: Chromium desktop, WebKit desktop, mobile Chromium emulation) | yes |
 | Container build and boot | CI only | 12 steps | yes |
 | Load measurement | `npm run test:load` | 1 run, ~30s | no — a measurement, not a pass |
 | Print samples | `npm run print:samples` | 7 PDFs + PNGs | no — output for a person to review |
@@ -26,18 +26,21 @@ The server suite runs against temporary data directories with an empty
 
 | File | Checks | Covers |
 |---|---|---|
-| `bughunt.js` | 245 | Baseline API behaviour |
+| `bughunt.js` | 249 | Baseline API behaviour |
 | `organizations.js` | 20 | Workspace isolation: reads, writes, listings, archives, exports, media, administration, and forged organization claims |
+| `auth.js` | 2 | Account resolution, disabled accounts, new accounts with no authority, migration to organization ownership |
+| `clerk-auth.js` | 2 | Real Clerk JWT verification: signatures, expiry, origin, pending tasks, missing keys (DEP-02) |
 | `jurisdictions.js` | 30 | County setup, discovery, fact verification (DEP-07) |
 | `security.js` | 28 | Headers, CSRF, bounds, SSRF, log redaction (DEP-03) |
 | `roles.js` | 26 | Permission matrix within one workspace, identity, withdrawal of access (DEP-02) |
 | `candidates.js` | 20 | Receipts, drafts, documents, communications (DEP-08) |
 | `disposition.js` | 19 | Outcomes, closeout, reopening (DEP-09) |
-| `storage.js` | 17 | Media commit, schema, single writer (DEP-04) |
+| `storage.js` | 22 | Media commit, schema, single writer (DEP-04) |
 | `export.js` | 17 | Records export and attribution (DEP-10) |
 | `monitoring.js` | 14 | Health, metrics, alerts (DEP-06) |
 | `recovery.js` | 11 | Snapshots, off-volume copies, restore drill (DEP-05) |
-| `integrity.js` | 37 | Regression checks for previously fixed defects |
+| `aireliability.js` | 18 | Budgets, spend accounting, outage behaviour, prompt-injection boundary (DEP-11) |
+| `integrity.js` | 40 | Regression checks for previously fixed defects |
 
 ## What the browser coverage found
 

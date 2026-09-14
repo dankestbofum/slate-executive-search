@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const crypto = require('crypto');
 const integrity = require('./integrity');
 const backup = require('./backup');
@@ -141,8 +142,30 @@ function requireWritableDataDir(){
  * discards everything the first committed since it loaded. Clustering and
  * multiple replicas are unsupported, and this makes that enforceable rather
  * than a line in a document.
+ *
+ * A process ID is not an identity. The operating system reuses them, so the
+ * number a crashed writer left behind can belong to an unrelated program by
+ * the time the replacement boots — asking whether *something* holds that
+ * number then wedges the store shut for good. Across containers on a shared
+ * volume the number is worse than useless: it describes a process this one
+ * cannot see at all, and every absent PID reads as free.
+ *
+ * So the holder proves it is alive by touching the lock on a timer, and names
+ * itself with a token no recycled PID can forge. The PID is still recorded,
+ * and still used, but only as a fast path on the machine that wrote it: a
+ * writer that crashed on this host is reclaimed at once instead of waiting
+ * out the heartbeat.
  * ------------------------------------------------------------------ */
 const LOCK_FILE = path.join(DATA_DIR, '.writer.lock');
+const LOCK_HEARTBEAT_MS = 30000;
+const LOCK_STALE_MS = 90000; // three missed beats, so a slow moment is not a takeover
+const HOST = os.hostname();
+
+// Unique to this run of this process, which is the thing a PID fails to be.
+const instanceToken = crypto.randomUUID();
+const PROCESS_STARTED_AT = Date.now() - Math.round(process.uptime() * 1000);
+let claimedAt = null;
+let heartbeat = null;
 
 function holderIsAlive(pid){
   if (!Number.isInteger(pid) || pid <= 0) return false;
@@ -150,27 +173,104 @@ function holderIsAlive(pid){
   catch (error) { return error.code === 'EPERM'; } // exists, owned by someone else
 }
 
+function readWriterLock(){
+  try { return JSON.parse(fs.readFileSync(LOCK_FILE, 'utf8')); }
+  catch (error) {
+    if (error.code === 'ENOENT' || error instanceof SyntaxError) return null;
+    throw error;
+  }
+}
+
+// Whether a record is this process's own. The token settles it. Failing that,
+// a record naming our own PID on our own host is ours only if it was written
+// after we started: a module reloaded inside one process is not a second
+// writer, but a container restart hands the replacement PID 1 and the same
+// hostname, and that predecessor is dead rather than us.
+function heldByThisProcess(held){
+  if (held.token === instanceToken) return true;
+  if (held.pid !== process.pid || held.host !== HOST) return false;
+  const written = Date.parse(held.renewedAt ?? held.at ?? '');
+  return Number.isFinite(written) && written >= PROCESS_STARTED_AT;
+}
+
+// Age of the last heartbeat. A record from a release that did not keep one is
+// infinitely old on purpose: it carries no evidence that anyone is still there.
+function heartbeatAge(held){
+  const stamp = Date.parse(held?.renewedAt ?? '');
+  return Number.isFinite(stamp) ? Date.now() - stamp : Infinity;
+}
+
+function writeWriterLock(){
+  const record = {
+    token: instanceToken,
+    pid: process.pid,
+    host: HOST,
+    release: process.env.SLATE_RELEASE || 'dev',
+    at: claimedAt,
+    renewedAt: now()
+  };
+  // Same discipline as the store itself: a reader must never catch this file
+  // half-written, because a parse failure here reads as "no lock at all".
+  const tmp = LOCK_FILE + '.' + process.pid + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(record));
+  fs.renameSync(tmp, LOCK_FILE);
+}
+
 function claimWriterLock(){
-  try {
-    const held = JSON.parse(fs.readFileSync(LOCK_FILE, 'utf8'));
-    if (held.pid !== process.pid && holderIsAlive(held.pid)) {
-      console.error('Slate: another process (pid ' + held.pid + ', started ' + held.at + ') is already writing '
-        + DATA_DIR + '.');
+  const held = readWriterLock();
+  if (held && !heldByThisProcess(held)) {
+    const age = heartbeatAge(held);
+    // Beating recently. The one exception is a writer that beat recently and
+    // then died on this machine: its PID is gone for certain, so a crash is
+    // recovered now rather than after the staleness window.
+    // On this host the holder is provably gone if its number is now ours — a
+    // PID cannot name two live processes — or if nothing is running under it.
+    const crashedHere = held.host === HOST && (held.pid === process.pid || !holderIsAlive(held.pid));
+    if (age <= LOCK_STALE_MS && !crashedHere) {
+      console.error('Slate: another process (pid ' + held.pid + ' on ' + (held.host || 'an unknown host')
+        + ', last seen ' + Math.round(age / 1000) + 's ago) is already writing ' + DATA_DIR + '.');
       console.error('Slate: the JSON store supports one writer. Do not run multiple replicas or PM2 cluster mode.');
       process.exit(1);
     }
-    // Holder is gone: an unclean shutdown, not a running peer.
-    console.warn('Slate: taking over a stale write lock from pid ' + held.pid + '.');
-  } catch (error) {
-    if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
+    const why = crashedHere ? 'the process is gone'
+      : held.renewedAt ? 'last seen ' + Math.round(age / 1000) + 's ago'
+      : 'it predates heartbeats, so nothing says its holder is still running';
+    console.warn('Slate: taking over a stale write lock from pid ' + held.pid + ' (' + why + ').');
   }
-  fs.writeFileSync(LOCK_FILE, JSON.stringify({ pid: process.pid, at: now(), release: process.env.SLATE_RELEASE || 'dev' }));
+  claimedAt = now();
+  writeWriterLock();
+  startHeartbeat();
+}
+
+// The heartbeat is what makes the lock trustworthy, so it also watches for the
+// one thing the claim check cannot rule out: another process deciding we were
+// stale and taking the store while we are still holding records in memory.
+// Two writers against one JSON file is silent data loss, and the loser of that
+// race cannot save its way out of it. Leaving is the only safe move.
+function startHeartbeat(){
+  if (heartbeat) return;
+  heartbeat = setInterval(() => {
+    let held = null;
+    try { held = readWriterLock(); }
+    catch { return; } // a transient read failure is not evidence of anything
+    if (held && !heldByThisProcess(held)) {
+      console.error('Slate: the write lock on ' + DATA_DIR + ' was taken by pid ' + held.pid
+        + ' on ' + (held.host || 'an unknown host') + '.');
+      console.error('Slate: exiting rather than letting two processes overwrite each other.');
+      return process.exit(1);
+    }
+    try { writeWriterLock(); }
+    catch (error) { console.error('Slate: could not refresh the write lock: ' + error.message); }
+  }, LOCK_HEARTBEAT_MS);
+  // Never a reason for the process to stay up.
+  heartbeat.unref();
 }
 
 function releaseWriterLock(){
+  if (heartbeat) { clearInterval(heartbeat); heartbeat = null; }
   try {
-    const held = JSON.parse(fs.readFileSync(LOCK_FILE, 'utf8'));
-    if (held.pid === process.pid) fs.unlinkSync(LOCK_FILE);
+    const held = readWriterLock();
+    if (held && heldByThisProcess(held)) fs.unlinkSync(LOCK_FILE);
   } catch { /* never block shutdown on the lock file */ }
 }
 

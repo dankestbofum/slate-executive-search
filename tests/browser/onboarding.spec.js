@@ -84,10 +84,10 @@ test('an invitation to a search holds a seat, and joining the workspace opens ex
   expect(held.seated).toBe(false);
   expect(held.invitationSent).toBe(true);
 
-  // The manager's own view says the seat is held, not that somebody is on it.
+  // The manager's own view says the place is held, not that somebody is on it.
   await installClerk(page, { organization:'shared' });
   await page.goto(`/#/o/${orgId}/s/${search.id}/team`);
-  await expect(page.getByText('Seats held')).toBeVisible();
+  await expect(page.getByText('Waiting to join')).toBeVisible();
   await expect(page.getByText('Invitation sent')).toBeVisible();
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 

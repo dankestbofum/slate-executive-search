@@ -41,6 +41,9 @@ const HOST = process.env.HOST || '0.0.0.0';
 // confirm which commit a running container was built from, which is what makes
 // a rollback decision checkable rather than assumed.
 const RELEASE = String(process.env.SLATE_RELEASE || '').trim() || 'dev';
+// The supported Node major, read from the one place it is already declared
+// rather than repeated here where it could drift from package.json.
+const ENGINE_FLOOR = Number(String(require('../package.json').engines?.node || '').match(/\d+/)?.[0] || 0);
 const NON_ARTIFACT_STEPS = new Set(['profile', 'screen', 'send2', 'finalists', ...db.STAFF_STEPS]);
 const ARTIFACTS = new Set(db.STEPS.map(s => s.key).filter(k => !NON_ARTIFACT_STEPS.has(k)));
 
@@ -833,18 +836,18 @@ app.post('/api/searches/:id/members', ...requireWorkspace, requireSearch, requir
   if (!name) return res.status(400).json({ error:'Name is required.' });
   if (!EMAIL_RE.test(email)) return res.status(400).json({ error:'Enter a working email. It is their sign-in.' });
   if (seat === 'manager') {
-    return res.status(400).json({ error:'Seat them first, then hand over the account.' });
+    return res.status(400).json({ error:'Add them first, then hand over the account.' });
   }
 
   const orgId = req.access.orgId;
   const existing = db.findUserByEmail(email);
   if (existing && String(existing.name || '').trim() !== name) {
     return res.status(409).json({
-      error: email + ' already signs in as ' + existing.name + '. Seat them under that name, or use a different email.'
+      error: email + ' already signs in as ' + existing.name + '. Add them under that name, or use a different email.'
     });
   }
   if (existing && db.memberOf(req.search, existing.id)) {
-    return res.status(409).json({ error: name + ' is already seated on this search.' });
+    return res.status(409).json({ error: name + ' is already on this search.' });
   }
 
   // Membership in the owning organization is what separates a seat from a held
@@ -861,7 +864,7 @@ app.post('/api/searches/:id/members', ...requireWorkspace, requireSearch, requir
 
   if (member && organizations.isSupportedRole(member.role)) {
     if (seat === 'consultant' && !organizations.capabilitiesFor(member.role).staff) {
-      return res.status(400).json({ error: name + ' is a committee member in this workspace. Change their role first, or seat them on the committee.' });
+      return res.status(400).json({ error: name + ' is a committee member in this workspace. Change their role first, or add them to the committee.' });
     }
     // A verified member of this workspace who has no Slate account yet gets
     // one now. Their Clerk identity binds to it on their first request, which
@@ -877,7 +880,7 @@ app.post('/api/searches/:id/members', ...requireWorkspace, requireSearch, requir
   }
 
   if (seat !== 'committee') {
-    return res.status(400).json({ error: 'A consultant seat goes to somebody already in this workspace. Invite them from Team & access first.' });
+    return res.status(400).json({ error: 'The consultant role goes to somebody already in this workspace. Invite them from Team & access first.' });
   }
 
   let invitation = null;
@@ -901,8 +904,8 @@ app.post('/api/searches/:id/members', ...requireWorkspace, requireSearch, requir
     invitedBy: req.user.id, invitationId: invitation?.id || null
   });
   db.touch(req.search, req.user, invitation
-    ? 'invited ' + name + ' to the workspace and held a committee seat'
-    : 'held a committee seat for ' + name + ', pending a workspace invitation');
+    ? 'invited ' + name + ' to the workspace and held a committee place'
+    : 'held a committee place for ' + name + ', pending a workspace invitation');
   db.persist();
   res.json({
     search: painted(req, req.search), ...rosterOnly(req.search), email,
@@ -912,17 +915,17 @@ app.post('/api/searches/:id/members', ...requireWorkspace, requireSearch, requir
     invitationSent: Boolean(invitation),
     invitationNeeded: !invitation,
     note: invitation
-      ? 'An invitation was sent to ' + email + '. Their seat opens when they accept it.'
-      : (inviteError || 'The seat is held for ' + email + '. An organization administrator must invite them before it opens.')
+      ? 'An invitation was sent to ' + email + '. They join the search when they accept it.'
+      : (inviteError || 'A place is held for ' + email + '. An organization administrator must invite them before they can join.')
   });
 });
 
 /** Release a held seat that has not been taken up. */
 app.delete('/api/searches/:id/members/pending/:pid', ...requireWorkspace, requireSearch, requireManager, (req, res) => {
   const held = organizations.pendingFor(db.db, req.access.orgId, req.search.id).find(p => p.id === req.params.pid);
-  if (!held) return res.status(404).json({ error:'That held seat is no longer waiting.' });
+  if (!held) return res.status(404).json({ error:'That pending person is no longer waiting.' });
   organizations.removePendingAssignment(db.db, held.id);
-  db.touch(req.search, req.user, 'released the held seat for ' + (held.name || held.email));
+  db.touch(req.search, req.user, 'released the held place for ' + (held.name || held.email));
   db.persist();
   // Deliberately does not revoke the organization invitation: being invited to
   // the firm and being seated on one search are different decisions, and this
@@ -975,7 +978,7 @@ app.patch('/api/searches/:id/members/:uid', ...requireWorkspace, requireSearch, 
       return res.status(400).json({ error:'Hand the account to someone else first. A search always has a manager.' });
     }
     if (seat === 'consultant' && !db.isStaffOf(user.id, req.access.orgId)) {
-      return res.status(400).json({ error:'Only this workspace\u2019s consultants and administrators sit in a consultant seat.' });
+      return res.status(400).json({ error:'Only this workspace\u2019s consultants and administrators can be added as a consultant.' });
     }
     m.seat = seat;
     db.touch(req.search, req.user, 'moved ' + user.name + ' to ' + committee.SEAT_LABEL[seat].toLowerCase());
@@ -1026,7 +1029,7 @@ app.post('/api/searches/:id/intake/status', ...requireWorkspace, requireSearch, 
     return res.status(400).json({ error:'Intake is draft, open, or closed.' });
   }
   if (want === 'open' && !req.search.team?.confirmedAt) {
-    return res.status(400).json({ error:'Confirm the roster first. People seated later would miss the window.' });
+    return res.status(400).json({ error:'Confirm the roster first. People added later would miss the window.' });
   }
   const intake = req.search.intake;
   intake.status = want;
@@ -1043,9 +1046,9 @@ app.post('/api/searches/:id/intake/status', ...requireWorkspace, requireSearch, 
 
 app.put('/api/searches/:id/intake', ...requireWorkspace, requireSearch, (req, res) => {
   const seat = db.memberOf(req.search, req.user.id);
-  if (!seat) return res.status(403).json({ error:'You are not seated on this search.' });
+  if (!seat) return res.status(403).json({ error:'You are not on this search.' });
   if (!committee.INTAKE_SEATS.has(committee.seatOf(seat.seat))) {
-    return res.status(403).json({ error:'Your seat does not answer intake.' });
+    return res.status(403).json({ error:'Your role on this search does not answer intake.' });
   }
   const intake = req.search.intake;
   if (intake.status !== 'open') {
@@ -2197,6 +2200,15 @@ app.get('/apply/:token', candidateLimit, (_req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
 });
 
+// Unknown API route. Express would answer an HTML error page, which is the
+// one response shape a client that only ever parses JSON cannot read: a
+// typo in a path would surface to the user as a parse failure rather than
+// as the 404 it is. Registered after every route, so it only sees paths
+// nothing claimed.
+app.use('/api', (req, res) => {
+  res.status(404).json({ error: 'No such endpoint.', ref: req.ref });
+});
+
 // Terminal handler. Registered last so it sees failures from every route,
 // including malformed JSON and oversized bodies rejected by the parsers.
 app.use(http.errors());
@@ -2204,6 +2216,14 @@ app.use(http.errors());
 const server = app.listen(PORT, HOST, () => {
   console.log('Slate listening on http://'+HOST+':'+PORT);
   console.log('Release:', RELEASE, '| Node', process.versions.node, '| data', db.DATA_DIR);
+  // The Dockerfile and CI pin the supported major. A local runtime below it
+  // still starts, because refusing to boot over it would help nobody, but it
+  // is said out loud: a difference between what you are testing on and what
+  // production runs is worth knowing before it explains a bug.
+  if (ENGINE_FLOOR && Number(process.versions.node.split('.')[0]) < ENGINE_FLOOR) {
+    console.warn('Slate: Node ' + process.versions.node + ' is below the supported floor (>=' + ENGINE_FLOOR
+      + '). Production runs Node ' + ENGINE_FLOOR + '; behaviour here may not match it.');
+  }
   console.log('Default model:', process.env.CLAUDE_MODEL || 'claude-sonnet-5');
   console.log('API key:', String(process.env.ANTHROPIC_API_KEY || '').trim() ? 'present' : 'MISSING — set ANTHROPIC_API_KEY');
   try {

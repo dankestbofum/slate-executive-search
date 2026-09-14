@@ -171,6 +171,19 @@ check('a store from a newer release is refused, not downgraded', () => {
 
 /* ---------------- Single writer ---------------- */
 
+function lock(dir, record) {
+  fs.writeFileSync(path.join(dir, '.writer.lock'), JSON.stringify(record));
+}
+
+// A bare boot of the store against a directory, which is all the lock needs.
+function boot(dir) {
+  return spawnSync(process.execPath, ['-e', "require('./server/db'); console.log('started')"], {
+    cwd: path.resolve(__dirname, '..'),
+    env: { ...process.env, NODE_ENV: 'test', DATA_DIR: dir },
+    encoding: 'utf8'
+  });
+}
+
 check('this process holds the write lock', () => {
   const held = JSON.parse(fs.readFileSync(db.LOCK_FILE, 'utf8'));
   assert.strictEqual(held.pid, process.pid, 'the lock names another process');
@@ -204,6 +217,84 @@ check('a stale lock from a dead process is taken over', () => {
   assert.strictEqual(child.status, 0, 'a stale lock blocked startup: ' + child.stderr.slice(0, 200));
   assert.match(child.stdout, /started/);
   assert.match(child.stderr + child.stdout, /stale write lock/, 'the takeover was not reported');
+});
+
+// A PID is not an identity: the operating system hands the number of a dead
+// writer to whatever starts next. The store was found wedged shut in exactly
+// this way, by a lock naming a PID that had become a browser.
+check('a recycled process id does not wedge the store shut', () => {
+  const dir = tmpdir('recycled');
+  // Alive, on this host, and emphatically not Slate: this very test runner.
+  lock(dir, { token: 'someone-elses-run', pid: process.pid, host: os.hostname(),
+    at: 'earlier', renewedAt: new Date(Date.now() - 10 * 60000).toISOString() });
+
+  const child = boot(dir);
+  assert.strictEqual(child.status, 0,
+    'a live but unrelated pid blocked startup: ' + child.stderr.slice(0, 200));
+  assert.match(child.stderr + child.stdout, /stale write lock/, 'the takeover was not reported');
+});
+
+// The heartbeat window must not become a restart delay. A writer that died on
+// this machine leaves a PID that is provably gone, which is faster evidence
+// than waiting for beats to run out.
+check('a writer that crashed on this host is reclaimed at once', () => {
+  const dir = tmpdir('crashed');
+  lock(dir, { token: 'crashed-run', pid: 2147483646, host: os.hostname(),
+    at: 'earlier', renewedAt: new Date().toISOString() });
+
+  const child = boot(dir);
+  assert.strictEqual(child.status, 0,
+    'a crashed writer held the store for the full staleness window: ' + child.stderr.slice(0, 200));
+});
+
+// The same reasoning inverted. Across containers on one volume a PID is not
+// answerable, so the absent process must not read as an absent writer.
+check('a live writer in another container keeps the volume', () => {
+  const dir = tmpdir('shared');
+  lock(dir, { token: 'other-container', pid: 2147483646, host: 'another-container',
+    at: 'earlier', renewedAt: new Date().toISOString() });
+
+  const child = boot(dir);
+  assert.notStrictEqual(child.status, 0, 'a second writer was allowed onto a shared volume');
+  assert.match(child.stderr, /one writer|already writing/,
+    'the refusal did not explain the single-writer constraint: ' + child.stderr.slice(0, 200));
+});
+
+// A container hands every replacement PID 1 and the same hostname, so "names
+// my own pid on my own host" cannot mean "is me". What separates them is when
+// the record was last touched: a dead predecessor stopped beating before this
+// process existed. The child writes its own lock here because only it knows
+// the PID it is about to run under.
+check('a container restart inherits its own pid without adopting a dead lock', () => {
+  const dir = tmpdir('restart');
+  const script = `
+    const fs=require('fs'), path=require('path'), os=require('os');
+    fs.writeFileSync(path.join(process.env.DATA_DIR, '.writer.lock'), JSON.stringify({
+      token:'dead-predecessor', pid:process.pid, host:os.hostname(),
+      at:'earlier', renewedAt:new Date(Date.now() - 5000).toISOString()
+    }));
+    require('./server/db');
+    console.log('started');
+  `;
+  const child = spawnSync(process.execPath, ['-e', script], {
+    cwd: path.resolve(__dirname, '..'),
+    env: { ...process.env, NODE_ENV: 'test', DATA_DIR: dir },
+    encoding: 'utf8'
+  });
+
+  assert.strictEqual(child.status, 0,
+    'a restart under the predecessor\u2019s pid was refused: ' + child.stderr.slice(0, 200));
+  assert.match(child.stderr + child.stdout, /stale write lock/,
+    'the dead predecessor\u2019s lock was adopted silently instead of reported');
+  const held = JSON.parse(fs.readFileSync(path.join(dir, '.writer.lock'), 'utf8'));
+  assert.notStrictEqual(held.token, 'dead-predecessor', 'the predecessor still owns the lock');
+});
+
+check('the lock records a heartbeat, not just a pid', () => {
+  const held = JSON.parse(fs.readFileSync(db.LOCK_FILE, 'utf8'));
+  assert.ok(held.token, 'the lock carries no instance token, so a reused pid is indistinguishable');
+  assert.ok(Date.now() - Date.parse(held.renewedAt) < 90000, 'the held lock is already stale');
+  assert.strictEqual(held.host, os.hostname());
 });
 
 /* ---------------- Corrupt input ---------------- */

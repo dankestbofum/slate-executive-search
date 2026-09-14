@@ -381,6 +381,15 @@ async function run(){
   } catch (err) { record('Unknown search is 404', false, err.message); }
 
   try {
+    // A client that only ever parses JSON must be able to read a mistyped path
+    // as the 404 it is, rather than choking on an HTML error page.
+    const res = await fetch(BASE + '/api/no-such-endpoint', { headers: abe.auth });
+    const type = res.headers.get('content-type') || '';
+    const body = type.includes('json') ? await res.json() : null;
+    record('Unknown endpoint is a JSON 404', res.status===404 && Boolean(body?.error), type);
+  } catch (err) { record('Unknown endpoint is a JSON 404', false, err.message); }
+
+  try {
     const empty = await req('/api/searches/bulk-delete', { method:'POST', auth: abe.auth, body:{ ids:[] } });
     record('Bulk delete requires at least one id', empty.status===400, empty.json.error);
     const a = await req('/api/searches', { method:'POST', auth: abe.auth, expect:200, body:{ client:'Bughunt Bulk A', position:'Clerk', package:'basic' } });
@@ -1221,7 +1230,7 @@ async function run(){
       && /screen:'Screening'/.test(appJs) && /send2:'Semifinalist questionnaire'/.test(appJs)
       && /finalists:'Finalists'/.test(appJs));
 
-  record('Search runs in three phases', /Seat the committee and hear them/.test(appJs) && /Prepare and post/.test(appJs) && /Once there are candidates/.test(appJs) && /needsCandidates/.test(fs.readFileSync(path.join(__dirname, '..', 'server', 'db.js'), 'utf8')));
+  record('Search runs in three phases', /Assemble the committee and hear them/.test(appJs) && /Prepare and post/.test(appJs) && /Once there are candidates/.test(appJs) && /needsCandidates/.test(fs.readFileSync(path.join(__dirname, '..', 'server', 'db.js'), 'utf8')));
 
   // The signed-in card became a one-row account chip in the rail footer. What
   // still has to hold is that a short rail does not squeeze it: the rail's own
@@ -1268,7 +1277,26 @@ async function run(){
     /data-act="delete-searches"/.test(appJs) && /data-act="pick-all"/.test(appJs) && /data-pick-search/.test(appJs)
       && /\/api\/searches\/bulk-delete/.test(appJs) && /app\.post\('\/api\/searches\/bulk-delete'/.test(fs.readFileSync(path.join(__dirname, '..', 'server', 'index.js'), 'utf8')));
 
-  record('New search opens on the search committee', /go\('team'\)/.test(appJs) && /Seat the committee first/.test(appJs));
+  // The roster is built in one sitting: the form takes as many people as the
+  // manager types, and each row is asked for separately so one bad address
+  // cannot lose the rest. It stays collapsed until they ask for it.
+  record('People are added several at a time, behind a disclosure',
+    /data-panel="addpeople"/.test(appJs)
+    && /data-personadd/.test(appJs) && /data-persondel/.test(appJs)
+    && /id="newpeople"/.test(appJs)
+    && /function collectPeople/.test(appJs) && /function addPeopleSummary/.test(appJs)
+    && /for \(const person of filled\)/.test(appJs)
+    // Each reply carries the revision the next request must send.
+    && /state\.search = out\.search;/.test(appJs));
+
+  record('A failed row keeps its reason and is not retried blind',
+    /state\.newPeople = failed\.length \? failed : \[blankPerson\(\)\]/.test(appJs)
+    && /person-row__err/.test(appJs));
+
+  record('The roster is not described as seating', !/Seat (the|every|this|them|somebody)/.test(appJs)
+    && !/Nobody seated/.test(appJs) && !/is seated\./.test(appJs));
+
+  record('New search opens on the search committee', /go\('team'\)/.test(appJs) && /Add the committee first/.test(appJs));
 
   // Opening a file no longer asks which package was bought. It opens at the
   // default level and the package is set on Search facts. A search started
