@@ -33,7 +33,7 @@ const out=path.join(__dirname,'evidence');
  const searches=await(await context.request.get('http://127.0.0.1:4190/api/searches')).json();const api='http://127.0.0.1:4190/api/searches/'+searches[0].id;
  const put=async(suffix,data,method='put')=>{const s=await(await context.request.get(api)).json();const r=await context.request[method](api+suffix,{headers:{'if-match':String(s.revision)},data});if(!r.ok())throw Error(suffix+' '+await r.text());return r.json();};
  await put('/profile',{criteria:['skill','trait','chall','opp'].flatMap((kind,k)=>['Financial stewardship','Collaborative leadership','Community trust'].map((label,i)=>({id:['S','T','C','O'][k]+(i+1),kind,label:label+' '+kind,weight:i+3,note:'Evidence of results in a local government setting.'})))});
- await put('/members',{name:'Dana Reyes',email:'dana-audit@example.gov',title:'Council member',seat:'committee'},'post');
+ await put('/members',{name:'Dana Reyes',email:'dana-audit@example.gov',title:'Council member',searchRole:'committee'},'post');
  await put('/team/confirm',{},'post');await put('/intake/status',{status:'open'},'post');
  await page.locator('[data-act="reload-search"]').click();await nav('profile');await snap('desktop-profile-populated');
  await page.setViewportSize({width:390,height:844});await snap('mobile-profile-populated');

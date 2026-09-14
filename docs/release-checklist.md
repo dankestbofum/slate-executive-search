@@ -51,6 +51,14 @@ breadth, print, and load testing. See `docs/handoff.md` §6.
       organization-selection session task, and Clerk's own components are
       unverified here. Rehearse with approved synthetic recipients before any
       real address is invited.
+
+      Partly done on the **development** instance, 14 Sep 2026: both custom
+      roles are registered there, and `clerkDirectory().invite()` was run
+      against real Clerk for each of them and refused for an unregistered one.
+      Recipients were `+clerk_test` addresses on the reserved `example.com`
+      domain and every invitation was revoked afterwards, so delivery and
+      acceptance remain unproven — and none of it is evidence about a hosted
+      instance.
 - [ ] **The production Clerk instance inspected.** Organizations enabled,
       organization selection required, and the custom roles `org:consultant`
       and `org:committee` registered. The development instance having them is

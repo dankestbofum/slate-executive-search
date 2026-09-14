@@ -69,7 +69,7 @@ test('starting fresh can be cancelled, archives managed searches, and keeps the 
   await page.goto('/');
   const start = page.getByRole('button', { name:'Start fresh', exact:true });
   await expect(start).toBeVisible();
-  const ids = (await (await page.request.get('/api/searches')).json()).filter(s => s.seat === 'manager').map(s => s.id);
+  const ids = (await (await page.request.get('/api/searches')).json()).filter(s => s.searchRole === 'manager').map(s => s.id);
   try {
     page.once('dialog', dialog => dialog.dismiss());
     await start.click();

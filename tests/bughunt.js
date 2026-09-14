@@ -334,12 +334,12 @@ async function run(){
       got = await req('/api/searches/'+sid+'/staff/references/log', { method:'POST', auth: abe.auth, expect:200, body:{ text:'Spoke with former mayor.', candidateId: cand.id } });
       record('Reference log accepts a consenting finalist', got.json.staff.references.log[0].candidateId===cand.id);
 
-      // A committee member seated on this file reads it without the staff log.
-      const seated = await req('/api/searches/'+sid+'/members', {
+      // A committee member on this file reads it without the staff log.
+      const added = await req('/api/searches/'+sid+'/members', {
         method:'POST', auth: abe.auth, expect:200,
-        body:{ name:'Staff Test Member', email:'staff-test-member@example.com', seat:'committee' }
+        body:{ name:'Staff Test Member', email:'staff-test-member@example.com', searchRole:'committee' }
       });
-      if (seated.json.email) {
+      if (added.json.email) {
         const member = await login('staff-test-member@example.com');
         const view = await req('/api/searches/'+sid, { auth: member.auth, expect:200 });
         record('Committee member does not see staff logs', view.json.staff && Object.keys(view.json.staff).length===0,
@@ -807,7 +807,7 @@ async function run(){
   // --- the shared team sign-in ---
   // One generic firm account so day-to-day work does not require remembering
   // which named consultant you are. It must be able to pick up a search it was
-  // never seated on, which is the case that used to dead-end.
+  // never on, which is the case that used to dead-end.
   try {
     const teamEmail = process.env.SLATE_EMAIL_TEAM || 'team@slate.local';
     const team = await login(teamEmail);
@@ -818,28 +818,28 @@ async function run(){
     record('The shared account sees the whole book', seen.json.some(s => s.id === search.id));
 
     const before = await req('/api/searches/'+search.id, { auth: team.auth, expect:200 });
-    record('An unseated consultant can read and edit but does not hold the account',
+    record('A consultant not on the roster can read and edit but does not hold the account',
       before.json.you.canEdit===true && before.json.you.canManage===false && before.json.you.member===false,
       JSON.stringify(before.json.you));
 
     const joined = await req('/api/searches/'+search.id+'/members/self', { method:'POST', auth: team.auth, expect:200, body:{} });
-    record('A consultant can put themselves on a search', joined.json.search.you.seat==='consultant');
+    record('A consultant can put themselves on a search', joined.json.search.you.searchRole==='consultant');
     await req('/api/searches/'+search.id+'/members/self', { method:'POST', auth: team.auth, expect:409, body:{} });
     record('Joining a search twice is refused', true);
 
     const took = await req('/api/searches/'+search.id+'/members/'+team.json.user.id, {
-      method:'PATCH', auth: team.auth, expect:200, body:{ seat:'manager' }
+      method:'PATCH', auth: team.auth, expect:200, body:{ searchRole:'manager' }
     });
     record('Any consultant can take an account rather than being stranded by it',
       took.json.search.accountManager.userId===team.json.user.id);
-    record('The outgoing manager keeps a consultant seat',
-      took.json.roster.find(m => m.userId===abe.json.user.id).seat==='consultant');
+    record('The outgoing manager keeps a consultant role',
+      took.json.roster.find(m => m.userId===abe.json.user.id).searchRole==='consultant');
     await req('/api/searches/'+search.id+'/team/confirm', { method:'POST', auth: team.auth, expect:200, body:{ confirmed:true } });
     record('Taking the account carries the powers that go with it', true);
 
     // Hand it back so later assertions see the search as they expect.
     await req('/api/searches/'+search.id+'/members/'+abe.json.user.id, {
-      method:'PATCH', auth: team.auth, expect:200, body:{ seat:'manager' }
+      method:'PATCH', auth: team.auth, expect:200, body:{ searchRole:'manager' }
     });
     await req('/api/searches/'+search.id+'/members/'+team.json.user.id, {
       method:'DELETE', auth: abe.auth, expect:200
@@ -856,38 +856,38 @@ async function run(){
       body:{ client:'City of Quorum', position:'City Manager', state:'Nevada' }
     });
     cm = { id: opened.json.id };
-    record('Opening a search seats the creator as account manager',
+    record('Opening a search puts the creator on as account manager',
       opened.json.accountManager && opened.json.accountManager.role==='consultant' && opened.json.roster.length===1);
 
-    const seated = [];
+    const added = [];
     for (const who of [
       { name:'Rosa Lin', email:'rosa@quorum.test', title:'Mayor' },
       { name:'Ben Ruiz', email:'ben@quorum.test', title:'Council member' },
       { name:'Tia Novak', email:'tia@quorum.test', title:'Council member' }
     ]) {
       const out = await req('/api/searches/'+cm.id+'/members', {
-        method:'POST', auth: abe.auth, expect:200, body:{ ...who, seat:'committee' }
+        method:'POST', auth: abe.auth, expect:200, body:{ ...who, searchRole:'committee' }
       });
-      seated.push({ ...who, returnedEmail: out.json.email, hasPin: Object.hasOwn(out.json, "pin") });
+      added.push({ ...who, returnedEmail: out.json.email, hasPin: Object.hasOwn(out.json, "pin") });
     }
-    record('Seating a new member returns their sign-in email without a PIN',
-      seated.length===3 && seated.every(x => x.returnedEmail === x.email && !x.hasPin));
+    record('Adding a new member returns their sign-in email without a PIN',
+      added.length===3 && added.every(x => x.returnedEmail === x.email && !x.hasPin));
 
     await req('/api/searches/'+cm.id+'/members', {
       method:'POST', auth: abe.auth, expect:400, body:{ name:'Bad Email', email:'not-an-email' }
     });
     record('A member needs a real email to sign in with', true);
 
-    const rosa = await login(seated[0].email);
-    const ben = await login(seated[1].email);
-    const tia = await login(seated[2].email);
+    const rosa = await login(added[0].email);
+    const ben = await login(added[1].email);
+    const tia = await login(added[2].email);
 
     const mine = await req('/api/searches', { auth: rosa.auth, expect:200 });
-    record('A committee member sees only the searches they are seated on',
+    record('A committee member sees only the searches they are on',
       mine.json.length===1 && mine.json[0].id===cm.id, 'saw '+mine.json.length);
 
     await req('/api/searches/'+search.id, { auth: rosa.auth, expect:404 });
-    record('A search they are not seated on reads as not found', true);
+    record('A search they are not on reads as not found', true);
 
     await req('/api/searches/'+cm.id, { method:'PATCH', auth: rosa.auth, expect:403, body:{ notes:'x' } });
     record('A committee member cannot edit the search file', true);
@@ -985,9 +985,9 @@ async function run(){
     record('A closed window does not take late answers', true);
 
     const roster = (await req('/api/searches/'+cm.id, { auth: abe.auth, expect:200 })).json.roster;
-    const rosaId = roster.find(m => m.email===seated[0].email).userId;
+    const rosaId = roster.find(m => m.email===added[0].email).userId;
     await req('/api/searches/'+cm.id+'/members/'+rosaId, {
-      method:'PATCH', auth: abe.auth, expect:400, body:{ seat:'manager' }
+      method:'PATCH', auth: abe.auth, expect:400, body:{ searchRole:'manager' }
     });
     record('The account manager must be a consultant at the firm', true);
 
@@ -996,7 +996,7 @@ async function run(){
     });
     record('Removing a member takes their answers out of the tally',
       removed.json.search.consensus.submitted===2, 'submitted='+removed.json.search.consensus.submitted);
-    // The account existed only for this seat. Removing them retires it, so the
+    // The account existed only for this place. Removing them retires it, so the
     // file stops existing as far as they can tell, even though their Clerk
     // identity is untouched and still opens the front door.
     await req('/api/searches/'+cm.id, { auth: rosa.auth, expect:404 });
@@ -1017,8 +1017,8 @@ async function run(){
     const committee = require('../server/committee');
     const fixture = {
       members: [
-        { userId:'a', seat:'committee' }, { userId:'b', seat:'committee' },
-        { userId:'c', seat:'committee' }, { userId:'d', seat:'committee' }
+        { userId:'a', searchRole:'committee' }, { userId:'b', searchRole:'committee' },
+        { userId:'c', searchRole:'committee' }, { userId:'d', searchRole:'committee' }
       ],
       intake: { submissions: {
         a: { submitted:true, items:[{ kind:'skill', label:'Community engagement', weight:5 }] },
@@ -1293,8 +1293,10 @@ async function run(){
     /state\.newPeople = failed\.length \? failed : \[blankPerson\(\)\]/.test(appJs)
     && /person-row__err/.test(appJs));
 
-  record('The roster is not described as seating', !/Seat (the|every|this|them|somebody)/.test(appJs)
-    && !/Nobody seated/.test(appJs) && !/is seated\./.test(appJs));
+  // The word is now gone from the client entirely — copy, CSS class names, and
+  // the field posted to the server — so the guard can be the whole file rather
+  // than the handful of phrases that used to carry it.
+  record('The word "seat" appears nowhere in the client', !/\bseat(s|ed|ing)?\b/i.test(appJs));
 
   record('New search opens on the search committee', /go\('team'\)/.test(appJs) && /Add the committee first/.test(appJs));
 

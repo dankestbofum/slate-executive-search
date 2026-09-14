@@ -134,7 +134,7 @@ NODE_ENV=production DATA_DIR=/tmp/restored PORT=4174 npm start
 Verify, and write down what you found:
 
 - [ ] The search opens, with the right client, position and revision
-- [ ] Its committee members are still seated and can still sign in
+- [ ] Its committee members are still on the search and can still sign in
 - [ ] Candidate answers are present **with the original question text**
 - [ ] Scores and history are intact
 - [ ] Brochure images render
@@ -301,7 +301,7 @@ lists the alert, the destination received it, and it clears.
 ### AI outages
 
 `ai.configured` and `ai.degraded` on `/api/ready` are separate from `ready`.
-Drafting and research stop; opening searches, seating committees, scoring, and
+Drafting and research stop; opening searches, assembling committees, scoring, and
 candidate questionnaires all keep working. An Anthropic outage must never read
 as Slate being down.
 

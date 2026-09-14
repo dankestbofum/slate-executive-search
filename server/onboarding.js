@@ -35,23 +35,23 @@ function hasName(user) {
  * with a different next step, which is the point of naming them separately:
  * "no access" covers four situations that need four different answers.
  */
-function stageOf(store, access, seated) {
+function stageOf(store, access, assigned) {
   if (!hasName(access.user)) return 'identity';
   if (access.membershipLost) return 'membership-lost';
   if (!access.orgId) return 'workspace';
   if (!access.role) return 'role-pending';
-  if (!access.capabilities.staff && !seated) return 'assignment-pending';
+  if (!access.capabilities.staff && !assigned) return 'assignment-pending';
   return 'ready';
 }
 
 function status(store, access) {
   const user = access.user;
   const orgId = access.orgId;
-  const seated = orgId
+  const assigned = orgId
     ? store.db.searches.filter(s => s.organizationId === orgId && store.memberOf(s, user.id)).length
     : 0;
-  const stage = stageOf(store, access, seated);
-  const heldSeats = orgId
+  const stage = stageOf(store, access, assigned);
+  const heldPlaces = orgId
     ? organizations.pendingForEmail(store.db, user.email).filter(p => p.orgId === orgId).length
     : 0;
 
@@ -75,8 +75,8 @@ function status(store, access) {
     // 'staff' and 'committee' describe what this person does in the active
     // workspace; 'pending' means they are not working anywhere yet.
     access: access.role ? (access.capabilities.staff ? 'staff' : 'committee') : 'pending',
-    assignments: seated,
-    heldSeats,
+    assignments: assigned,
+    heldPlaces,
     membershipLost: Boolean(access.membershipLost)
   };
 }

@@ -90,9 +90,9 @@ function blankSearch(input, user, organizationId){
     createdAt: now(),
     updatedAt: now(),
     // The person who opened the search runs it until somebody reassigns the
-    // seat. `members` is the whole roster, manager included, so there is one
+    // place. `members` is the whole roster, manager included, so there is one
     // list to read rather than a field plus a list that can disagree.
-    members: [{ userId: user.id, seat: 'manager', addedAt: now(), addedBy: user.id }],
+    members: [{ userId: user.id, searchRole: 'manager', addedAt: now(), addedBy: user.id }],
     team: { confirmedAt: null, confirmedBy: null },
     intake: {
       status: 'draft',
@@ -281,7 +281,7 @@ function releaseWriterLock(){
  * newer release is refused outright: rolling the application back onto a store
  * it does not understand is how a rollback turns into data loss.
  * ------------------------------------------------------------------ */
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
 function removeLegacyPins(store){
   const users = [...(store.users || []),
@@ -315,6 +315,23 @@ const MIGRATIONS = [
     for (const s of [...(store.searches || []), ...(store.archivedSearches || [])]) {
       if (!Object.hasOwn(s, 'organizationId')) s.organizationId = null;
     }
+  },
+  // 4 -> 5: a roster place is a `searchRole`, not a `seat`. The UI stopped
+  // saying "seat" first; this is the stored field catching up, so that the word
+  // is gone from the vocabulary rather than merely hidden behind a label. The
+  // values are untouched — 'manager', 'consultant', 'committee' — and archived
+  // rosters and held places are carried over with the live ones, because an
+  // archive that keeps the old spelling would restore a roster nobody can read.
+  store => {
+    const rename = row => {
+      if (!row || !Object.hasOwn(row, 'seat')) return;
+      if (!Object.hasOwn(row, 'searchRole')) row.searchRole = row.seat;
+      delete row.seat;
+    };
+    for (const s of [...(store.searches || []), ...(store.archivedSearches || [])]) {
+      for (const m of s.members || []) rename(m);
+    }
+    for (const p of store.pendingAssignments || []) rename(p);
   }
 ];
 
@@ -373,7 +390,7 @@ function load(){
 }
 
 // Searches written before the committee existed have no roster and no intake.
-// Seat their creator as account manager and treat their profile as already
+// Put their creator on as account manager and treat their profile as already
 // adopted, so an in-flight search does not reopen at Step 1 with its later
 // work locked behind a step that did not exist when it was done.
 function migrate(store){
@@ -415,7 +432,7 @@ function migrate(store){
     if (!Array.isArray(s.members) || !s.members.length) {
       s.members = [{
         userId: s.createdBy,
-        seat: 'manager',
+        searchRole: 'manager',
         addedAt: s.createdAt || s.opened || now(),
         addedBy: s.createdBy
       }];
@@ -480,7 +497,7 @@ function memberOf(search, userId){
 }
 
 function accountManager(search){
-  return (search.members || []).find(m => m.seat === 'manager') || null;
+  return (search.members || []).find(m => m.searchRole === 'manager') || null;
 }
 
 /* ------------------------------------------------------------------ *
@@ -496,10 +513,10 @@ function accountManager(search){
 /**
  * The workspace role last verified for somebody, from the membership cache.
  *
- * Used only to answer "is this person eligible to hold that seat", never to
+ * Used only to answer "is this person eligible to hold that place", never to
  * decide what the person making the request may do — that answer always comes
  * from the membership verified for this request. A stale cache entry here can
- * propose a seat; it cannot open anything, because the holder's own next
+ * propose a place; it cannot open anything, because the holder's own next
  * request re-reads their membership from the provider.
  */
 function workspaceRoleOf(userId, orgId){
@@ -507,7 +524,7 @@ function workspaceRoleOf(userId, orgId){
   return membership ? membership.role : null;
 }
 
-/** Eligible to sit in a consultant or manager seat in this workspace. */
+/** Eligible to hold a consultant or manager place in this workspace. */
 function isStaffOf(userId, orgId){
   const role = workspaceRoleOf(userId, orgId);
   return role === organizations.ADMIN || role === organizations.CONSULTANT;
@@ -534,7 +551,7 @@ function ownedBy(search, access){
  *
  * Staff see their own firm's whole book; that is how the firm works and inside
  * one workspace it is unchanged. A committee member sees only the searches
- * they are seated on, because their seat exists for one search.
+ * they are on, because their place exists for one search.
  */
 function canView(search, access){
   if (!ownedBy(search, access)) return false;
@@ -555,29 +572,29 @@ function canManage(search, access){
 }
 
 /**
- * Retire unused invitation accounts that are no longer seated anywhere.
+ * Retire unused invitation accounts that are no longer on any search.
  *
- * A committee account exists to serve one search. When that seat goes away,
+ * A committee account exists to serve one search. When that place goes away,
  * whether the member was removed or the whole search was deleted, the account
  * would otherwise linger as a live email sign-in that opens an app with
  * nothing in it. Consultants are never touched: their accounts belong to the
  * firm, not to a search. Keep accounts with saved setup so their identity and
- * onboarding choices survive removal of a search seat.
+ * onboarding choices survive removal of a search assignment.
  *
  * An account that holds an organization membership is never retired either,
- * whatever seats it has. The person is in the firm's workspace; losing a seat
+ * whatever assignments it has. The person is in the firm's workspace; losing one
  * on one search is not leaving the firm, and deleting them here would only
  * strand a live Clerk membership against no Slate account.
  */
 function pruneOrphanCommittee(){
-  const seated = new Set();
+  const onARoster = new Set();
   for (const s of db.searches) {
-    for (const m of s.members || []) seated.add(m.userId);
+    for (const m of s.members || []) onARoster.add(m.userId);
   }
   const inWorkspace = new Set((db.memberships || []).map(m => m.userId));
   const orphans = new Set(
     db.users.filter(u => u.role === 'committee' && !u.onboarding
-      && !seated.has(u.id) && !inWorkspace.has(u.id)).map(u => u.id)
+      && !onARoster.has(u.id) && !inWorkspace.has(u.id)).map(u => u.id)
   );
   if (!orphans.size) return 0;
   db.users = db.users.filter(u => !orphans.has(u.id));
@@ -588,7 +605,7 @@ function pruneOrphanCommittee(){
  * The roster with names attached, ready for the client.
  *
  * `orgRole` is the workspace role last verified for this person in the firm
- * that owns the search. It is what the Committee screen labels a seat with,
+ * that owns the search. It is what the Committee screen labels a person with,
  * because the legacy account `role` says nothing about which workspace the
  * reader is in.
  */
@@ -600,7 +617,7 @@ function roster(search){
     return {
       orgRole: membership ? membership.role : null,
       userId: m.userId,
-      seat: m.seat,
+      searchRole: m.searchRole,
       addedAt: m.addedAt,
       addedBy: m.addedBy,
       name: u ? u.name : 'Removed user',
@@ -652,10 +669,10 @@ function stepStatus(search, step, cache){
     switch (step.key){
       case 'team': {
         // A one-person search is legitimate, so the roster is never "too small"
-        // on its own. What marks the step done is the manager saying the seats
+        // on its own. What marks the step done is the manager saying the roster
         // are set, which is also what makes it safe to open intake.
-        const seated = (search.members || []).length;
-        status = search.team?.confirmedAt ? 'done' : (seated > 1 ? 'now' : 'open');
+        const onSearch = (search.members || []).length;
+        status = search.team?.confirmedAt ? 'done' : (onSearch > 1 ? 'now' : 'open');
         break;
       }
       case 'intake': {
@@ -733,10 +750,10 @@ function decorate(search, access){
   delete out.history;
   if (access) {
     const uid = access.userId;
-    const seat = memberOf(search, uid);
+    const searchRole = memberOf(search, uid);
     out.you = {
-      seat: seat ? seat.seat : null,
-      member: Boolean(seat),
+      searchRole: searchRole ? searchRole.searchRole : null,
+      member: Boolean(searchRole),
       // "Staff" is the organization-scoped successor to the firm-wide
       // consultant flag. Kept under the old name as well so the client's
       // existing reads of `you.consultant` keep meaning the same thing.

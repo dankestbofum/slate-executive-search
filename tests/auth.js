@@ -71,7 +71,7 @@ const as = (base, email, route = '/api/me') => fetch(base + route, { headers: si
     storeFixture.db.searches.push({ organizationId:'org_1', members:['named'] });
     assert.equal(onboarding.status(storeFixture, inOrg({ role:'org:committee' })).stage, 'ready');
     assert.equal(onboarding.status(storeFixture, inOrg({ role:'org:committee' })).access, 'committee');
-    // A seat in another firm is not a seat here.
+    // A place in another firm is not a place here.
     storeFixture.db.searches[0].organizationId = 'org_other';
     assert.equal(onboarding.status(storeFixture, inOrg({ role:'org:committee' })).stage, 'assignment-pending');
     storeFixture.db.searches.length = 0;
@@ -168,7 +168,12 @@ const as = (base, email, route = '/api/me') => fetch(base + route, { headers: si
     store.users.find(u => u.id === 'u1').pinHash = 'legacy-hash';
     store.users.find(u => u.id === 'u0').disabled = true;
     Object.assign(store.users.find(u => u.id === 'u2'), { disabled: true, pin: 'old-pin' });
-    store.archivedSearches = [{ id: 'archived-auth', archivedUsers: [{ id: 'old-member', pinHash: 'old-hash' }] }];
+    // An archived roster and a held place, both still spelled `seat`. They
+    // migrate with the live ones or an archive restores a roster nobody reads.
+    store.archivedSearches = [{ id: 'archived-auth', archivedUsers: [{ id: 'old-member', pinHash: 'old-hash' }],
+      members: [{ userId: 'old-member', seat: 'committee' }] }];
+    store.pendingAssignments = [{ id: 'pa-legacy', orgId: 'org-legacy', searchId: 'sr-legacy',
+      email: 'held@example.test', name: 'Held Person', seat: 'committee' }];
     fs.writeFileSync(file, JSON.stringify(store));
     base = await start();
     const migrated = JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -207,13 +212,24 @@ const as = (base, email, route = '/api/me') => fetch(base + route, { headers: si
     await stop();
 
     const upgraded = JSON.parse(fs.readFileSync(file, 'utf8'));
-    assert.equal(upgraded.schemaVersion, 4);
+    assert.equal(upgraded.schemaVersion, 5);
+    // 4 -> 5 renamed the field the roster is read through. A row left at the old
+    // spelling reads as no role at all, so all three places it lives are checked.
+    const legacyRoster = upgraded.searches.find(s => s.id === 'sr-legacy').members[0];
+    assert.equal(legacyRoster.searchRole, 'manager', 'a live roster kept the old spelling');
+    assert.ok(!('seat' in legacyRoster), 'the old field survived the migration');
+    const archivedRoster = upgraded.archivedSearches.find(s => s.id === 'archived-auth').members[0];
+    assert.equal(archivedRoster.searchRole, 'committee', 'an archived roster kept the old spelling');
+    assert.ok(!('seat' in archivedRoster), 'the old field survived on an archived roster');
+    const heldPlace = upgraded.pendingAssignments.find(p => p.id === 'pa-legacy');
+    assert.equal(heldPlace.searchRole, 'committee', 'a held place kept the old spelling');
+    assert.ok(!('seat' in heldPlace), 'the old field survived on a held place');
     assert.ok(Array.isArray(upgraded.organizations) && Array.isArray(upgraded.memberships)
       && Array.isArray(upgraded.pendingAssignments), 'the organization tables were not created');
     assert.equal(upgraded.sessions, undefined, 'the session table survived the migration');
     assert.ok(upgraded.users.every(u => !('pin' in u) && !('pinHash' in u)));
     assert.equal(upgraded.archivedSearches[0].archivedUsers[0].pinHash, undefined);
-    assert.ok(fs.readdirSync(path.join(directory, 'backups')).some(n => n.startsWith('pre-migration-1-to-4-')));
+    assert.ok(fs.readdirSync(path.join(directory, 'backups')).some(n => n.startsWith('pre-migration-1-to-5-')));
     console.log('PASS  Account linking, disabled accounts, public sign-up, workspace creation, and migration to organization ownership');
   } finally { await stop(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -20,7 +20,7 @@ async function check(name, fn) {
 }
 
 // An identity is a Clerk session for one email. Slate resolves it to the
-// account that holds the seats, which is what these rows are about.
+// account that holds the assignments, which is what these rows are about.
 const sign = identity.signer();
 
 function api(path, { auth, method = 'GET', body, revision } = {}) {
@@ -49,25 +49,25 @@ async function revisionOf(id, auth) {
   const own = await mk(abe, 'Roles County');
   const other = await mk(mike, 'Other Roles County');
 
-  // Seating somebody from outside the workspace holds the seat and invites them
-  // to the firm; the seat becomes real when they accept and sign in. This helper
+  // Adding somebody from outside the workspace holds the place and invites them
+  // to the firm; the place becomes real when they accept and sign in. This helper
   // walks that whole path so the rows below are about permission rather than
-  // about invitation state. Seating issues no credential of its own: the person
+  // about invitation state. Adding issues no credential of its own: the person
   // signs in with the email on their invitation.
-  const seat = async (searchId, auth, name, email) => {
+  const searchRole = async (searchId, auth, name, email) => {
     const res = await api('/api/searches/' + searchId + '/members', {
       auth, method: 'POST', revision: await revisionOf(searchId, auth),
-      body: { name, email, seat: 'committee' }
+      body: { name, email, searchRole: 'committee' }
     });
-    assert.strictEqual(res.status, 200, 'seating ' + email + ' returned ' + res.status);
+    assert.strictEqual(res.status, 200, 'adding ' + email + ' returned ' + res.status);
     const body = await res.json();
-    assert.ok(!Object.hasOwn(body, 'pin'), 'seating handed back a credential of its own');
-    if (!body.seated) {
+    assert.ok(!Object.hasOwn(body, 'pin'), 'adding handed back a credential of its own');
+    if (!body.added) {
       const held = (body.pending || []).find(p => p.email === email.toLowerCase());
-      assert.ok(held, 'seating ' + email + ' neither seated them nor held a seat');
+      assert.ok(held, 'adding ' + email + ' neither added them nor held a place');
       if (!body.invitationSent) {
         // A manager who is not an administrator cannot invite anybody to the
-        // firm, so the seat waits with "Invitation needed" and an administrator
+        // firm, so the place waits with "Invitation needed" and an administrator
         // completes it. Two authorities, two steps, on purpose.
         assert.strictEqual(held.status, 'invitation-needed');
         const invited = await api('/api/organization/invitations', {
@@ -75,17 +75,17 @@ async function revisionOf(id, auth) {
         });
         assert.strictEqual(invited.status, 200, 'the administrator could not invite ' + email);
       }
-      // Their first request accepts the workspace invitation and takes the seat.
+      // Their first request accepts the workspace invitation and takes the place.
       assert.strictEqual((await api('/api/me', { auth: sign.headers(email) })).status, 200);
     }
     const roster = (await (await api('/api/searches/' + searchId, { auth })).json()).roster || [];
     const row = roster.find(m => m.email === email.toLowerCase());
-    assert.ok(row, 'seated member ' + email + ' was not on the roster after joining');
+    assert.ok(row, 'member ' + email + ' was not on the roster after joining');
     return { userId: row.userId };
   };
 
-  await seat(own, abe, 'Rose Committee', 'rose-roles@example.com');
-  await seat(other, mike, 'Sam Outsider', 'sam-roles@example.com');
+  await searchRole(own, abe, 'Rose Committee', 'rose-roles@example.com');
+  await searchRole(other, mike, 'Sam Outsider', 'sam-roles@example.com');
   const member = sign.headers('rose-roles@example.com');
   const outsider = sign.headers('sam-roles@example.com');
 
@@ -102,7 +102,7 @@ async function revisionOf(id, auth) {
     assert.strictEqual((await api('/api/searches/' + other, { auth: abe })).status, 200);
   });
 
-  await check('a seated committee member reads only their own search', async () => {
+  await check('a committee member reads only their own search', async () => {
     assert.strictEqual((await api('/api/searches/' + own, { auth: member })).status, 200);
   });
 
@@ -151,8 +151,8 @@ async function revisionOf(id, auth) {
     assert.ok(!index.some(s => s.id === own), 'an unrelated search appeared in the index');
     const seen = await (await api('/api/searches', { auth: member })).json();
     const mine = seen.find(s => s.id === own);
-    assert.ok(mine, 'a seated member could not see their own search');
-    // A seated member takes part in screening, so the count is theirs to see;
+    assert.ok(mine, 'a member could not see their own search');
+    // A member takes part in screening, so the count is theirs to see;
     // what they must not receive is the roll of names behind it.
     assert.strictEqual(mine.candidateCounts.total, 2);
     assert.ok(!JSON.stringify(mine).includes('Amita'), 'a committee summary leaked a candidate name');
@@ -168,10 +168,10 @@ async function revisionOf(id, auth) {
     assert.ok(res.status === 403 || res.status === 404, 'expected refusal, got ' + res.status);
   });
 
-  await check('a committee member cannot seat other members', async () => {
+  await check('a committee member cannot add other members', async () => {
     const res = await api('/api/searches/' + own + '/members', {
       auth: member, method: 'POST', revision: await revisionOf(own, member),
-      body: { name: 'Snuck In', email: 'snuck@example.com', seat: 'committee' }
+      body: { name: 'Snuck In', email: 'snuck@example.com', searchRole: 'committee' }
     });
     assert.ok(res.status === 403 || res.status === 404, 'expected refusal, got ' + res.status);
   });
@@ -180,7 +180,7 @@ async function revisionOf(id, auth) {
     // Mike is a consultant and can read this search, but Abe manages it.
     const res = await api('/api/searches/' + own + '/members', {
       auth: mike, method: 'POST', revision: await revisionOf(own, mike),
-      body: { name: 'Wrong Manager', email: 'wrong-manager@example.com', seat: 'committee' }
+      body: { name: 'Wrong Manager', email: 'wrong-manager@example.com', searchRole: 'committee' }
     });
     assert.strictEqual(res.status, 403, 'expected 403, got ' + res.status);
   });
@@ -251,25 +251,25 @@ async function revisionOf(id, auth) {
 
   /* ---------------- Withdrawal of access ---------------- */
 
-  await check('withdrawing a seat ends access on the next request', async () => {
-    const { userId } = await seat(own, abe, 'Temp Member', 'temp-roles@example.com');
+  await check('withdrawing an assignment ends access on the next request', async () => {
+    const { userId } = await searchRole(own, abe, 'Temp Member', 'temp-roles@example.com');
     const temp = sign.headers('temp-roles@example.com');
     assert.strictEqual((await api('/api/searches/' + own, { auth: temp })).status, 200);
 
     const res = await api('/api/searches/' + own + '/members/' + userId, {
       auth: abe, method: 'DELETE', revision: await revisionOf(own, abe)
     });
-    assert.strictEqual(res.status, 200, 'the seat could not be withdrawn: ' + res.status);
+    assert.strictEqual(res.status, 200, 'the assignment could not be withdrawn: ' + res.status);
     // The same session token, one request later. Nothing had to expire.
     assert.strictEqual((await api('/api/searches/' + own, { auth: temp })).status, 404,
-      'access outlived the seat');
+      'access outlived the assignment');
   });
 
   // Slate retires the account, not the person's identity at Clerk: they can
   // still sign in, and what they find is an empty workspace rather than a door
   // that silently stopped opening.
   await check('a removed member is left with no searches at all', async () => {
-    const { userId } = await seat(own, abe, 'Remove Member', 'remove-roles@example.com');
+    const { userId } = await searchRole(own, abe, 'Remove Member', 'remove-roles@example.com');
     const removed = sign.headers('remove-roles@example.com');
     assert.strictEqual((await api('/api/searches/' + own, { auth: removed })).status, 200);
     const res = await api('/api/searches/' + own + '/members/' + userId, {
@@ -305,7 +305,7 @@ async function revisionOf(id, auth) {
   await check('starting fresh requires the exact managed searches and preserves the login and archives', async () => {
     const before = await (await api('/api/me', { auth:abe })).json();
     const list = await (await api('/api/searches', { auth:abe })).json();
-    const ids = list.filter(s => s.seat === 'manager').map(s => s.id);
+    const ids = list.filter(s => s.searchRole === 'manager').map(s => s.id);
     const reset = body => api('/api/account/start-fresh', { auth:abe, method:'POST', body });
     assert.strictEqual((await reset({})).status, 400);
     assert.strictEqual((await reset({ ids:[...ids, ids[0]] })).status, 400);

@@ -499,7 +499,7 @@ The committee input below is the primary source. Rules:
 - Do not invent a criterion nobody named unless a kind has fewer than three items; if you must add one, ground it in "inTheirWords" or the search facts and say in the note that it did not come from the committee.
 - In each note, state how many members named it.
 
-Committee input (${room.submissions} of ${room.seats} seated members responded):
+Committee input (${room.submissions} of ${room.asked} people asked responded):
 ${JSON.stringify(room, null, 2)}`
       : `Draft the Step ${stepNo('profile')} candidate profile matrix from these notes and search facts. ${SCHEMAS.profile}`;
     return `${brief}\n\nSearch:\n${JSON.stringify(packSearch(s),null,2)}\n\nGoverning body / staff notes:\n${extra.notes||s.notes||'(none)'}`;

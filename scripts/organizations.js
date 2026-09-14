@@ -26,7 +26,7 @@
 //
 //   node scripts/organizations.js link --org org_123 --email dana@firm.example --role org:consultant [--apply]
 //       Record what role Clerk holds for somebody, so the Members list and the
-//       seat-eligibility checks have a name before that person signs in. This
+//       eligibility checks have a name before that person signs in. This
 //       is a cache entry, not a grant: their access still comes from the
 //       membership Clerk reports on their next request. Create the membership
 //       at Clerk itself — this command does not.
@@ -99,9 +99,9 @@ const actions = {
       console.log('  ' + m.orgId + '  ' + String(m.role).padEnd(16) + '  ' + (user ? user.email : m.userId + ' (no account)'));
     }
 
-    console.log('\nHeld search seats: ' + (db.db.pendingAssignments || []).length);
+    console.log('\nHeld search places: ' + (db.db.pendingAssignments || []).length);
     for (const p of db.db.pendingAssignments || []) {
-      console.log('  ' + p.orgId + '  ' + p.searchId + '  ' + p.seat.padEnd(10) + '  ' + p.email);
+      console.log('  ' + p.orgId + '  ' + p.searchId + '  ' + p.searchRole.padEnd(10) + '  ' + p.email);
     }
 
     const accounts = db.db.users;

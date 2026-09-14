@@ -42,10 +42,10 @@ async function request(url, method = 'GET', body, auth, revision) {
   assert.equal((await read()).salary, '100000');
 
   await write('/profile', 'PUT', { criteria:[{ id:'S1', kind:'skill', label:'Budget management', weight:3 }] });
-  const seated = await write('/members', 'POST', { name:'Integrity Member', email:'integrity@example.test' });
+  const added = await write('/members', 'POST', { name:'Integrity Member', email:'integrity@example.test' });
   const member = sign.headers('integrity@example.test');
   const memberId = (await request('/api/me', 'GET', undefined, member)).body.user.id;
-  check('new committee accounts need only an email', () => { assert.equal(seated.body.email, 'integrity@example.test'); assert.equal(seated.body.pin, undefined); });
+  check('new committee accounts need only an email', () => { assert.equal(added.body.email, 'integrity@example.test'); assert.equal(added.body.pin, undefined); });
   await write('/candidates', 'POST', { name:'Synthetic Candidate' });
   let c = (await read()).candidates[0];
   const memberView = (await request(p, 'GET', undefined, member)).body;
@@ -246,16 +246,16 @@ async function request(url, method = 'GET', body, auth, revision) {
   assert.equal((await write('', 'DELETE')).status, 200);
   assert.equal((await request(p, 'GET', undefined, auth)).status, 404);
   assert.equal((await request('/api/apply/'+liveInvite)).status, 404);
-  // Archiving ends the seat, not the membership. This person accepted an
+  // Archiving ends the assignment, not the membership. This person accepted an
   // invitation to the firm's workspace, so their account stays: retiring it
   // would strand a live Clerk membership against nothing and erase the name on
   // their scores. What has to be gone is their access to this search.
   const archived = JSON.parse(fs.readFileSync(path.join(process.env.SLATE_TEST_DATA, 'slate.json'), 'utf8'));
-  check('archiving ends the seat and keeps the account that holds the history', () => {
+  check('archiving ends the assignment and keeps the account that holds the history', () => {
     assert.ok(archived.users.some(u => u.email === 'archive-integrity@example.test'));
     assert.ok(!archived.searches.some(s => (s.members || []).some(m => m.userId
       && archived.users.find(u => u.id === m.userId)?.email === 'archive-integrity@example.test')),
-      'the archived search left a live seat behind');
+      'the archived search left a live assignment behind');
   });
   assert.ok((await request('/api/archives', 'GET', undefined, auth)).body.some(a=>a.id===fresh.body.id));
   const restored = await request('/api/archives/'+fresh.body.id+'/restore', 'POST', {}, auth);

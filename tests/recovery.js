@@ -42,7 +42,7 @@ function seedStore() {
     searches: [{
       id: 'sr-recover', no: 1, client: 'Recovery County', position: 'County Administrator',
       jurisdictionType: 'county', revision: 7, profileRevision: 2,
-      members: [{ userId: 'u1', seat: 'manager' }, { userId: 'c9', seat: 'committee' }],
+      members: [{ userId: 'u1', searchRole: 'manager' }, { userId: 'c9', searchRole: 'committee' }],
       criteria: [{ id: 'S1', kind: 'skill', label: 'Budget' }],
       scores: { 'C1': { S1: 4 } },
       candidates: [{
@@ -89,7 +89,7 @@ check('an independently copied snapshot restores a complete search', () => {
   assert.strictEqual(search.revision, 7, 'the revision was not preserved');
 
   // Committee access.
-  assert.ok(search.members.some(m => m.userId === 'c9'), 'the committee seat was lost');
+  assert.ok(search.members.some(m => m.userId === 'c9'), 'the committee place was lost');
   assert.ok(store.users.some(u => u.id === 'c9'), 'the committee account was lost');
 
   // Candidate answers and the questions they were asked.

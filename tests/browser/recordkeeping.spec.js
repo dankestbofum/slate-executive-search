@@ -254,10 +254,10 @@ test('a committee member is not offered outcomes, verification or closeout', asy
   const member = 'committee-record-' + testInfo.project.name.replace(/[^a-z]/gi, '') + '@example.gov';
   await page.request.post('/api/searches/' + search.id + '/members', {
     headers: { 'if-match': await revision(page, search.id) },
-    data: { name: 'Pat Lane', email: member, seat: 'committee' }
+    data: { name: 'Pat Lane', email: member, searchRole: 'committee' }
   });
-  // Seating an address from outside the firm holds the seat and invites them to
-  // the workspace; the seat opens when they join. Their own browser context,
+  // Adding an address from outside the firm holds the place and invites them to
+  // the workspace; the place opens when they join. Their own browser context,
   // because the workspace a session is active in is stored per origin.
   const theirs = await page.context().browser().newContext();
   const them = await theirs.newPage();

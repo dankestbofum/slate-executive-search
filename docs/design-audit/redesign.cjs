@@ -77,11 +77,11 @@ async function fixture(request) {
   const revision = async id =>
     String((await (await request.get(BASE + '/api/searches/' + id)).json()).revision);
 
-  // A seated committee, so intake and the roster have something in them.
+  // A committee already on the search, so intake and the roster have something in them.
   for (const m of [
-    { name: 'Rosalind Achebe-Whitmore', email: 'rosalind@example.gov', seat: 'committee', title: 'Council member' },
-    { name: 'Tomas Ferreira', email: 'tomas@example.gov', seat: 'committee', title: 'Council member' },
-    { name: 'Junko Halvorsen', email: 'junko@example.gov', seat: 'committee', title: 'Mayor' }
+    { name: 'Rosalind Achebe-Whitmore', email: 'rosalind@example.gov', searchRole: 'committee', title: 'Council member' },
+    { name: 'Tomas Ferreira', email: 'tomas@example.gov', searchRole: 'committee', title: 'Council member' },
+    { name: 'Junko Halvorsen', email: 'junko@example.gov', searchRole: 'committee', title: 'Mayor' }
   ]) {
     await request.post(BASE + '/api/searches/' + search.id + '/members', {
       headers: { 'if-match': await revision(search.id) }, data: m
@@ -311,7 +311,7 @@ async function measure(page) {
         'committee-overview': '/#/s/' + id,
         'committee-intake': '/#/s/' + id + '/intake',
         'committee-candidates': '/#/s/' + id + '/screen',
-        // A step this seat does not take part in, reached by direct link.
+        // A step this role does not take part in, reached by direct link.
         'committee-denied-plan': '/#/s/' + id + '/plan'
       })) {
         await mp.goto(BASE + route);

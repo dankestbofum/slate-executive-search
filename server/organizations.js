@@ -10,7 +10,7 @@
  * member from one client ends up reading another client's file.
  *
  *   Clerk is authoritative for membership and role.
- *   Slate is authoritative for search seats.
+ *   Slate is authoritative for places on a search.
  *
  * Everything below follows from that. The local `organizations` and
  * `memberships` tables are a display cache and a migration mapping; nothing in
@@ -88,7 +88,7 @@ const NO_CAPABILITIES = Object.freeze(capabilitiesFor(null));
  * provider round trip, and so an archived search still says which firm it
  * belonged to. `memberships` caches the last verified role for the
  * administrator's Members list and for migration mapping. `pendingAssignments`
- * is Slate's own: a search seat held for somebody who has been invited to the
+ * is Slate's own: a place held for somebody who has been invited to the
  * organization but has not accepted yet.
  * ------------------------------------------------------------------ */
 
@@ -158,8 +158,8 @@ function membershipsOfUser(db, userId) {
  * Pending search assignments
  *
  * A manager preparing a committee for a new client usually knows the names
- * before anybody has an account. Slate holds the seat against an email and the
- * organization it belongs to; it becomes a real seat only once that person
+ * before anybody has an account. Slate holds the place against an email and the
+ * organization it belongs to; it becomes a real assignment only once that person
  * accepts the organization invitation and signs in. Matching on an email alone
  * never grants anything — acceptance at Clerk is what proves the address.
  * ------------------------------------------------------------------ */
@@ -173,19 +173,19 @@ function pendingForEmail(db, email) {
   return (db.pendingAssignments || []).filter(p => p.email === address);
 }
 
-function addPendingAssignment(db, { orgId, searchId, email, name, seat, invitedBy, invitationId = null }) {
+function addPendingAssignment(db, { orgId, searchId, email, name, searchRole, invitedBy, invitationId = null }) {
   ensureTables(db);
   const address = normalizeEmail(email);
   const existing = db.pendingAssignments.find(p => p.orgId === orgId && p.searchId === searchId && p.email === address);
   if (existing) {
-    existing.seat = seat;
+    existing.searchRole = searchRole;
     if (name) existing.name = String(name).trim();
     if (invitationId) existing.invitationId = invitationId;
     return existing;
   }
   const record = {
     id: 'pa-' + crypto.randomBytes(4).toString('hex'),
-    orgId, searchId, email: address, name: String(name || '').trim(), seat,
+    orgId, searchId, email: address, name: String(name || '').trim(), searchRole,
     invitationId, invitedBy, createdAt: now()
   };
   db.pendingAssignments.push(record);
@@ -199,7 +199,7 @@ function removePendingAssignment(db, id) {
   return db.pendingAssignments.length !== before;
 }
 
-/** Drop every held seat for a search, used when the search leaves the book. */
+/** Drop every held place for a search, used when the search leaves the book. */
 function clearPendingForSearch(db, searchId) {
   ensureTables(db);
   db.pendingAssignments = db.pendingAssignments.filter(p => p.searchId !== searchId);
@@ -338,6 +338,20 @@ function clerkDirectory(clerkClient) {
       } catch (error) {
         if (error?.status === 400 || error?.status === 422) {
           throw rejected(error?.errors?.[0]?.message || 'Clerk refused that invitation.', 400);
+        }
+        // Clerk answers an unregistered role with 404 and `paramName: 'role'`, not
+        // the 422 a bad field usually gets. Left to fall through, that reads as an
+        // outage and tells an administrator to try again shortly — advice that can
+        // never come true, because the instance is simply missing the role. It is
+        // the first place a deployment without `org:consultant` and `org:committee`
+        // goes wrong, so it says so.
+        if (error?.status === 404) {
+          const meta = error?.errors?.[0]?.meta || {};
+          if (meta.paramName === 'role') {
+            throw rejected('This Clerk instance has no ' + role + ' role. Register it on the '
+              + 'instance before inviting anybody to it.', 400);
+          }
+          throw rejected('That workspace is no longer available.', 409);
         }
         throw unavailable(error);
       }

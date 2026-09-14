@@ -8,7 +8,7 @@
  * the SDK is stubbed at its origin: the page gets a Clerk object that hands out
  * the same fixture-signed token the server verifies for real. Everything below
  * the token — proving it, resolving it to an account, the workspace membership
- * behind it, roles and seats — is the production path, and so is every request
+ * behind it, roles and assignments — is the production path, and so is every request
  * the app makes with it.
  *
  * Organizations are part of the session, so the stub carries them too: one

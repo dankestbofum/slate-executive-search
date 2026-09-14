@@ -309,29 +309,29 @@ button.strip__s:hover{background:var(--sunken)}
 .sources a{color:var(--accent); word-break:break-all}
 .empty__t{font-weight:700; color:var(--ink); margin-bottom:4px}
 /* ============================================================ the committee
-   Step 1 seats people; Step 2 asks them what they want and rolls the answers
+   Step 1 adds people; Step 2 asks them what they want and rolls the answers
    into one ranked read of the room. Both lean on the existing spec/pill/pick
    patterns; only the roster row, the consensus meter, and the intake
    card needed shapes of their own. */
 
-.seat{
+.rosterrow{
   display:grid; grid-template-columns:34px minmax(0,1fr) auto auto;
   gap:var(--s-3); align-items:center;
   padding:var(--s-3) 0; border-bottom:1px solid var(--line);
 }
-.seat:last-child{border-bottom:0}
-.seat--me{background:var(--accent-tint); margin:0 calc(var(--s-3) * -1); padding-left:var(--s-3); padding-right:var(--s-3); border-radius:var(--r-2)}
-.seat--mgr{border-bottom:0; padding-top:0}
-.seat__init{
+.rosterrow:last-child{border-bottom:0}
+.rosterrow--me{background:var(--accent-tint); margin:0 calc(var(--s-3) * -1); padding-left:var(--s-3); padding-right:var(--s-3); border-radius:var(--r-2)}
+.rosterrow--mgr{border-bottom:0; padding-top:0}
+.rosterrow__init{
   display:flex; align-items:center; justify-content:center;
   width:34px; height:34px; border-radius:999px;
   background:var(--sunken); border:1px solid var(--line-strong);
   font-size:12.5px; font-weight:700; color:var(--ink-2); letter-spacing:.02em;
 }
-.seat--mgr .seat__init{background:var(--accent); border-color:var(--accent); color:var(--accent-on)}
-.seat__who b{font-size:14.5px}
-.seat__tags{display:flex; flex-wrap:wrap; gap:6px; justify-content:flex-end}
-.seat__acts{display:flex; flex-wrap:wrap; gap:6px; justify-content:flex-end}
+.rosterrow--mgr .rosterrow__init{background:var(--accent); border-color:var(--accent); color:var(--accent-on)}
+.rosterrow__who b{font-size:14.5px}
+.rosterrow__tags{display:flex; flex-wrap:wrap; gap:6px; justify-content:flex-end}
+.rosterrow__acts{display:flex; flex-wrap:wrap; gap:6px; justify-content:flex-end}
 
 .rosterline{display:flex; flex-wrap:wrap; gap:8px; margin-bottom:var(--s-3)}
 .rosterchip{
@@ -414,8 +414,8 @@ button.strip__s:hover{background:var(--sunken)}
 
 @media (max-width:900px){
   .crit-row{grid-template-columns:1fr}
-  .seat{grid-template-columns:34px minmax(0,1fr)}
-  .seat__tags,.seat__acts{grid-column:2; justify-content:flex-start}
+  .rosterrow{grid-template-columns:34px minmax(0,1fr)}
+  .rosterrow__tags,.rosterrow__acts{grid-column:2; justify-content:flex-start}
   .intake-row,.crit-read{grid-template-columns:1fr}
 }
 
@@ -511,12 +511,12 @@ button.strip__s:hover{background:var(--sunken)}
 }
 .wslist--plain li:last-child{border-bottom:0}
 
-/* A seat that is spoken for but not yet occupied.
+/* A place that is spoken for but not yet taken.
    Marked by an outline rather than by fading the row: dimming carried the
    initials to 4.09:1 against their own tint, and "not here yet" is not a reason
    to make a name harder to read. The ink stays the body ink; the dashed ring is
-   what says the seat is still open. */
-.seat--held .seat__init{
+   what says the place is still open. */
+.rosterrow--held .rosterrow__init{
   background:var(--wait-tint); border-style:dashed; border-color:var(--wait); color:var(--ink);
 }
 

@@ -110,15 +110,15 @@ test('an empty search and a step outside the package both land somewhere useful'
 
 test('a committee member is shown their own steps and nothing else', async ({ page, browser }) => {
   await workspace(page);
-  const search = await makeSearch(page, { client: 'Seated City', position: 'City Manager', package: 'executive' });
+  const search = await makeSearch(page, { client: 'Roster City', position: 'City Manager', package: 'executive' });
   const email = 'committee-' + Date.now() + '@example.test';
-  const seated = await page.request.post('/api/searches/' + search.id + '/members', {
+  const added = await page.request.post('/api/searches/' + search.id + '/members', {
     headers: { 'if-match': await revision(page, search.id) },
-    data: { name: 'Casey Member', email, seat: 'committee' }
+    data: { name: 'Casey Member', email, searchRole: 'committee' }
   });
-  expect(seated.ok()).toBeTruthy();
+  expect(added.ok()).toBeTruthy();
 
-  // Give the seat its own session on its own context before the first page
+  // Give the member their own session on their own context before the first page
   // load, so the deep link is the first navigation the app boots on.
   const context = await browser.newContext();
   await installClerk(context, { email });

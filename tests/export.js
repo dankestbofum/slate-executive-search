@@ -49,7 +49,7 @@ const revisionOf = async (id, auth) =>
 
   await api('/api/searches/' + id + '/members', {
     auth: abe, method: 'POST', revision: await revisionOf(id, abe),
-    body: { name: 'Rose Committee', email: 'rose-export@example.com', seat: 'committee' }
+    body: { name: 'Rose Committee', email: 'rose-export@example.com', searchRole: 'committee' }
   });
   const member = sign.headers('rose-export@example.com');
 

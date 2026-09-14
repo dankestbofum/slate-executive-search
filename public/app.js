@@ -107,7 +107,7 @@ const DESTS = [
   { key:'overview',   label:'Overview',   icon:'gauge' },
   { key:'candidates', label:'Candidates', icon:'people' },
   { key:'interviews', label:'Interviews', icon:'screen' },
-  { key:'committee',  label:'Committee',  icon:'seats' },
+  { key:'committee',  label:'Committee',  icon:'people' },
   { key:'documents',  label:'Documents',  icon:'docs' },
   { key:'activity',   label:'Activity',   icon:'clock' }
 ];
@@ -153,7 +153,7 @@ const DOC_KEYS = ['profile','community','plan','brochure','ads','survey1','surve
 // a workspace screen, or the candidate detail.
 const HUB_VIEWS = ['interviews','committee','documents','activity','process'];
 
-const SEAT = {
+const SEARCH_ROLE = {
   manager:   { label:'Account manager', hint:'Runs the search. Adds people, opens and closes intake, adopts the profile.' },
   consultant:{ label:'Consultant',      hint:'Works the file alongside the manager.' },
   committee: { label:'Committee member',hint:'Answers intake and scores candidates. Reads the file; does not edit it.' }
@@ -166,7 +166,7 @@ const INTAKE_ASK = {
   skill: { t:'What must this person already know how to do?', hint:'The work they have to be good at on day one.' },
   trait: { t:'What kind of person works here?', hint:'How they carry themselves with the governing body, staff, and residents.' },
   chall: { t:'What are they walking into?', hint:'The problems on the table right now.' },
-  opp:   { t:'What could they build?', hint:'What becomes possible with the right person in the seat.' }
+  opp:   { t:'What could they build?', hint:'What becomes possible with the right person in the role.' }
 };
 
 const DRAFTS = {
@@ -464,9 +464,9 @@ function demoSearch(pkg){
     { id:'c4', name:'Elena Ruiz', stage:'declined', survey1:{} }
   ];
   const roster = [
-    { userId:'u1', name:'Abe Macy', init:'AM', seat:'manager' },
-    { userId:'u2', name:'Pat Chen', init:'PC', seat:'committee' },
-    { userId:'u3', name:'Sam Ortiz', init:'SO', seat:'committee' }
+    { userId:'u1', name:'Abe Macy', init:'AM', searchRole:'manager' },
+    { userId:'u2', name:'Pat Chen', init:'PC', searchRole:'committee' },
+    { userId:'u3', name:'Sam Ortiz', init:'SO', searchRole:'committee' }
   ];
   return {
     id:'demo-'+info.key, no:'SAMPLE', demo:true,
@@ -477,7 +477,7 @@ function demoSearch(pkg){
     package: info.key, packageInfo: info,
     steps, progress: { done: steps.filter(st => st.status==='done').length, total: steps.length, next },
     roster, accountManager: roster[0],
-    you: { seat:'consultant', member:false, consultant:true, canEdit:false, canManage:false },
+    you: { searchRole:'consultant', member:false, consultant:true, canEdit:false, canManage:false },
     criteria: [
       { id:'S1', kind:'skill', label:'Financial management', weight:5 },
       { id:'S2', kind:'skill', label:'Council relations', weight:4 },
@@ -519,7 +519,7 @@ function withPreview(search, fn){
 /* --- who the signed-in person is on this search --------------------------- */
 
 function you(){
-  return state.search?.you || { seat:null, member:false, staff:isStaff(), consultant:isStaff(), canEdit:false, canManage:false };
+  return state.search?.you || { searchRole:null, member:false, staff:isStaff(), consultant:isStaff(), canEdit:false, canManage:false };
 }
 function canEdit(){ return Boolean(you().canEdit); }
 function canManage(){ return Boolean(you().canManage); }
@@ -1111,7 +1111,7 @@ function ico(name, size=15){
     gauge:'<path d="M2.5 11a5.5 5.5 0 1 1 11 0"/><path d="M8 11 10.6 7"/>',
     people:'<path d="M6 8a2.2 2.2 0 1 0 0-4.4A2.2 2.2 0 0 0 6 8Z"/><path d="M1.9 13.2c0-2 1.8-3.2 4.1-3.2s4.1 1.2 4.1 3.2"/><path d="M11 4.2a2 2 0 0 1 0 3.9"/><path d="M12.1 10.3c1.3.4 2.1 1.3 2.1 2.6"/>',
     screen:'<path d="M2 3.5h12v8H2z"/><path d="M6.6 6.2 9.6 7.7 6.6 9.2z"/><path d="M5.5 13.8h5"/>',
-    seats:'<path d="M8 7.4a2.1 2.1 0 1 0 0-4.2 2.1 2.1 0 0 0 0 4.2Z"/><path d="M3.6 13.4c0-2.3 2-3.6 4.4-3.6s4.4 1.3 4.4 3.6"/>',
+    people:'<path d="M8 7.4a2.1 2.1 0 1 0 0-4.2 2.1 2.1 0 0 0 0 4.2Z"/><path d="M3.6 13.4c0-2.3 2-3.6 4.4-3.6s4.4 1.3 4.4 3.6"/>',
     docs:'<path d="M4.2 2.2h4.4L11.8 5v8.8H4.2z"/><path d="M8.4 2.4V5h3.2"/><path d="M6 8.4h4M6 10.7h4"/>',
     clock:'<path d="M8 14A6 6 0 1 0 8 2a6 6 0 0 0 0 12Z"/><path d="M8 4.9V8l2.2 1.4"/>',
     list:'<path d="M3 4.3h10M3 8h10M3 11.7h10"/>',
@@ -1593,9 +1593,9 @@ function railWorkspace(){
 // The account and theme controls, kept to the height of a row so the rail's
 // working area is destinations rather than identity.
 function railAccount(u, s){
-  const seat = s && you().seat ? SEAT[you().seat]?.label || '' : '';
+  const searchRole = s && you().searchRole ? SEARCH_ROLE[you().searchRole]?.label || '' : '';
   const title = String(u.title || '').trim();
-  const detail = title && seat && title.toLowerCase() !== seat.toLowerCase() ? title + ' · ' + seat : title || seat;
+  const detail = title && searchRole && title.toLowerCase() !== searchRole.toLowerCase() ? title + ' · ' + searchRole : title || searchRole;
   return `<div class="acct">
     <div class="acct__avatar" data-clerk-user></div>
     <span class="acct__id"><span class="acct__nm">${esc(u.name)}</span>${detail?`<span class="acct__rl">${esc(detail)}</span>`:''}</span>
@@ -1926,7 +1926,7 @@ function vAssignmentPending(){
  */
 function vMyAccess(){
   const o = state.onboarding || {};
-  const seats = (state.searches || []).map(s => `<li><strong>${esc(s.client || 'Untitled')}</strong> · ${esc(SEAT[s.seat]?.label || 'Assigned')}${s.no ? ' · <span class="mono">'+esc(s.no)+'</span>' : ''}</li>`).join('');
+  const assignments = (state.searches || []).map(s => `<li><strong>${esc(s.client || 'Untitled')}</strong> · ${esc(SEARCH_ROLE[s.searchRole]?.label || 'Assigned')}${s.no ? ' · <span class="mono">'+esc(s.no)+'</span>' : ''}</li>`).join('');
   const others = (state.workspaces || []).filter(w => w.id !== state.org?.id && w.role);
   return accountFrame(`<div><p class="t-label">Your account</p><h1 class="t-title">My access</h1>
     <p class="t-body">Signed in as <strong>${esc(state.user.email)}</strong>.</p></div>
@@ -1934,7 +1934,7 @@ function vMyAccess(){
       ${o.roleLabel ? `<p>Your role here is <strong>${esc(o.roleLabel)}</strong>. ${esc(o.roleSummary || '')}</p>` : '<p>You have no role in an active workspace.</p>'}
       <p class="t-small">Roles are set by an administrator of this workspace in Team &amp; access. To change yours, ask one of them.</p></section>
     <section class="stack stack--tight"><h2 class="t-section">Your searches</h2>
-      ${seats ? `<ul class="wslist wslist--plain" role="list">${seats}</ul>` : '<p class="t-small">You are not on any search in this workspace.</p>'}
+      ${assignments ? `<ul class="wslist wslist--plain" role="list">${assignments}</ul>` : '<p class="t-small">You are not on any search in this workspace.</p>'}
       <p class="t-small">A search manager adds people to individual searches. Being in the workspace is a separate thing from being on a search.</p></section>
     ${others.length ? `<section class="stack stack--tight"><h2 class="t-section">Your other workspaces</h2>
       <ul class="wslist" role="list">${others.map(w => `<li class="wslist__row"><span class="wslist__id"><strong>${esc(w.name)}</strong><span class="t-small">${esc(w.roleLabel)}</span></span>
@@ -2060,9 +2060,9 @@ function vHome(){
   const complete = list.filter(s => s.progress && s.progress.done >= s.progress.total).length;
   const live = list.length - complete;
   const pickup = list.find(s => s.progress?.next);
-  const owed = list.filter(s => s.intakeOpen && s.seat && !s.intakeMine);
+  const owed = list.filter(s => s.intakeOpen && s.searchRole && !s.intakeMine);
   const manage = canDelete && Boolean(state.open.homemanage);
-  const managed = list.filter(s => s.seat === 'manager');
+  const managed = list.filter(s => s.searchRole === 'manager');
 
   const rows = shown.map(s => {
     const n = s.progress?.next;
@@ -2078,7 +2078,7 @@ function vHome(){
       <td data-label="Candidates" class="tnum">${counts
         ? `<b>${counts.total}</b>${counts.total?`<span class="candmeta">${counts.semifinalist+counts.finalist} advanced · ${counts.responses} answered</span>`:''}`
         : '<span class="t-small">Not on this package</span>'}</td>
-      <td data-label="Account manager">${s.accountManager?esc(s.accountManager.name):'<span class="t-small">Unassigned</span>'}${s.seats>1?' <span class="t-small">+'+(s.seats-1)+'</span>':''}</td>
+      <td data-label="Account manager">${s.accountManager?esc(s.accountManager.name):'<span class="t-small">Unassigned</span>'}${s.people>1?' <span class="t-small">+'+(s.people-1)+'</span>':''}</td>
       <td data-label="Next action">${n?esc(STEP_NAME[n.key]||n.t):'<span class="t-small">Every step complete</span>'}</td>
       ${manage?`<td data-label="" class="candacts"><button class="btn btn--danger btn--sm" data-act="delete-search" data-id="${s.id}" data-name="${esc(s.client||s.no||'this search')}">Archive</button></td>`:''}
     </tr>`;
@@ -2318,7 +2318,7 @@ function rosterPanel(s){
   return `<div class="spec"><div class="spec__bar">Who is on this search</div>
     <div class="spec__body">
       <div class="rosterline">${(s.roster||[]).map(m =>
-        `<span class="rosterchip${m.seat==='manager'?' rosterchip--mgr':''}" title="${esc(SEAT[m.seat]?.label||m.seat)}">
+        `<span class="rosterchip${m.searchRole==='manager'?' rosterchip--mgr':''}" title="${esc(SEARCH_ROLE[m.searchRole]?.label||m.searchRole)}">
           <span class="rosterchip__i">${esc(m.init)}</span>${esc(m.name)}${intakeDoneBy(m.userId)?' '+ico('check'):''}
         </span>`).join('') || '<span class="t-small">Nobody added yet.</span>'}
       </div>
@@ -2377,7 +2377,7 @@ const DASH = {
     return `<div class="spec"><div class="spec__bar">Committee and profile</div>
       <div class="spec__body stack">
         <div class="rosterline">${(s.roster||[]).map(m =>
-          `<span class="rosterchip${m.seat==='manager'?' rosterchip--mgr':''}" title="${esc(SEAT[m.seat]?.label||m.seat)}"><span class="rosterchip__i">${esc(m.init)}</span>${esc(m.name)}${intakeDoneBy(m.userId)?' '+ico('check'):''}</span>`).join('') || '<span class="t-small">Nobody added yet.</span>'}
+          `<span class="rosterchip${m.searchRole==='manager'?' rosterchip--mgr':''}" title="${esc(SEARCH_ROLE[m.searchRole]?.label||m.searchRole)}"><span class="rosterchip__i">${esc(m.init)}</span>${esc(m.name)}${intakeDoneBy(m.userId)?' '+ico('check'):''}</span>`).join('') || '<span class="t-small">Nobody added yet.</span>'}
         </div>
         ${kv('Roster', statusPill(team))}
         ${kv('Intake', statusPill(intake)+(s.intake?.status==='open'?' <span class="t-small">'+answered+' of '+(s.roster||[]).length+' answered</span>':''))}
@@ -2718,7 +2718,7 @@ function vCommittee(){
   const agg = s.consensus;
   const roster = s.roster || [];
   const answered = agg ? agg.submitted : Object.values(s.intake?.submissions||{}).filter(x => x && x.submitted).length;
-  const seated = Boolean(you().seat);
+  const onSearch = Boolean(you().searchRole);
   const open = s.intake?.status === 'open';
   const mine = mySubmission();
   const crit = (s.criteria||[]).filter(c => c.label).length;
@@ -2726,7 +2726,7 @@ function vCommittee(){
   return shell(`
     ${head('This search','Committee',
       'Who is on the committee, what they were asked, and the profile their answers produced.',
-      seated && open && !(mine && mine.submitted) && canOpenStep('intake')
+      onSearch && open && !(mine && mine.submitted) && canOpenStep('intake')
         ? `<button class="btn btn--primary" data-go="intake-mine">Answer your questionnaire</button>` : '')}
     <div class="band"><div class="wrap stack">
       ${rosterPanel(s)}
@@ -2737,7 +2737,7 @@ function vCommittee(){
                  : s.intake?.status === 'closed' ? 'Closed. Answers are visible to the search team.' : 'Not opened yet.',
             statusPill(intake),
             openBtn('intake', you().consultant ? 'Manage intake' : 'Open the questionnaire', open && !you().consultant))}
-          ${seated ? hubRow('Your answers',
+          ${onSearch ? hubRow('Your answers',
             mine && mine.submitted ? 'On file. You can revise them while the window is open.' : open ? 'Not submitted yet.' : 'The window is not open.',
             mine && mine.submitted ? pill('ok','Submitted') : pill('idle','Not submitted'),
             open && canOpenStep('intake') ? `<button class="btn btn--secondary btn--sm" data-go="intake-mine">Open your questionnaire</button>` : '') : ''}
@@ -2901,7 +2901,7 @@ function vFacts(){
 // How many material facts are still unconfirmed, shown on the way in so the
 // gap is visible while the work is happening rather than when a county reads
 // the brochure. Defined below vFacts deliberately: tests/jurisdictions.js
-// renders that screen from the source between vFacts and seatPill, so its
+// renders that screen from the source between vFacts and searchRolePill, so its
 // helpers have to sit inside that range.
 function factGap(s){
   const fs = s?.factStatus;
@@ -3056,26 +3056,26 @@ function vCloseout(){
  * Step 1 — the search committee
  * ========================================================================= */
 
-function seatPill(seat){
-  const k = seat === 'manager' ? 'ok' : seat === 'consultant' ? 'info' : 'idle';
-  return pill(k, SEAT[seat]?.label || seat);
+function searchRolePill(searchRole){
+  const k = searchRole === 'manager' ? 'ok' : searchRole === 'consultant' ? 'info' : 'idle';
+  return pill(k, SEARCH_ROLE[searchRole]?.label || searchRole);
 }
 
 function memberRow(m, mgr){
   const me = m.userId === state.user.id;
   const answered = intakeDoneBy(m.userId);
   const manage = canManage();
-  return `<div class="seat${me?' seat--me':''}">
-    <span class="seat__init">${esc(m.init)}</span>
-    <div class="seat__who">
+  return `<div class="rosterrow${me?' rosterrow--me':''}">
+    <span class="rosterrow__init">${esc(m.init)}</span>
+    <div class="rosterrow__who">
       <b>${esc(m.name)}${me?' (you)':''}</b>
       <div class="t-small">${esc(m.title||'')}${m.email?' · '+esc(m.email):''}</div>
     </div>
-    <div class="seat__tags">${seatPill(m.seat)}${answered?pill('ok','Answered'):''}</div>
-    <div class="seat__acts">
-      ${manage && m.seat==='consultant' ? `<button class="btn btn--ghost btn--sm" data-act="make-manager" data-uid="${m.userId}">Hand over the account</button>` : ''}
+    <div class="rosterrow__tags">${searchRolePill(m.searchRole)}${answered?pill('ok','Answered'):''}</div>
+    <div class="rosterrow__acts">
+      ${manage && m.searchRole==='consultant' ? `<button class="btn btn--ghost btn--sm" data-act="make-manager" data-uid="${m.userId}">Hand over the account</button>` : ''}
       ${!manage && me && you().consultant ? `<button class="btn btn--secondary btn--sm" data-act="make-manager" data-uid="${m.userId}">Take the account</button>` : ''}
-      ${manage && m.userId !== mgr?.userId ? `<button class="btn btn--ghost btn--sm" data-act="unseat" data-uid="${m.userId}" data-name="${esc(m.name)}">Remove</button>` : ''}
+      ${manage && m.userId !== mgr?.userId ? `<button class="btn btn--ghost btn--sm" data-act="remove-person" data-uid="${m.userId}" data-name="${esc(m.name)}">Remove</button>` : ''}
     </div>
   </div>`;
 }
@@ -3089,14 +3089,14 @@ function memberRow(m, mgr){
  * the difference between a manager who knows to go and ask, and one who waits
  * a week for an email that was never sent.
  */
-function pendingSeatRow(p){
+function heldPlaceRow(p){
   const sent = p.status === 'invitation-sent';
-  return `<div class="seat seat--held">
-    <span class="seat__init">${esc(initialsOf(p.name || p.email))}</span>
-    <div class="seat__who"><b>${esc(p.name || p.email)}</b><div class="t-small">${esc(p.email)}</div></div>
-    <div class="seat__tags">${pill('wait', sent ? 'Invitation sent' : 'Invitation needed')}</div>
-    <div class="seat__acts">${canManage()
-      ? `<button class="btn btn--ghost btn--sm" data-act="release-seat" data-pending="${esc(p.id)}" data-email="${esc(p.email)}">Remove</button>`
+  return `<div class="rosterrow rosterrow--held">
+    <span class="rosterrow__init">${esc(initialsOf(p.name || p.email))}</span>
+    <div class="rosterrow__who"><b>${esc(p.name || p.email)}</b><div class="t-small">${esc(p.email)}</div></div>
+    <div class="rosterrow__tags">${pill('wait', sent ? 'Invitation sent' : 'Invitation needed')}</div>
+    <div class="rosterrow__acts">${canManage()
+      ? `<button class="btn btn--ghost btn--sm" data-act="release-place" data-pending="${esc(p.id)}" data-email="${esc(p.email)}">Remove</button>`
       : ''}</div>
   </div>`;
 }
@@ -3118,7 +3118,7 @@ function initialsOf(name){
  * invitation. Whatever fails stays on screen with the reason against it, and
  * whatever succeeded is gone, so a retry can never add somebody twice.
  * ------------------------------------------------------------------------- */
-function blankPerson(){ return { name:'', email:'', title:'', seat:'committee', error:null }; }
+function blankPerson(){ return { name:'', email:'', title:'', searchRole:'committee', error:null }; }
 
 function peopleDraft(){
   if (!Array.isArray(state.newPeople) || !state.newPeople.length) state.newPeople = [blankPerson()];
@@ -3134,7 +3134,7 @@ function collectPeople(){
     name: row.querySelector('[data-f="name"]')?.value || '',
     email: row.querySelector('[data-f="email"]')?.value || '',
     title: row.querySelector('[data-f="title"]')?.value || '',
-    seat: row.querySelector('[data-f="seat"]')?.value || 'committee',
+    searchRole: row.querySelector('[data-f="searchRole"]')?.value || 'committee',
     error: null
   }));
 }
@@ -3145,13 +3145,13 @@ function collectPeople(){
 function addPeopleSummary(done, failed){
   if (done.length === 1 && !failed.length) {
     const only = done[0];
-    // The server distinguishes seated, invited, and held; its wording is
+    // The server distinguishes added, invited, and held; its wording is
     // better than anything reconstructed from flags out here.
-    return only.seated ? only.name.trim() + ' is on the search.' : (only.note || 'Their place is held.');
+    return only.added ? only.name.trim() + ' is on the search.' : (only.note || 'Their place is held.');
   }
-  const onSearch = done.filter(x => x.seated);
-  const invited = done.filter(x => !x.seated && x.invitationSent);
-  const waiting = done.filter(x => !x.seated && !x.invitationSent);
+  const onSearch = done.filter(x => x.added);
+  const invited = done.filter(x => !x.added && x.invitationSent);
+  const waiting = done.filter(x => !x.added && !x.invitationSent);
   const parts = [];
   if (onSearch.length) parts.push(onSearch.length + (onSearch.length === 1 ? ' person is' : ' people are') + ' on the search.');
   if (invited.length) parts.push(invited.length === 1 ? 'One invitation was sent.' : invited.length + ' invitations were sent.');
@@ -3168,9 +3168,9 @@ function personDraftRow(p, i, total){
       ${field('Name','', `<input class="input" data-f="name" value="${esc(p.name||'')}" placeholder="Dana Reyes" autocomplete="off">`)}
       ${field('Email','Their contact email for this search.', `<input class="input" data-f="email" type="email" value="${esc(p.email||'')}" placeholder="dreyes@example.gov" autocomplete="off">`)}
       ${field('Title','', `<input class="input" data-f="title" value="${esc(p.title||'')}" placeholder="Board or committee member">`)}
-      ${field('Role on this search','', `<select class="input" data-f="seat">
-        <option value="committee"${p.seat === 'consultant' ? '' : ' selected'}>Committee member</option>
-        <option value="consultant"${p.seat === 'consultant' ? ' selected' : ''}>Consultant at the firm</option>
+      ${field('Role on this search','', `<select class="input" data-f="searchRole">
+        <option value="committee"${p.searchRole === 'consultant' ? '' : ' selected'}>Committee member</option>
+        <option value="consultant"${p.searchRole === 'consultant' ? ' selected' : ''}>Consultant at the firm</option>
       </select>`)}
     </div>
     <div class="person-row__foot">
@@ -3187,7 +3187,7 @@ function vTeam(){
   const mgr = s.accountManager;
   const confirmed = Boolean(s.team?.confirmedAt);
   const manage = canManage();
-  const committeeCount = list.filter(m => m.seat === 'committee').length;
+  const committeeCount = list.filter(m => m.searchRole === 'committee').length;
   const needInvite = held.filter(p => p.status === 'invitation-needed').length;
   const people = peopleDraft();
   const addOpen = Boolean(state.open.addpeople);
@@ -3202,13 +3202,13 @@ function vTeam(){
       </div></div>` : ''}
       ${mgr ? `<div class="spec"><div class="spec__bar">Account manager</div>
         <div class="spec__body">
-          <div class="seat seat--mgr">
-            <span class="seat__init">${esc(mgr.init)}</span>
-            <div class="seat__who"><b>${esc(mgr.name)}</b><div class="t-small">${esc(mgr.title||'')} · ${esc(mgr.email)}</div></div>
-            <div class="seat__tags">${pill('ok','Runs this search')}</div>
-            <div class="seat__acts"></div>
+          <div class="rosterrow rosterrow--mgr">
+            <span class="rosterrow__init">${esc(mgr.init)}</span>
+            <div class="rosterrow__who"><b>${esc(mgr.name)}</b><div class="t-small">${esc(mgr.title||'')} · ${esc(mgr.email)}</div></div>
+            <div class="rosterrow__tags">${pill('ok','Runs this search')}</div>
+            <div class="rosterrow__acts"></div>
           </div>
-          <p class="t-small">${esc(SEAT.manager.hint)} Any consultant on the roster can take the account; hand it over from the list below.</p>
+          <p class="t-small">${esc(SEARCH_ROLE.manager.hint)} Any consultant on the roster can take the account; hand it over from the list below.</p>
         </div></div>` : ''}
 
       <div class="spec"><div class="spec__bar">Search staff and committee ${pill(committeeCount?'ok':'wait', committeeCount+(committeeCount===1?' committee member':' committee members'))}</div>
@@ -3220,7 +3220,7 @@ function vTeam(){
 
       ${held.length ? `<div class="spec"><div class="spec__bar">Waiting to join ${pill('wait', held.length + (held.length===1?' person':' people'))}</div>
         <div class="spec__body stack">
-          ${held.map(pendingSeatRow).join('')}
+          ${held.map(heldPlaceRow).join('')}
           ${needInvite ? `<div class="notice notice--wait"><div>
             <div class="notice__t">${needInvite === 1 ? 'One person is waiting on an invitation' : needInvite + ' people are waiting on invitations'}</div>
             <div class="notice__b">No email has been sent. An administrator of ${esc(orgName())} has to invite these addresses to the workspace before they can join.
@@ -3231,7 +3231,7 @@ function vTeam(){
 
       ${manage ? `<div class="spec"><div class="spec__bar">Add people</div>
         <div class="spec__body stack">
-          <p class="t-small">${esc(SEAT.committee.hint)} The consultant role is for somebody already in ${esc(orgName())}.
+          <p class="t-small">${esc(SEARCH_ROLE.committee.hint)} The consultant role is for somebody already in ${esc(orgName())}.
             ${state.caps?.inviteMembers
               ? 'Adding an address that is not in this workspace invites them to it as a committee member and holds their place until they accept.'
               : 'If the address is not in this workspace, their place is held and an administrator has to send the invitation.'}</p>
@@ -3474,7 +3474,7 @@ function vIntakeManage(){
       </div></div>` : ''}
 
       <div class="tiles">
-        <div class="tile"><span class="tile__k">Seated</span><span class="tile__v">${agg?agg.seats:(s.roster||[]).length}</span></div>
+        <div class="tile"><span class="tile__k">On the search</span><span class="tile__v">${agg?agg.asked:(s.roster||[]).length}</span></div>
         <div class="tile"><span class="tile__k">Answered</span><span class="tile__v">${agg?agg.submitted:0}</span></div>
         <div class="tile"><span class="tile__k">Waiting on</span><span class="tile__v">${waiting.length}</span></div>
         <div class="tile tile--hi"><span class="tile__k">Window</span><span class="tile__v u-fs-135">${open?'Open':closed?'Closed':'Not open'}</span><span class="tile__n">${esc(intake.dueBy||'no due date')}</span></div>
@@ -3670,7 +3670,7 @@ function vProfile(){
     ${head('Step '+stepNo('profile'),'Candidate profile','This is the spine. Built from what the committee said in Step '+stepNo('intake')+', then edited by you. Recruiting markets it. Surveys test it. Interviews evidence it.')}
     <div class="band"><div class="wrap stack">
       ${agg?.submitted ? `<div class="notice notice--${adopted?'ok':'info'}"><div>
-        <div class="notice__t">${agg.submitted} of ${agg.seats} on the committee answered</div>
+        <div class="notice__t">${agg.submitted} of ${agg.asked} on the committee answered</div>
         <div class="notice__b">${adopted
           ? 'This profile was built from their answers. The badge on each line shows how many of them named it. Edit freely; the badges follow the label.'
           : 'Build the matrix from their answers rather than typing it from memory, then edit.'}
@@ -5347,14 +5347,14 @@ function vTeamAccess(){
     <td data-label="Role in this workspace">${m.supported
       ? `<select class="input" data-act="set-role" data-member="${esc(m.clerkUserId)}" data-nodirty aria-label="Role for ${esc(m.name)}" ${m.you?'disabled':''}>${roleChoices(m.role)}</select>`
       : `${pill('wait','Role not mapped')}<span class="candmeta mono">${esc(m.role)}</span>`}</td>
-    <td data-label="Searches">${m.seats ? m.seats + (m.seats===1?' search':' searches') : '<span class="t-small">None</span>'}</td>
+    <td data-label="Searches">${m.searches ? m.searches + (m.searches===1?' search':' searches') : '<span class="t-small">None</span>'}</td>
     <td data-label="Remove" class="candacts">${m.you
       ? '<span class="t-small">Ask another administrator</span>'
-      : `<button class="btn btn--ghost btn--sm" data-act="remove-member" data-member="${esc(m.clerkUserId)}" data-name="${esc(m.name)}" data-seats="${m.seats}">Remove</button>`}</td>
+      : `<button class="btn btn--ghost btn--sm" data-act="remove-member" data-member="${esc(m.clerkUserId)}" data-name="${esc(m.name)}" data-searches="${m.searches}">Remove</button>`}</td>
   </tr>`).join('');
 
   const invites = (team?.invitations || []).map(i => `<tr>
-    <th scope="row">${esc(i.email)}${i.heldSeats ? `<span class="candmeta">${i.heldSeats} search seat${i.heldSeats===1?'':'s'} held for them</span>` : ''}</th>
+    <th scope="row">${esc(i.email)}${i.heldPlaces ? `<span class="candmeta">${i.heldPlaces} search place${i.heldPlaces===1?'':'s'} held for them</span>` : ''}</th>
     <td data-label="Invited as">${esc(i.roleLabel || i.role)}</td>
     <td data-label="Status">${pill('wait','Invitation sent')}${i.expiresAt?`<span class="candmeta">Expires ${esc(String(i.expiresAt).slice(0,10))}</span>`:''}</td>
     <td data-label="Revoke" class="candacts"><button class="btn btn--ghost btn--sm" data-act="revoke-invite" data-invite="${esc(i.id)}" data-email="${esc(i.email)}">Revoke</button></td>
@@ -6149,16 +6149,16 @@ document.addEventListener('click', async e => {
   }
 
   if (act==='remove-member') {
-    const seats = Number(t.dataset.seats) || 0;
+    const searches = Number(t.dataset.searches) || 0;
     const warning = 'Remove ' + t.dataset.name + ' from ' + orgName() + '?\n\n'
-      + (seats ? 'They lose their ' + seats + ' search assignment' + (seats===1?'':'s') + ' here. ' : '')
+      + (searches ? 'They lose their ' + searches + ' search assignment' + (searches===1?'':'s') + ' here. ' : '')
       + 'Their scores, notes, and history stay on the record under their name.';
     if (!confirm(warning)) return;
     state.orgBusy = true; state.orgError = null; state.orgNotice = null; render();
     try {
       const out = await api('/api/organization/members/' + encodeURIComponent(t.dataset.member), { method:'DELETE' });
       state.orgNotice = t.dataset.name + ' was removed'
-        + (out.seats ? ', and released ' + out.seats + ' search seat' + (out.seats===1?'':'s') : '') + '.';
+        + (out.releasedPlaces ? ', and released ' + out.releasedPlaces + ' search assignment' + (out.releasedPlaces===1?'':'s') : '') + '.';
       await loadTeam();
     } catch (error) { state.orgError = error.message; }
     finally { state.orgBusy = false; render(); }
@@ -6177,12 +6177,12 @@ document.addEventListener('click', async e => {
     return;
   }
 
-  if (act==='release-seat') {
-    if (!confirm('Release the held seat for ' + t.dataset.email + '?\n\nThis does not revoke their invitation to the workspace.')) return;
+  if (act==='release-place') {
+    if (!confirm('Release the held place for ' + t.dataset.email + '?\n\nThis does not revoke their invitation to the workspace.')) return;
     await withBusy(async () => {
       const out = await api('/api/searches/'+state.search.id+'/members/pending/'+encodeURIComponent(t.dataset.pending), { method:'DELETE', body:{} });
       state.search = out.search;
-      toast('The held seat was released.');
+      toast('The held place was released.');
     });
     return;
   }
@@ -6264,7 +6264,7 @@ document.addEventListener('click', async e => {
     return;
   }
   if (act==='start-fresh'){
-    const managed = (state.searches || []).filter(s => s.seat === 'manager');
+    const managed = (state.searches || []).filter(s => s.searchRole === 'manager');
     if (!managed.length) return;
     const names = managed.map(s => '- '+(s.client || s.no || 'Untitled')+(s.position ? ' / '+s.position : '')).join('\n');
     if (!confirm('Archive these '+managed.length+' managed search'+(managed.length===1?'':'es')+' and start a new search?\n\n'+names+'\n\nThey will leave the active workspace for everyone on their committees. Your Clerk login stays active. You can restore the searches from Archived searches.')) return;
@@ -6346,13 +6346,13 @@ document.addEventListener('click', async e => {
     const uid = t.dataset.uid;
     const taking = uid === state.user.id;
     await withBusy(async () => {
-      const out = await api('/api/searches/'+state.search.id+'/members/'+uid, { method:'PATCH', body:{ seat:'manager' } });
+      const out = await api('/api/searches/'+state.search.id+'/members/'+uid, { method:'PATCH', body:{ searchRole:'manager' } });
       state.search = out.search;
-      toast(taking ? 'You run this search now. The previous manager keeps a consultant seat.' : 'Account handed over. You keep a consultant seat.');
+      toast(taking ? 'You run this search now. The previous manager keeps a consultant role.' : 'Account handed over. You keep a consultant role.');
     }, waitSave(taking ? 'Taking the account' : 'Handing over the account'));
     return;
   }
-  if (act==='unseat'){
+  if (act==='remove-person'){
     const uid = t.dataset.uid;
     const name = t.dataset.name || 'this person';
     if (!confirm('Remove '+name+' from this search? Their committee answers come off the file with them.')) return;
@@ -6376,7 +6376,7 @@ document.addEventListener('click', async e => {
       state.search = await api('/api/searches/'+state.search.id+'/intake/status', {
         method:'POST', body:{ status: open ? 'open' : 'closed', ...win }
       });
-      toast(open ? 'Intake is open. Every seated member can answer now.' : 'Intake closed. The committee can see what the room said.');
+      toast(open ? 'Intake is open. Everyone on the search can answer now.' : 'Intake closed. The committee can see what the room said.');
     }, waitSave(open ? 'Opening the window' : 'Closing the window'));
     return;
   }
@@ -6902,12 +6902,12 @@ document.addEventListener('submit', async e => {
         try {
           const out = await api('/api/searches/'+state.search.id+'/members', {
             method:'POST',
-            body:{ name:person.name.trim(), email:person.email.trim(), title:person.title.trim(), seat:person.seat }
+            body:{ name:person.name.trim(), email:person.email.trim(), title:person.title.trim(), searchRole:person.searchRole }
           });
           // Each reply carries the next revision, and the request after this
           // one has to send it or the server rejects it as a stale write.
           state.search = out.search;
-          done.push({ ...person, seated:out.seated, invitationSent:out.invitationSent, note:out.note });
+          done.push({ ...person, added:out.added, invitationSent:out.invitationSent, note:out.note });
         } catch (error) {
           failed.push({ ...person, error: error.message });
         }
@@ -6961,7 +6961,7 @@ async function createSearch(){
     state.newPackage = null;
     state.newJurisdiction = null;
     if (!state.search) return;
-    // A search now opens on the roster, not the profile. Seating the committee
+    // A search now opens on the roster, not the profile. Adding the committee
     // is what makes the profile something other than one person's guess.
     go('team');
     toast('Search '+state.search.no+' is open. Add the committee first.');

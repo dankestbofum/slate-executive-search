@@ -186,10 +186,10 @@ function painted(req, search){
   // Which workspace this record belongs to, so the client can refuse to paint
   // it under a different one after a switch.
   out.organization = req.access?.organization || null;
-  // Seats that are spoken for but not yet occupied. On every read, not only on
-  // the response to seating somebody: a manager who opens the Committee screen
+  // Places that are spoken for but not yet taken. On every read, not only on
+  // the response to adding somebody: a manager who opens the Committee screen
   // tomorrow has to see who is still outstanding.
-  out.pending = heldSeats(search);
+  out.pending = heldPlaces(search);
   // Which authority facts are confirmed and which are still assertions. Shown
   // on every read so the gap is visible while the work is happening, not
   // discovered when the county reads the brochure.
@@ -247,7 +247,7 @@ const CRIT_SOURCES = new Set(['committee', 'draft', 'consultant']);
 function requireSearch(req, res, next){
   const s = db.findSearch(req.params.id);
   if (!s) return res.status(404).json({ error:'Search not found.' });
-  // A committee member seated on a different search, or anybody at all in
+  // A committee member on a different search, or anybody at all in
   // another firm's workspace, must not learn this one exists: an unauthorized
   // read looks the same as a missing file. A search whose owning organization
   // is unknown is refused on the same terms rather than falling through.
@@ -438,8 +438,8 @@ app.get('/api/config', (_req, res) => {
  * The directory a viewer needs to put names to ids.
  *
  * Never the whole user table. Staff see the people in their own workspace —
- * anyone holding a membership there, plus anyone seated on one of its searches
- * — and a committee member sees only the people seated beside them. Another
+ * anyone holding a membership there, plus anyone on one of its searches
+ * — and a committee member sees only the people beside them on it. Another
  * firm's staff list is not a name, a count, or an absence somebody can
  * subtract: they are simply not in the answer.
  */
@@ -619,9 +619,9 @@ app.get('/api/organization/members', ...requireOrgAdmin, async (req, res) => {
       roleLabel: supported ? organizations.ROLE_LABEL[m.role] : null,
       supported,
       you: m.clerkUserId === req.access.clerkUserId,
-      // Seats are Slate's side of the record. They say what removing this
+      // Assignments are Slate's side of the record. They say what removing this
       // person would actually end.
-      seats: local ? db.db.searches.filter(s => s.organizationId === req.access.orgId && db.memberOf(s, local.id)).length : 0
+      searches: local ? db.db.searches.filter(s => s.organizationId === req.access.orgId && db.memberOf(s, local.id)).length : 0
     };
   }).sort((a, b) => a.name.localeCompare(b.name));
   res.json({
@@ -629,9 +629,9 @@ app.get('/api/organization/members', ...requireOrgAdmin, async (req, res) => {
     invitations: invitations.map(i => ({
       ...i,
       roleLabel: organizations.isSupportedRole(i.role) ? organizations.ROLE_LABEL[i.role] : null,
-      // Seats already held for this address, so revoking an invitation shows
+      // Places already held for this address, so revoking an invitation shows
       // what else it would strand.
-      heldSeats: organizations.pendingForEmail(db.db, i.email).filter(p => p.orgId === req.access.orgId).length
+      heldPlaces: organizations.pendingForEmail(db.db, i.email).filter(p => p.orgId === req.access.orgId).length
     })),
     admins: rows.filter(r => r.role === organizations.ADMIN).length
   });
@@ -649,7 +649,7 @@ app.post('/api/organization/invitations', ...requireOrgAdmin, async (req, res) =
     redirectUrl: auth.config.invitationRedirectUrl || undefined
   });
   res.json({
-    invitation: { ...invitation, roleLabel: organizations.ROLE_LABEL[role], heldSeats: organizations.pendingForEmail(db.db, email).filter(p => p.orgId === req.access.orgId).length },
+    invitation: { ...invitation, roleLabel: organizations.ROLE_LABEL[role], heldPlaces: organizations.pendingForEmail(db.db, email).filter(p => p.orgId === req.access.orgId).length },
     sent: true
   });
 });
@@ -684,7 +684,7 @@ app.patch('/api/organization/members/:clerkUserId', ...requireOrgAdmin, async (r
 /**
  * Remove somebody from the workspace.
  *
- * Their search seats go with their membership, because a seat that outlives
+ * Their search assignments go with their membership, because one that outlives
  * the membership is access nobody can see. What they did stays: activity,
  * scores, and authorship name them exactly as before, which is why the account
  * is kept rather than deleted.
@@ -717,7 +717,7 @@ app.delete('/api/organization/members/:clerkUserId', ...requireOrgAdmin, async (
 
   await auth.directory.removeMember(req.access.orgId, target);
 
-  let seats = 0;
+  let releasedPlaces = 0;
   if (local) {
     organizations.forgetMembership(db.db, req.access.orgId, local.id);
     for (const search of db.db.searches.filter(s => s.organizationId === req.access.orgId)) {
@@ -725,19 +725,19 @@ app.delete('/api/organization/members/:clerkUserId', ...requireOrgAdmin, async (
       search.members = search.members.filter(m => m.userId !== local.id);
       if (search.intake?.submissions) delete search.intake.submissions[local.id];
       db.touch(search, req.user, 'removed ' + local.name + ' from the search with their workspace access');
-      seats += 1;
+      releasedPlaces += 1;
     }
     db.db.pendingAssignments = db.db.pendingAssignments
       .filter(p => !(p.orgId === req.access.orgId && p.email === local.email));
     db.persist();
   }
-  res.json({ ok: true, seats });
+  res.json({ ok: true, releasedPlaces });
 });
 
 app.get('/api/searches', ...requireWorkspace, (req, res) => {
   res.json(db.db.searches.filter(s => db.canView(s, req.access)).map(s => {
     const d = db.decorate(s, req.access);
-    const seat = db.memberOf(s, req.user.id);
+    const searchRole = db.memberOf(s, req.user.id);
     const intake = s.intake || {};
     return {
       id:s.id, no:s.no, client:s.client, position:s.position, state:s.state, jurisdictionType:s.jurisdictionType,
@@ -750,8 +750,8 @@ app.get('/api/searches', ...requireWorkspace, (req, res) => {
       // a different statement from nobody having applied.
       candidateCounts: db.candidateCounts(s),
       accountManager: d.accountManager ? { name: d.accountManager.name, init: d.accountManager.init } : null,
-      seats: (s.members || []).length,
-      seat: seat ? seat.seat : null,
+      people: (s.members || []).length,
+      searchRole: searchRole ? searchRole.searchRole : null,
       // Drives the "you owe them an answer" prompt on Home. A member should not
       // have to open every search to find the one waiting on them.
       intakeOpen: intake.status === 'open',
@@ -787,17 +787,17 @@ app.get('/api/searches/:id', ...requireWorkspace, requireSearch, (req, res) => {
  * Step 1 — the roster
  *
  * A search has one account manager and any number of consultants and committee
- * members. Seating someone who has no account creates an email-only sign-in.
+ * members. Adding someone who has no account creates an email-only sign-in.
  * ------------------------------------------------------------------------- */
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
- * The roster, plus the seats that are held but not yet filled.
+ * The roster, plus the places that are held but not yet filled.
  *
  * Three states are shown separately because they need three different actions:
- * an active assignment (accepted membership and a seat), an assignment waiting
- * on somebody to accept an organization invitation, and a seat a manager has
+ * an active assignment (accepted membership and a place), an assignment waiting
+ * on somebody to accept an organization invitation, and a place a manager has
  * proposed for an address nobody has invited yet. The last one says
  * "Invitation needed" rather than implying an email went out.
  */
@@ -805,23 +805,23 @@ function rosterOnly(search){
   return {
     roster: db.roster(search),
     accountManager: db.accountManager(search),
-    pending: heldSeats(search)
+    pending: heldPlaces(search)
   };
 }
 
-function heldSeats(search){
+function heldPlaces(search){
   return organizations.pendingFor(db.db, search.organizationId, search.id).map(p => ({
-    id: p.id, email: p.email, name: p.name, seat: p.seat,
+    id: p.id, email: p.email, name: p.name, searchRole: p.searchRole,
     status: p.invitationId ? 'invitation-sent' : 'invitation-needed',
     createdAt: p.createdAt
   }));
 }
 
 /**
- * Seat somebody on this search.
+ * Add somebody to this search.
  *
- * A seat is only ever given to a member of the firm that owns the search.
- * Somebody outside it gets a held seat instead, waiting on an organization
+ * A place is only ever given to a member of the firm that owns the search.
+ * Somebody outside it gets a held place instead, waiting on an organization
  * invitation: an administrator sending that invitation is a separate authority
  * from a manager rostering a committee, and pretending otherwise would let a
  * search manager add people to the firm. Where the manager is also an
@@ -830,12 +830,12 @@ function heldSeats(search){
  */
 app.post('/api/searches/:id/members', ...requireWorkspace, requireSearch, requireManager, async (req, res) => {
   const b = req.body || {};
-  const seat = committee.seatOf(b.seat);
+  const searchRole = committee.searchRoleOf(b.searchRole);
   const name = String(b.name || '').trim();
   const email = organizations.normalizeEmail(b.email);
   if (!name) return res.status(400).json({ error:'Name is required.' });
   if (!EMAIL_RE.test(email)) return res.status(400).json({ error:'Enter a working email. It is their sign-in.' });
-  if (seat === 'manager') {
+  if (searchRole === 'manager') {
     return res.status(400).json({ error:'Add them first, then hand over the account.' });
   }
 
@@ -850,9 +850,9 @@ app.post('/api/searches/:id/members', ...requireWorkspace, requireSearch, requir
     return res.status(409).json({ error: name + ' is already on this search.' });
   }
 
-  // Membership in the owning organization is what separates a seat from a held
-  // seat, and it is read from the provider rather than from the local cache so
-  // that somebody removed at Clerk cannot be seated straight back in. The
+  // Membership in the owning organization is what separates a place from a held
+  // one, and it is read from the provider rather than from the local cache so
+  // that somebody removed at Clerk cannot be added straight back in. The
   // lookup falls back to the email because a colleague can be in the firm's
   // Clerk organization without ever having opened Slate.
   let member = existing?.clerkUserId
@@ -863,23 +863,23 @@ app.post('/api/searches/:id/members', ...requireWorkspace, requireSearch, requir
   }
 
   if (member && organizations.isSupportedRole(member.role)) {
-    if (seat === 'consultant' && !organizations.capabilitiesFor(member.role).staff) {
+    if (searchRole === 'consultant' && !organizations.capabilitiesFor(member.role).staff) {
       return res.status(400).json({ error: name + ' is a committee member in this workspace. Change their role first, or add them to the committee.' });
     }
     // A verified member of this workspace who has no Slate account yet gets
     // one now. Their Clerk identity binds to it on their first request, which
     // is the same path every other account takes.
     const person = existing || db.createUser({ name, email, title: b.title, role: 'committee' }).user;
-    req.search.members.push({ userId: person.id, seat, addedAt: db.now(), addedBy: req.user.id });
+    req.search.members.push({ userId: person.id, searchRole, addedAt: db.now(), addedBy: req.user.id });
     // The roster changed, so a confirmation given before this person joined no
     // longer describes the committee. Ask for it again.
     req.search.team = { confirmedAt: null, confirmedBy: null };
-    db.touch(req.search, req.user, 'seated ' + name + ' as ' + committee.SEAT_LABEL[seat].toLowerCase());
+    db.touch(req.search, req.user, 'added ' + name + ' as ' + committee.SEARCH_ROLE_LABEL[searchRole].toLowerCase());
     db.persist();
-    return res.json({ search: painted(req, req.search), ...rosterOnly(req.search), email, seated: true });
+    return res.json({ search: painted(req, req.search), ...rosterOnly(req.search), email, added: true });
   }
 
-  if (seat !== 'committee') {
+  if (searchRole !== 'committee') {
     return res.status(400).json({ error: 'The consultant role goes to somebody already in this workspace. Invite them from Team & access first.' });
   }
 
@@ -893,14 +893,14 @@ app.post('/api/searches/:id/members', ...requireWorkspace, requireSearch, requir
       });
     } catch (error) {
       // An address that already has an invitation out is not a failure of this
-      // request: the held seat is still worth recording against it.
+      // request: the held place is still worth recording against it.
       if (error?.code !== 'DIRECTORY_REJECTED') throw error;
       inviteError = error.message;
     }
   }
 
   const held = organizations.addPendingAssignment(db.db, {
-    orgId, searchId: req.search.id, email, name, seat,
+    orgId, searchId: req.search.id, email, name, searchRole,
     invitedBy: req.user.id, invitationId: invitation?.id || null
   });
   db.touch(req.search, req.user, invitation
@@ -909,7 +909,7 @@ app.post('/api/searches/:id/members', ...requireWorkspace, requireSearch, requir
   db.persist();
   res.json({
     search: painted(req, req.search), ...rosterOnly(req.search), email,
-    seated: false,
+    added: false,
     // Said plainly, because "pending" without this is indistinguishable from an
     // email that was actually sent.
     invitationSent: Boolean(invitation),
@@ -920,7 +920,7 @@ app.post('/api/searches/:id/members', ...requireWorkspace, requireSearch, requir
   });
 });
 
-/** Release a held seat that has not been taken up. */
+/** Release a held place that has not been taken up. */
 app.delete('/api/searches/:id/members/pending/:pid', ...requireWorkspace, requireSearch, requireManager, (req, res) => {
   const held = organizations.pendingFor(db.db, req.access.orgId, req.search.id).find(p => p.id === req.params.pid);
   if (!held) return res.status(404).json({ error:'That pending person is no longer waiting.' });
@@ -928,24 +928,24 @@ app.delete('/api/searches/:id/members/pending/:pid', ...requireWorkspace, requir
   db.touch(req.search, req.user, 'released the held place for ' + (held.name || held.email));
   db.persist();
   // Deliberately does not revoke the organization invitation: being invited to
-  // the firm and being seated on one search are different decisions, and this
+  // the firm and being on one search are different decisions, and this
   // route only undoes the second.
   res.json({ search: painted(req, req.search), ...rosterOnly(req.search) });
 });
 
-// Seat changes. Handing over or claiming the account is open to any consultant
+// Role changes. Handing over or claiming the account is open to any consultant
 // on the file: who runs an account is a firm decision, not a wall between
 // colleagues, and gating it on the current manager leaves a search stranded
-// whenever that person is unavailable. Every other seat change stays with the
+// whenever that person is unavailable. Every other roster change stays with the
 // manager.
 // A consultant putting themselves on a search they can already see. Needed
-// because seating is otherwise the manager's job, which would leave a
+// because the roster is otherwise the manager's job, which would leave a
 // colleague unable to join a file in order to pick it up.
 app.post('/api/searches/:id/members/self', ...requireWorkspace, requireSearch, requireEditor, (req, res) => {
   if (db.memberOf(req.search, req.user.id)) {
     return res.status(409).json({ error:'You are already on this search.' });
   }
-  req.search.members.push({ userId: req.user.id, seat: 'consultant', addedAt: db.now(), addedBy: req.user.id });
+  req.search.members.push({ userId: req.user.id, searchRole: 'consultant', addedAt: db.now(), addedBy: req.user.id });
   db.touch(req.search, req.user, 'joined the search');
   db.persist();
   res.json({ search: painted(req, req.search), ...rosterOnly(req.search) });
@@ -954,19 +954,19 @@ app.post('/api/searches/:id/members/self', ...requireWorkspace, requireSearch, r
 app.patch('/api/searches/:id/members/:uid', ...requireWorkspace, requireSearch, requireEditor, (req, res) => {
   const m = db.memberOf(req.search, req.params.uid);
   if (!m) return res.status(404).json({ error:'That person is not on this search.' });
-  const seat = committee.seatOf(req.body?.seat);
+  const searchRole = committee.searchRoleOf(req.body?.searchRole);
   const user = db.findUserById(m.userId);
 
-  if (seat === 'manager') {
+  if (searchRole === 'manager') {
     if (!db.isStaffOf(user.id, req.access.orgId)) {
       return res.status(400).json({ error:'The account manager is a consultant or administrator in this workspace.' });
     }
     // Exactly one manager. The outgoing one stays on the search as a
-    // consultant rather than losing their seat.
+    // consultant rather than losing their place.
     for (const other of req.search.members) {
-      if (other.seat === 'manager') other.seat = 'consultant';
+      if (other.searchRole === 'manager') other.searchRole = 'consultant';
     }
-    m.seat = 'manager';
+    m.searchRole = 'manager';
     db.touch(req.search, req.user, 'handed the account to ' + user.name);
   } else {
     if (!db.canManage(req.search, req.access)) {
@@ -974,14 +974,14 @@ app.patch('/api/searches/:id/members/:uid', ...requireWorkspace, requireSearch, 
       const who = mgr ? (db.findUserById(mgr.userId)?.name || 'the account manager') : 'the account manager';
       return res.status(403).json({ error: who + ' runs this search. Take the account first, or ask them.' });
     }
-    if (m.seat === 'manager') {
+    if (m.searchRole === 'manager') {
       return res.status(400).json({ error:'Hand the account to someone else first. A search always has a manager.' });
     }
-    if (seat === 'consultant' && !db.isStaffOf(user.id, req.access.orgId)) {
+    if (searchRole === 'consultant' && !db.isStaffOf(user.id, req.access.orgId)) {
       return res.status(400).json({ error:'Only this workspace\u2019s consultants and administrators can be added as a consultant.' });
     }
-    m.seat = seat;
-    db.touch(req.search, req.user, 'moved ' + user.name + ' to ' + committee.SEAT_LABEL[seat].toLowerCase());
+    m.searchRole = searchRole;
+    db.touch(req.search, req.user, 'moved ' + user.name + ' to ' + committee.SEARCH_ROLE_LABEL[searchRole].toLowerCase());
   }
   db.persist();
   res.json({ search: painted(req, req.search), ...rosterOnly(req.search) });
@@ -990,7 +990,7 @@ app.patch('/api/searches/:id/members/:uid', ...requireWorkspace, requireSearch, 
 app.delete('/api/searches/:id/members/:uid', ...requireWorkspace, requireSearch, requireManager, (req, res) => {
   const m = db.memberOf(req.search, req.params.uid);
   if (!m) return res.status(404).json({ error:'That person is not on this search.' });
-  if (m.seat === 'manager') {
+  if (m.searchRole === 'manager') {
     return res.status(400).json({ error:'Hand the account to someone else before leaving the search.' });
   }
   const user = db.findUserById(m.userId);
@@ -999,7 +999,7 @@ app.delete('/api/searches/:id/members/:uid', ...requireWorkspace, requireSearch,
   // the committee, so a departed member cannot keep voting.
   if (req.search.intake?.submissions) delete req.search.intake.submissions[m.userId];
   db.touch(req.search, req.user, 'removed ' + (user ? user.name : 'a member') + ' from the search');
-  // If this was their only seat, their sign-in goes with it.
+  // If this was their only assignment, their sign-in goes with it.
   db.pruneOrphanCommittee();
   db.persist();
   res.json({ search: painted(req, req.search), ...rosterOnly(req.search) });
@@ -1018,7 +1018,7 @@ app.post('/api/searches/:id/team/confirm', ...requireWorkspace, requireSearch, r
 /* ---------------------------------------------------------------------------
  * Step 2 — intake
  *
- * Each seated member answers privately. The manager opens the window, watches
+ * Everyone on the search answers privately. The manager opens the window, watches
  * who has answered (never what they said), and closes it when the committee
  * has spoken. Closing is what publishes consensus to the room.
  * ------------------------------------------------------------------------- */
@@ -1045,9 +1045,9 @@ app.post('/api/searches/:id/intake/status', ...requireWorkspace, requireSearch, 
 });
 
 app.put('/api/searches/:id/intake', ...requireWorkspace, requireSearch, (req, res) => {
-  const seat = db.memberOf(req.search, req.user.id);
-  if (!seat) return res.status(403).json({ error:'You are not on this search.' });
-  if (!committee.INTAKE_SEATS.has(committee.seatOf(seat.seat))) {
+  const searchRole = db.memberOf(req.search, req.user.id);
+  if (!searchRole) return res.status(403).json({ error:'You are not on this search.' });
+  if (!committee.INTAKE_ROLES.has(committee.searchRoleOf(searchRole.searchRole))) {
     return res.status(403).json({ error:'Your role on this search does not answer intake.' });
   }
   const intake = req.search.intake;
@@ -1087,8 +1087,8 @@ app.post('/api/searches/:id/intake/adopt', ...requireWorkspace, requireSearch, r
 
 function removeSearch(search){
   search.archivedAt = db.now();
-  // Held seats belong to a live search. Archiving one would otherwise leave an
-  // invitation that seats somebody on a file nobody can open.
+  // Held places belong to a live search. Archiving one would otherwise leave an
+  // invitation that adds somebody to a file nobody can open.
   organizations.clearPendingForSearch(db.db, search.id);
   search.archivedUsers = db.db.users.filter(u => (search.members || []).some(m => m.userId === u.id) && u.role === 'committee').map(integrity.clone);
   db.db.archivedSearches.push(search);

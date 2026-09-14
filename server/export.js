@@ -191,7 +191,7 @@ function build(search, { viewer, users, dataDir, release }) {
           actorId: member.userId,
           name: user?.name || 'Removed account',
           role: user?.role || null,
-          seat: member.seat,
+          searchRole: member.searchRole,
           addedAt: member.addedAt,
           disabled: Boolean(user?.disabled)
         };
@@ -356,7 +356,7 @@ function report(bundle) {
 
   head('Committee');
   for (const member of bundle.committee.roster) {
-    lines.push('  ' + member.seat.padEnd(10) + member.name + ' [' + member.actorId + ']'
+    lines.push('  ' + member.searchRole.padEnd(10) + member.name + ' [' + member.actorId + ']'
       + (member.disabled ? ' (account disabled)' : ''));
   }
   field('Intake status', bundle.committee.intake.status);

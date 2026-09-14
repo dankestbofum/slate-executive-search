@@ -3,7 +3,7 @@
 /**
  * Search committee intake and consensus.
  *
- * Step 2 asks every seated member what they are looking for in the executive,
+ * Step 2 asks everyone on the search what they are looking for in the executive,
  * privately and in their own words. This module turns those independent
  * submissions into one ranked matrix the consultant can adopt as the Step 3
  * candidate profile. Nothing here writes; callers decide what to keep.
@@ -23,25 +23,25 @@ const PREFIX = { skill: 'S', trait: 'T', chall: 'C', opp: 'O' };
 const KIND_CAP = 5;
 const KIND_FLOOR = 3;
 
-const SEATS = ['manager', 'consultant', 'committee'];
-const SEAT_LABEL = {
+const SEARCH_ROLES = ['manager', 'consultant', 'committee'];
+const SEARCH_ROLE_LABEL = {
   manager: 'Account manager',
   consultant: 'Consultant',
   committee: 'Committee member'
 };
 
-// Everyone seated on the search is asked to fill out intake, including the
+// Everyone on the search is asked to fill out intake, including the
 // consultants: their read on the job is part of the record the profile is
 // built from.
-const INTAKE_SEATS = new Set(['manager', 'consultant', 'committee']);
+const INTAKE_ROLES = new Set(['manager', 'consultant', 'committee']);
 
 function clampWeight(w){
   const n = (w === '' || w === null || w === undefined) ? 3 : Number(w);
   return Math.max(1, Math.min(5, Number.isFinite(n) ? n : 3));
 }
 
-function seatOf(seat){
-  return SEATS.includes(seat) ? seat : 'committee';
+function searchRoleOf(searchRole){
+  return SEARCH_ROLES.includes(searchRole) ? searchRole : 'committee';
 }
 
 // Two members typing "Financial management" and "financial management." are
@@ -95,8 +95,8 @@ function normalizeSubmission(body, prev, now){
   };
 }
 
-function seatedForIntake(search){
-  return (search.members || []).filter(m => INTAKE_SEATS.has(seatOf(m.seat)));
+function membersForIntake(search){
+  return (search.members || []).filter(m => INTAKE_ROLES.has(searchRoleOf(m.searchRole)));
 }
 
 function submissionsOf(search){
@@ -107,9 +107,9 @@ function submissionsOf(search){
 // denominator down and make real agreement look weaker than it is.
 function finishedSubmissions(search){
   const subs = submissionsOf(search);
-  const seated = new Set(seatedForIntake(search).map(m => m.userId));
+  const asked = new Set(membersForIntake(search).map(m => m.userId));
   return Object.entries(subs)
-    .filter(([uid, s]) => s && s.submitted && seated.has(uid))
+    .filter(([uid, s]) => s && s.submitted && asked.has(uid))
     .map(([uid, s]) => ({ userId: uid, ...s }));
 }
 
@@ -131,7 +131,7 @@ function aggregate(search, nameOf){
   const name = typeof nameOf === 'function' ? nameOf : () => '';
   const finished = finishedSubmissions(search);
   const submitted = finished.length;
-  const seated = seatedForIntake(search);
+  const asked = membersForIntake(search);
   const done = new Set(finished.map(f => f.userId));
 
   const groups = new Map();
@@ -202,11 +202,11 @@ function aggregate(search, nameOf){
 
   return {
     submitted,
-    seats: seated.length,
-    pending: seated.filter(m => !done.has(m.userId)).map(m => ({
+    asked: asked.length,
+    pending: asked.filter(m => !done.has(m.userId)).map(m => ({
       userId: m.userId,
       name: name(m.userId),
-      seat: seatOf(m.seat)
+      searchRole: searchRoleOf(m.searchRole)
     })),
     byKind,
     contested: KINDS.flatMap(k => byKind[k].filter(e => e.contested)),
@@ -309,7 +309,7 @@ function packForPrompt(agg){
   }));
   return {
     submissions: agg.submitted,
-    seats: agg.seats,
+    asked: agg.asked,
     skills: pick('skill'),
     traits: pick('trait'),
     challenges: pick('chall'),
@@ -330,8 +330,8 @@ function packForPrompt(agg){
 
 module.exports = {
   KINDS, KIND_LABEL, KIND_CAP, KIND_FLOOR,
-  SEATS, SEAT_LABEL, INTAKE_SEATS, PREFIX,
-  normLabel, groupKey, cleanItems, normalizeSubmission, clampWeight, seatOf,
-  seatedForIntake, finishedSubmissions,
+  SEARCH_ROLES, SEARCH_ROLE_LABEL, INTAKE_ROLES, PREFIX,
+  normLabel, groupKey, cleanItems, normalizeSubmission, clampWeight, searchRoleOf,
+  membersForIntake, finishedSubmissions,
   aggregate, mergeIntoCriteria, adoptionGaps, packForPrompt
 };

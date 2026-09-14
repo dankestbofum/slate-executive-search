@@ -86,7 +86,7 @@ async function request(url, method='GET', body) {
     pill:(k,label)=>String(label)
   });
   vm.runInContext(source.slice(source.indexOf('function jurisdictionInfo('),source.indexOf('function nextHint(')),ui);
-  vm.runInContext(source.slice(source.indexOf('function vFacts('),source.indexOf('function seatPill(')),ui);
+  vm.runInContext(source.slice(source.indexOf('function vFacts('),source.indexOf('function searchRolePill(')),ui);
   ui.stepNo = ()=>1;
   for (const render of ['vNew','vFacts']) check(render + ' renders a selected county option', () => {
     const html = vm.runInContext(render+'()', ui);

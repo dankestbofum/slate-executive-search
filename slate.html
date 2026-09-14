@@ -1158,7 +1158,7 @@ function vCandidates(){
     ${r!=='council' ? `<div class="spec">
       <div class="spec__bar">Scorer progress</div>
       <div class="spec__body spec__body--flush"><div class="tablewrap"><table>
-        <thead><tr><th>Scorer</th><th>Seat</th><th>Complete</th><th style="width:200px">Progress</th><th></th></tr></thead>
+        <thead><tr><th>Scorer</th><th>Role</th><th>Complete</th><th style="width:200px">Progress</th><th></th></tr></thead>
         <tbody>${scorers.map(([n,s,d,t])=>`<tr>
           <td>${esc(n)}</td><td>${esc(s)}</td><td class="mono tnum">${d}/${t}</td>
           <td>${bar(Math.round(d/t*100), d===t?'ok':d===0?'idle':'wait')}</td>
@@ -1540,7 +1540,7 @@ function vBlueprint(){
     ['Engagement','One search for one client. Owns everything below.','client, position, dates, stage'],
     ['Criterion','A single line of the Step 1 profile. The spine object.','id, kind, label, weight, note'],
     ['Instrument','A survey, questionnaire, interview guide, or scenario.','step, questions, each question → criteria'],
-    ['Person','A hiring-side user with one role in one engagement.','role, seat, scope'],
+    ['Person','A hiring-side user with one role in one engagement.','workspace role, search role, scope'],
     ['Candidate','An applicant file. A record, not an account.','stage, documents, responses, consents'],
     ['Score','One person, one candidate, one criterion, one source.','value 1–5, source, sealed flag, note'],
     ['Cycle','An annual evaluation round after the hire.','expectations, goals, ratings, governance survey']

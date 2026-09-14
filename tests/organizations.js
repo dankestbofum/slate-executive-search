@@ -105,7 +105,7 @@ async function newSearch(fields, who = {}) {
     const writes = [
       ['PATCH', '/api/searches/' + inA.id, { client: 'Renamed by B' }],
       ['PUT', '/api/searches/' + inA.id + '/profile', { criteria: [] }],
-      ['POST', '/api/searches/' + inA.id + '/members', { name: 'B Person', email: 'b@other.example', seat: 'committee' }],
+      ['POST', '/api/searches/' + inA.id + '/members', { name: 'B Person', email: 'b@other.example', searchRole: 'committee' }],
       ['POST', '/api/searches/' + inA.id + '/candidates', { name: 'B Candidate' }],
       ['POST', '/api/searches/' + inA.id + '/team/confirm', { confirmed: true }],
       ['DELETE', '/api/searches/' + inA.id, undefined],
@@ -166,7 +166,7 @@ async function newSearch(fields, who = {}) {
     assert.equal(me.body.capabilities.staff, false, 'a committee member was given staff capabilities');
     assert.equal(me.body.capabilities.manageMembers, false);
     const searches = await call('/api/searches', { email: outsider, org: B, role: 'org:committee' });
-    assert.deepEqual(searches.body, [], 'a workspace member with no seat saw the firm’s searches');
+    assert.deepEqual(searches.body, [], 'a workspace member with no assignment saw the firm’s searches');
   });
 
   /* --- archives, exports, media ------------------------------------------ */
@@ -174,7 +174,7 @@ async function newSearch(fields, who = {}) {
     const doomed = await newSearch({ client: 'Archive Test', position: 'Manager' });
     const archived = await call('/api/account/start-fresh', {
       method: 'POST', body: { ids: [inA.id, doomed.id, ...((await call('/api/searches')).body
-        .filter(s => s.seat === 'manager' && ![inA.id, doomed.id].includes(s.id)).map(s => s.id)) ] }
+        .filter(s => s.searchRole === 'manager' && ![inA.id, doomed.id].includes(s.id)).map(s => s.id)) ] }
     });
     assert.equal(archived.status, 200, JSON.stringify(archived.body));
     const listA = await call('/api/archives');
@@ -239,23 +239,23 @@ async function newSearch(fields, who = {}) {
     assert.equal(removeSelf.status, 409);
   });
 
-  /* --- seats, invitations, and what revoking each one ends ---------------- */
-  await check('a held seat grants nothing until the person joins, and then grants exactly one search', async () => {
-    const chair = 'held-seat@city.example';
-    const search = await newSearch({ client: 'Held Seat County', position: 'Administrator' });
-    const seated = await call('/api/searches/' + search.id + '/members', {
-      method: 'POST', body: { name: 'Chair Holder', email: chair, seat: 'committee' }, etag: search.revision
+  /* --- held places, invitations, and what revoking each one ends ---------- */
+  await check('a held place grants nothing until the person joins, and then grants exactly one search', async () => {
+    const chair = 'held-place@city.example';
+    const search = await newSearch({ client: 'Held Place County', position: 'Administrator' });
+    const held = await call('/api/searches/' + search.id + '/members', {
+      method: 'POST', body: { name: 'Chair Holder', email: chair, searchRole: 'committee' }, etag: search.revision
     });
-    assert.equal(seated.status, 200, JSON.stringify(seated.body));
-    assert.equal(seated.body.seated, false, 'somebody outside the workspace was seated outright');
-    assert.equal(seated.body.pending.length, 1);
-    assert.equal(seated.body.pending[0].status, 'invitation-sent');
+    assert.equal(held.status, 200, JSON.stringify(held.body));
+    assert.equal(held.body.added, false, 'somebody outside the workspace was added outright');
+    assert.equal(held.body.pending.length, 1);
+    assert.equal(held.body.pending[0].status, 'invitation-sent');
 
     // Before joining: no workspace, so nothing at all.
     const before = await call('/api/searches/' + search.id, { email: chair, org: null });
     assert.equal(before.status, 403);
 
-    // Joining accepts the invitation and takes up the held seat.
+    // Joining accepts the invitation and takes up the held place.
     const after = await call('/api/me', { email: chair, org: A, role: 'org:committee' });
     assert.equal(after.body.onboarding.access, 'committee');
     const theirs = await call('/api/searches', { email: chair, org: A, role: 'org:committee' });
@@ -263,10 +263,10 @@ async function newSearch(fields, who = {}) {
     assert.equal(theirs.body[0].id, search.id);
     assert.equal((await call('/api/searches/' + inA.id, { email: chair, org: A, role: 'org:committee' })).status, 404);
 
-    // Idempotent: signing in again does not seat them twice.
+    // Idempotent: signing in again does not add them twice.
     await call('/api/me', { email: chair, org: A, role: 'org:committee' });
     const roster = (await call('/api/searches/' + search.id)).body.roster;
-    assert.equal(roster.filter(m => m.email === chair).length, 1, 'the invitation seated them twice');
+    assert.equal(roster.filter(m => m.email === chair).length, 1, 'the invitation added them twice');
 
     // A committee member reads the file; they do not edit it. Sent with the
     // current revision, so this is the authorization answer and not a
@@ -278,11 +278,11 @@ async function newSearch(fields, who = {}) {
     assert.equal(edit.status, 403, 'a committee member edited the search file');
   });
 
-  await check('removing somebody from the workspace ends their seats and keeps their history', async () => {
+  await check('removing somebody from the workspace ends their assignments and keeps their history', async () => {
     const member = 'departing@city.example';
     const search = await newSearch({ client: 'Departure City', position: 'Manager' });
     await call('/api/searches/' + search.id + '/members', {
-      method: 'POST', body: { name: 'Departing Member', email: member, seat: 'committee' }, etag: search.revision
+      method: 'POST', body: { name: 'Departing Member', email: member, searchRole: 'committee' }, etag: search.revision
     });
     await call('/api/me', { email: member, org: A, role: 'org:committee' });
     assert.equal((await call('/api/searches', { email: member, org: A, role: 'org:committee' })).body.length, 1);
@@ -290,11 +290,11 @@ async function newSearch(fields, who = {}) {
     const members = (await call('/api/organization/members')).body.members;
     const row = members.find(m => m.email === member);
     assert.ok(row, 'the new member was not listed');
-    assert.equal(row.seats, 1);
+    assert.equal(row.searches, 1);
 
     const removed = await call('/api/organization/members/' + row.clerkUserId, { method: 'DELETE' });
     assert.equal(removed.status, 200, JSON.stringify(removed.body));
-    assert.equal(removed.body.seats, 1);
+    assert.equal(removed.body.releasedPlaces, 1);
 
     const nothing = await call('/api/searches', { email: member, org: A, role: 'org:committee' });
     assert.equal(nothing.status, 403, 'access survived removal from the workspace');
@@ -345,6 +345,40 @@ async function newSearch(fields, who = {}) {
     assert.equal(inANow.body.capabilities.staff, true, 'the second membership changed the first');
     assert.equal((await call('/api/searches', { email: ABE, org: B, role: 'org:committee' })).body.length, 0,
       'a committee member in B saw B’s book of business');
+  });
+
+  // Against the real provider's error shape rather than the fixture: Clerk
+  // answers an unregistered role with 404, which every other branch of invite()
+  // would have turned into "try again shortly". An instance missing
+  // org:consultant and org:committee is the likeliest way this deployment
+  // breaks, and a retryable outage message hides it for as long as somebody
+  // keeps retrying.
+  await check('an unregistered Clerk role is a refusal, not an outage', async () => {
+    const organizations = require('../server/organizations');
+    const clerkError = (status, meta) => Object.assign(new Error('not found'), {
+      status, errors: [{ code: 'resource_not_found', message: 'not found', meta }]
+    });
+    const directoryWith = error => organizations.createDirectory({}, {
+      clerkClient: { organizations: { createOrganizationInvitation: async () => { throw error; } } }
+    });
+    const invite = error => () => directoryWith(error)
+      .invite('org_x', { email: 'someone@city.example', role: 'org:consultant' });
+
+    await assert.rejects(invite(clerkError(404, { paramName: 'role' })),
+      e => e.code === 'DIRECTORY_REJECTED' && e.status === 400 && /no org:consultant role/.test(e.message),
+      'a missing role read as a provider outage');
+
+    // A 404 that is not about the role is still not an outage — the workspace is
+    // gone — and it must not claim the instance is missing a role.
+    await assert.rejects(invite(clerkError(404, {})),
+      e => e.code === 'DIRECTORY_REJECTED' && e.status === 409,
+      'a deleted workspace read as a provider outage');
+
+    // A real outage must still be one, or the fix would have swallowed the case
+    // the 503 exists for.
+    await assert.rejects(invite(Object.assign(new Error('socket hang up'), { status: 503 })),
+      e => e.code === 'DIRECTORY_UNAVAILABLE',
+      'a provider outage stopped being retryable');
   });
 
   console.log('\n' + passed + ' organization checks passed' + (failed ? ', ' + failed + ' failed.' : '.'));

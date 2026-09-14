@@ -152,17 +152,17 @@ function row(label, stats) {
     });
 
     const buildStart = Date.now();
-    const seatEmails = [];
+    const committeeEmails = [];
     for (let i = 0; i < ACCOUNTS; i += 1) {
       const email = 'load-member-' + i + '@example.gov';
       const res = await write('POST', '/api/searches/' + id + '/members',
-        { name: 'Load Member ' + i, email, seat: 'committee' });
-      // Seating somebody outside the workspace invites them and holds the seat;
-      // their first request accepts it and takes the seat up. Do that here so
-      // the measurement runs against real seated members.
+        { name: 'Load Member ' + i, email, searchRole: 'committee' });
+      // Adding somebody outside the workspace invites them and holds the place;
+      // their first request accepts it and takes the place up. Do that here so
+      // the measurement runs against members who are really on the search.
       if (res.status === 200) {
         await call('GET', '/api/me', undefined, signer.inOrg(email, orgId, 'org:committee'));
-        seatEmails.push(email);
+        committeeEmails.push(email);
       }
     }
 
@@ -187,7 +187,7 @@ function row(label, stats) {
     const storeBytes = fs.statSync(path.join(dataDir, 'slate.json')).size;
 
     console.log('  built in ' + buildSeconds.toFixed(1) + 's · '
-      + candidateIds.length + ' candidates · ' + seatEmails.length + ' seats · store '
+      + candidateIds.length + ' candidates · ' + committeeEmails.length + ' committee members · store '
       + (storeBytes / 1024).toFixed(0) + ' KB');
     console.log('');
 
@@ -222,7 +222,7 @@ function row(label, stats) {
     async function readerLoop(index) {
       // Committee members and consultants read the same search; both paths run.
       const headers = index % 4 === 0 ? owner
-        : signer.inOrg(seatEmails[index % seatEmails.length], orgId, 'org:committee');
+        : signer.inOrg(committeeEmails[index % committeeEmails.length], orgId, 'org:committee');
       while (Date.now() < deadline) {
         const started = process.hrtime.bigint();
         const res = await call('GET', '/api/searches/' + id, undefined, headers);

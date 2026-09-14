@@ -1,7 +1,7 @@
 'use strict';
 
 // Clerk proves identity and organization membership; Slate retains authority
-// over search seats. The two halves meet in the access context this module
+// over places on a search. The two halves meet in the access context this module
 // builds for every request (`req.access`), which is the only thing the
 // permission helpers in server/db.js will answer from.
 const { clerkMiddleware, clerkClient, getAuth } = require('@clerk/express');
@@ -90,14 +90,14 @@ async function resolveUser(store, userId, getUser) {
 }
 
 /**
- * Turn a held seat into a real one, now that the person has actually joined.
+ * Turn a held place into a real one, now that the person has actually joined.
  *
  * A search manager can prepare a committee before anybody has an account. The
- * seat waits as a pending assignment against an email and an organization; it
- * only becomes a seat when that same person shows up with a verified primary
+ * place waits as a pending assignment against an email and an organization; it
+ * only becomes an assignment when that same person shows up with a verified primary
  * email and a membership in that organization. Running on every request is
  * what makes it idempotent — the pending record is consumed, so a retry after
- * a crashed save finds nothing left to do rather than seating them twice.
+ * a crashed save finds nothing left to do rather than adding them twice.
  */
 function adoptPendingAssignments(store, user, orgId) {
   if (!orgId) return false;
@@ -108,12 +108,12 @@ function adoptPendingAssignments(store, user, orgId) {
     const search = store.db.searches.find(s => s.id === held.searchId && s.organizationId === orgId);
     if (!search) {
       // The search was archived or deleted while the invitation was out. The
-      // held seat has nothing to attach to, so it goes rather than lingering.
+      // held place has nothing to attach to, so it goes rather than lingering.
       organizations.removePendingAssignment(store.db, held.id);
       changed = true;
       continue;
     }
-    // The manager typed a name when they held the seat. Use it if the Clerk
+    // The manager typed a name when they held the place. Use it if the Clerk
     // profile gave us nothing better, so the roster reads as people rather
     // than as email addresses.
     if (held.name && user.name === user.email) {
@@ -122,7 +122,7 @@ function adoptPendingAssignments(store, user, orgId) {
     }
     if (!store.memberOf(search, user.id)) {
       search.members.push({
-        userId: user.id, seat: committee.seatOf(held.seat),
+        userId: user.id, searchRole: committee.searchRoleOf(held.searchRole),
         addedAt: store.now(), addedBy: held.invitedBy || null, fromInvitation: held.id
       });
       // The roster changed, so a confirmation given before this person joined

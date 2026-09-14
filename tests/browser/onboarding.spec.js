@@ -67,7 +67,7 @@ test('a new account confirms who it is, then has to join a workspace before anyt
   await expect(page.getByRole('status')).toContainText(email);
 });
 
-test('an invitation to a search holds a seat, and joining the workspace opens exactly that search', async ({ page, browser }, testInfo) => {
+test('an invitation to a search holds a place, and joining the workspace opens exactly that search', async ({ page, browser }, testInfo) => {
   const email = `invited-${testInfo.project.name}@example.test`;
   const orgId = await sharedWorkspace();
   const manager = authHeaders('abe@slate.local');
@@ -77,11 +77,11 @@ test('an invitation to a search holds a seat, and joining the workspace opens ex
   })).json();
   const invite = await page.request.post(`/api/searches/${search.id}/members`, {
     headers:{ ...manager, 'if-match':String(search.revision) },
-    data:{ name:'Jordan Rivera', email, seat:'committee' }
+    data:{ name:'Jordan Rivera', email, searchRole:'committee' }
   });
   expect(invite.ok(), await invite.text()).toBe(true);
   const held = await invite.json();
-  expect(held.seated).toBe(false);
+  expect(held.added).toBe(false);
   expect(held.invitationSent).toBe(true);
 
   // The manager's own view says the place is held, not that somebody is on it.

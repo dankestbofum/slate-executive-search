@@ -22,7 +22,7 @@ async function check(name, fn) {
 }
 
 // A Clerk session for one account. Slate links it to the Slate user with that
-// verified email, so seating someone is all it takes to sign in as them.
+// verified email, so adding someone is all it takes to sign in as them.
 const sign = identity.signer();
 
 (async () => {
@@ -265,11 +265,11 @@ const sign = identity.signer();
   });
 
   await check('follow-ups are refused to the committee', async () => {
-    const seated = await (await api('/api/searches/' + id + '/members', {
+    const added = await (await api('/api/searches/' + id + '/members', {
       method: 'POST', revision: await revisionOf(id),
-      body: { name: 'Rose Intake', email: 'rose-intake@example.com', seat: 'committee' }
+      body: { name: 'Rose Intake', email: 'rose-intake@example.com', searchRole: 'committee' }
     })).json();
-    assert.ok(seated.email, 'seating did not return the member email');
+    assert.ok(added.email, 'adding did not return the member email');
     const res = await fetch(BASE + '/api/searches/' + id + '/follow-ups', { headers: sign.headers('rose-intake@example.com') });
     assert.ok(res.status === 403 || res.status === 404, 'the committee could read the contact log: ' + res.status);
   });

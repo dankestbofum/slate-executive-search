@@ -46,7 +46,7 @@ Routes: `POST /staff/:key/log`, `DELETE /staff/:key/log/:lid`,
 
 A search carries one of three packages, picked when the file is opened and
 changeable on Search facts. The package decides how many of the nineteen steps
-are on the file. The committee is on every one: each package seats the people
+are on the file. The committee is on every one: each package puts the people
 who will hire and builds the profile from their answers. What a cheaper package
 leaves out is the later work, not the room.
 
@@ -98,7 +98,8 @@ the point of the design:
 
 - **Membership** is Clerk's answer, and it decides which firm you are in and
   what you may do across it.
-- **A seat** is Slate's answer, and it decides which searches you work on.
+- **A place on a search** is Slate's answer, and it decides which searches
+  you work on. In the store it is the member's `searchRole`.
 
 Being in a firm's workspace does not put you on any of its searches; being on a
 search does not survive losing the membership.
@@ -106,8 +107,8 @@ search does not survive losing the membership.
 | Workspace role | Clerk role | In the workspace | On a search |
 |---|---|---|---|
 | Organization administrator | `org:admin` | Invites members, sets their roles, sees the whole book | Consultant powers; may take over a search by the ordinary handover |
-| Search consultant | `org:consultant` | Opens searches, sees the whole book | Reads and edits every search here; manager actions still need the manager seat |
-| Committee member | `org:committee` | Sees only their own assignments | Reads and scores the searches they are seated on |
+| Search consultant | `org:consultant` | Opens searches, sees the whole book | Reads and edits every search here; manager actions still need the manager role |
+| Committee member | `org:committee` | Sees only their own assignments | Reads and scores the searches they are on |
 | Awaiting access | anything else | Nothing | Nothing |
 
 Register `org:consultant` and `org:committee` on the Clerk instance before
@@ -116,21 +117,21 @@ other role, **including Clerk's own `org:member`**, resolves to no access at
 all rather than to a guess, because `org:member` carries directory and billing
 permissions that a committee member should not hold.
 
-Within one workspace the seats are unchanged:
+Within one workspace the roles on a search are unchanged:
 
 | | Consultant | Account manager | Committee member |
 |---|---|---|---|
 | See every search in this workspace | yes | yes | only their own |
 | Edit the search file | yes | yes | no |
-| Seat members, run intake, adopt consensus | no | yes | no |
+| Add members, run intake, adopt consensus | no | yes | no |
 | Answer intake, score candidates | yes | yes | yes |
 
-The account manager is whichever consultant holds the seat. **Any consultant in
+The account manager is whichever consultant holds that role. **Any consultant in
 the workspace can join a search and take the account** — who runs a file is a
 firm decision, not a wall between colleagues, and gating it on the current
 manager would strand a search whenever that person is unavailable. Everything
-else the manager does (seating members, running the intake window, adopting
-consensus) stays with whoever holds the seat.
+else the manager does (adding members, running the intake window, adopting
+consensus) stays with whoever holds it.
 
 The same person can be a consultant in one firm's workspace and a committee
 member in another's. The answer always comes from the membership verified for
@@ -165,7 +166,7 @@ because "no access" covers several situations that need different answers:
 - **A member whose role Slate does not act on** is told which role they hold and
   who can change it.
 - **A committee member with no assignment** is told they are part of the firm
-  and that a search manager seats people individually.
+  and that a search manager adds people individually.
 
 #### Who may found a workspace
 
@@ -188,7 +189,7 @@ organization membership and defeating it. This bounds who can bring a new, empty
 firm into being, and grants nothing inside any workspace.
 
 **My access** in the rail shows the role the workspace assigned, the searches
-they are seated on, and who to ask for a change. It is not a control that
+they are on, and who to ask for a change. It is not a control that
 changes anything: roles are set by an administrator in **Team & access**.
 
 ### Team & access
@@ -198,7 +199,7 @@ different states. **Members** are in the firm; **Invitations** have been emailed
 and are not. Inviting somebody requires an address and an explicit role, and the
 form says what pressing the button does before it is pressed. Changing a role
 takes effect on that person's next request. Removing somebody ends their access
-to every search in the workspace and releases their seats, while their scores,
+to every search in the workspace and releases their places, while their scores,
 notes and authorship stay on the record under their name; somebody who manages a
 search has to hand it over first. The last administrator cannot be removed or
 demoted.
@@ -260,7 +261,7 @@ it so the single-process store reloads the change.
 
 Clerk is the only way in. Slate issues no credential, keeps no session table
 and has no sign-in route of its own; identity is proven on every request and
-resolved to the account that holds the roles and seats. Missing Clerk
+resolved to the account that holds the roles and assignments. Missing Clerk
 configuration blocks workspace access rather than restoring open access.
 
 The regression suite signs its own Clerk sessions with a throwaway key the test
@@ -920,7 +921,7 @@ must contact the candidate and share the link.
 **Archive** replaces permanent search deletion. Archived searches and their media
 can be restored from **Archived searches**. Their candidate links stop working
 while archived and are replaced on restoration. Committee accounts with no active
-seats are retired; roster accounts are recovered on restoration.
+places are retired; roster accounts are recovered on restoration.
 If an email was reassigned to a different account, restoration stops for that
 conflict to be resolved. No permanent purge is exposed in the app.
 

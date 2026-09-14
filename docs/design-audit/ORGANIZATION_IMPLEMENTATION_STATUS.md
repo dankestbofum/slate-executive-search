@@ -27,14 +27,14 @@ out of the migration in, on purpose.
 
 | File | What it does now |
 |---|---|
-| `server/organizations.js` | New. Roles, capabilities, the local organization/membership/held-seat tables, and the directory: one place that talks to Clerk's Backend API, and the one place the offline suite substitutes. |
-| `server/auth.js` | Builds `req.access` — identity, active organization, the role re-read from the directory, and the capabilities that follow. Handles a session Clerk is holding on an unanswered task, and turns held seats into real ones when the person joins. |
+| `server/organizations.js` | New. Roles, capabilities, the local organization/membership/held-place tables, and the directory: one place that talks to Clerk's Backend API, and the one place the offline suite substitutes. |
+| `server/auth.js` | Builds `req.access` — identity, active organization, the role re-read from the directory, and the capabilities that follow. Handles a session Clerk is holding on an unanswered task, and turns held places into real ones when the person joins. |
 | `server/onboarding.js` | Names the five states somebody can be in before the workspace opens, so each gets its own screen instead of one "no access". |
 | `server/db.js` | Schema 4. `canView`/`canEdit`/`canManage` take the access context instead of a user; `isConsultant` is gone. |
-| `server/index.js` | Every search, archive, export and media route runs behind `requireWorkspace`. New organization and administration routes. Held seats on every search read. |
+| `server/index.js` | Every search, archive, export and media route runs behind `requireWorkspace`. New organization and administration routes. Held places on every search read. |
 | `server/http.js` | A provider outage is a 503 the client can retry, and a provider refusal keeps its own message. |
 | `public/auth.js` | Active organization, switching, invitations, and the pending-task state. |
-| `public/app.js` | Workspace identity and switcher, `#/o/{orgId}/…` addresses, the five onboarding screens, My access, Team & access, held seats on the roster, and authenticated photo fetches. |
+| `public/app.js` | Workspace identity and switcher, `#/o/{orgId}/…` addresses, the five onboarding screens, My access, Team & access, held places on the roster, and authenticated photo fetches. |
 | `scripts/organizations.js` | New. `plan`, `adopt`, `link` — a dry run until `--apply`. |
 | `scripts/accounts.js` | Keeps only the deployment-level authority. No command grants access any more. |
 
@@ -55,7 +55,7 @@ out of the migration in, on purpose.
   boundary is proved end to end in `tests/organizations.js`.
 - **Two authorities, kept apart.** A search manager rosters a committee; an
   administrator invites people to the firm. A manager who is not an
-  administrator gets a held seat marked **Invitation needed**, and Slate never
+  administrator gets a held place marked **Invitation needed**, and Slate never
   implies an email went out when it did not.
 - **The multi-tab hazard.** Brochure photos are fetched with the page's own
   bearer token; the server refuses an image request without one, because Clerk's
@@ -71,6 +71,33 @@ out of the migration in, on purpose.
   into being and grants nothing inside any workspace — which is what separates
   it from the operator allowlist this work removed.
 
+## Added 14 September 2026
+
+**The word "seat" is gone from the store, not only the screen.** The UI stopped
+saying it on 13 September; the field behind it did not, which left the roster
+described one way in the interface and another way in every file that touches
+it. `members[].seat` and `pendingAssignments[].seat` are now `searchRole`
+— schema 5, migrating live rosters, archived rosters and held places together,
+because an archive left at the old spelling would restore a roster nobody can
+read. The CSS block is `.rosterrow`, the form field posts `searchRole`, and
+the four different counts that were all called `seats` now say which one they
+mean: `asked`, `people`, `searches`, `releasedPlaces`. A guard in
+`tests/bughunt.js` asserts the word appears nowhere in the client at all.
+
+This changes the export contract: `bundle.committee.roster[].seat` is now
+`searchRole`. Anything outside this repository reading an export needs the
+same rename.
+
+**An unregistered Clerk role is now a refusal, not an outage.** Clerk answers
+`createOrganizationInvitation` with a role it does not know by returning 404
+and `meta.paramName: "role"` — not the 422 a bad field usually gets. That fell
+through to the provider-outage branch, so a deployment missing
+`org:consultant` or `org:committee` told the administrator "we could not
+verify your workspace membership, please try again shortly": retryable advice
+for a condition retrying can never fix, on the single likeliest way this release
+goes wrong. It now names the missing role. Found by running the real invitation
+path against the development instance rather than the fixture.
+
 ## What it found on the way
 
 Three defects the work surfaced, all now fixed:
@@ -85,14 +112,21 @@ Three defects the work surfaced, all now fixed:
 
 ## Verification
 
-- `npm run check` — 64 files parsed, 0 failed.
-- `npm test` — 509 checks, exit 0. Includes `tests/organizations.js`: 20 checks
+Re-run on 14 September, after the `searchRole` rename:
+
+- `npm run check` — 65 files parsed, 0 failed.
+- `npm test` — 515 checks, exit 0. Includes `tests/organizations.js`: 21 checks
   covering reads, writes, listings, counts, directories, archives, exports,
-  media, administration, held seats, removal, and forged organization claims.
-- `npm run test:browser` — 181 checks across Chromium, WebKit and a phone
-  viewport, 0 failed. The runner exits normally and leaves no listener behind;
-  the teardown problem noted in the plan is resolved (`SLATE_EXIT_WITH_PARENT`
-  plus closing idle connections on shutdown).
+  media, administration, held places, removal, forged organization claims, and
+  an unregistered Clerk role. `tests/auth.js` takes a store written at schema 1
+  — with a live roster, an archived roster and a held place all still spelled
+  `seat` — through to schema 5.
+- `npm run test:browser` — 193 passed, 20 skipped, 0 failed, exit 0, across
+  Chromium, WebKit and a phone viewport. The runner exits normally and leaves no
+  listener behind; the teardown problem noted in the plan is resolved
+  (`SLATE_EXIT_WITH_PARENT` plus closing idle connections on shutdown).
+- The 4 → 5 migration rehearsed against a copy of the working store: both
+  roster rows converted, the old key gone, pre-migration snapshot written.
 - Accessibility scans pass in both themes on every new screen, and the workspace
   name stays readable at 320px.
 
@@ -103,15 +137,21 @@ already stood in for its user lookup, and it accepts an invitation on sight
 because there is no Clerk UI here to accept it in. So none of the following is
 evidence yet, and all of it needs a hosted instance:
 
-- Invitation email delivery, and a person accepting one.
+- Invitation email delivery, and a person accepting one. The creation half is
+  no longer among these: on 14 September the development instance took a real
+  invitation for each custom role through `clerkDirectory().invite()`. The
+  recipients were `+clerk_test` addresses on the reserved `example.com` domain
+  and every invitation was revoked, so nothing was sent anywhere and nobody
+  accepted one.
 - The organization-selection session task as Clerk actually presents it.
 - Clerk's own components, which remain outside the accessibility scan.
 - The latency of one Backend API call per protected request, which is the cost
   this release pays for immediate revocation. Measure it before considering a
   cache.
 - That the deployed environment points at an instance with Organizations enabled
-  and the two custom roles registered. The development instance having them is
-  not evidence about a hosted one.
+  and the two custom roles registered. The development instance has had both
+  since 13 September, and that is still not evidence about a hosted one — it is
+  a different instance with its own role set.
 
 ## One thing to decide, not a defect
 

@@ -132,8 +132,8 @@ a{color:var(--accent-deep); text-underline-offset:.18em; text-decoration-thickne
 .rail__caret{flex:none; transition:transform .12s ease}
 .rail__toggle[aria-expanded="true"] .rail__caret{transform:rotate(90deg)}
 .rail__toggle .rail__label{flex:1; min-width:0}
-/* Phase names wrap rather than truncate: "Seat the committee and hear them"
-   ellipsised to "Seat the committe…", which named nothing. */
+/* Phase names wrap rather than truncate: "Assemble the committee and hear them"
+   ellipsised to "Assemble the committ…", which named nothing. */
 .rail__label{
   font-size:11.5px; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
   line-height:1.35; color:var(--ink-3);
@@ -672,7 +672,7 @@ details.toggle[open] summary::before{transform:rotate(90deg) translateX(-1px)}
   .shell{display:block; grid-template-columns:1fr}
   .page, .band{background:#fff; box-shadow:none}
   /* A row should not be split down the middle by a page break. */
-  .spec, .hubrow, .seat, .q, .scorerow{break-inside:avoid}
+  .spec, .hubrow, .rosterrow, .q, .scorerow{break-inside:avoid}
   thead{display:table-header-group}
   tr{break-inside:avoid}
 

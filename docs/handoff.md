@@ -110,7 +110,7 @@ checked in.
 
 **Restore:** the full path is exercised automatically on every run —
 snapshot → copy off-volume → restore into an empty environment → verify the
-search, committee seats and accounts, candidate answers *with their original
+search, committee places and accounts, candidate answers *with their original
 questions*, scores, history and brochure image, and that old sessions do not
 come back. Measured at **36ms against synthetic data**.
 
