@@ -4,6 +4,11 @@ Create one Markdown record per release rehearsal from `TEMPLATE.md`. Name it
 with a UTC timestamp and short release id, for example
 `2026-09-16T1800Z-a1b2c3d.md`.
 
+Two records here are not release rehearsals and say so at the top:
+`2026-09-16-local-working-tree.md` and `2026-09-16-late-stage-p4.md` are
+implementation evidence from a dirty tree on an unsupported runtime. Neither
+carries a gate, and neither may be cited as a pass for a later commit.
+
 Evidence is release-specific. Record the commit and whether the tree was dirty;
 if it was, attach a sanitized `git diff --binary` outside the repository and
 record its checksum. Do not commit identity tokens, candidate bearer URLs,

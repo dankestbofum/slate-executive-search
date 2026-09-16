@@ -80,20 +80,31 @@ function attribute(entry, lookupUser) {
   };
 }
 
-function candidateRecord(candidate, { includeContact }) {
+function candidateRecord(candidate, { includeContact, superseded = [] }) {
   const surveys = {};
   for (const key of ['survey1', 'survey2']) {
     const response = candidate[key];
     if (!response) continue;
     surveys[key] = {
-      submittedAt: response.submittedAt || null,
+      // The stored response names its own timestamp `at`, and keeps the frozen
+      // copy of the questionnaire under `survey`. This read those as
+      // `submittedAt` and `questions`, which are not fields the record has: the
+      // export shipped answers with no questions beside them and no submission
+      // date, which is the one thing this section exists to carry. Found by the
+      // B09 rehearsal; the sealed-score declaration below was never affected.
+      submittedAt: response.at || response.submittedAt || null,
       version: response.version ?? null,
       // The questions as they were asked, kept with the answers. An answer
       // without its question is not a record of anything.
-      questions: response.questions || null,
-      answers: response.answers || null,
-      correctedAt: response.correctedAt || null,
-      supersedes: response.supersedes || null
+      questions: response.survey?.questions || response.questions || null,
+      profileRevision: response.profileRevision ?? null,
+      criteria: response.criteria || null,
+      answers: response.answers || null
+      // `correctedAt` and `supersedes` used to sit here and were always null:
+      // a response is never edited in place, so nothing ever set them. A
+      // correction replaces the response and files the original in the search
+      // history, which is what `supersededResponses` below carries. A field
+      // that is always null implies a concept the record does not have.
     };
   }
   return {
@@ -107,7 +118,40 @@ function candidateRecord(candidate, { includeContact }) {
     addedAt: candidate.addedAt || null,
     referenceConsentAt: candidate.referenceConsentAt || null,
     referenceConsentBy: candidate.referenceConsentBy || null,
-    responses: surveys
+    responses: surveys,
+    // The inventory of material held elsewhere, and the contact staff recorded
+    // making. Both have been on the candidate since DEP-08; the export was
+    // still describing them as future work and shipping neither.
+    documents: (candidate.documents || []).map(doc => ({
+      id: doc.id, kind: doc.kind, label: doc.label,
+      // Where it is, never a way in. A repository link is a location; if it
+      // carries a sharing credential it is scrubbed with everything else.
+      location: doc.url || null,
+      note: doc.note || '', receivedAt: doc.receivedAt || null,
+      restricted: Boolean(doc.restricted),
+      recordedBy: doc.recordedByName || null, recordedAt: doc.recordedAt || null
+    })),
+    communications: (candidate.communications || []).map(entry => ({
+      id: entry.id, at: entry.at, channel: entry.channel, purpose: entry.purpose,
+      summary: entry.summary, followUpOn: entry.followUpOn || null,
+      actorName: entry.actorName || null, recordedAt: entry.recordedAt || null,
+      evidence: entry.evidence, evidenceNote: entry.evidenceNote
+    })),
+    // Responses replaced when a questionnaire was reopened. The current answers
+    // above are not the whole of what this person submitted, and a record that
+    // showed only the latest would misrepresent a correction as an original.
+    // The bodies live in the search history; they are repeated here so both the
+    // bundle and the readable report carry them beside the person they concern.
+    supersededResponses: superseded.map(entry => ({
+      questionnaire: entry.key || null,
+      submittedAt: entry.body?.at || null,
+      replacedAt: entry.at || null,
+      reason: entry.reason || null,
+      reopenedBy: entry.who || null,
+      version: entry.body?.version ?? null,
+      questions: entry.body?.survey?.questions || null,
+      answers: entry.body?.answers || null
+    }))
   };
 }
 
@@ -220,7 +264,10 @@ function build(search, { viewer, users, dataDir, release }) {
       staleReason: search.staleArtifacts?.[key] || null
     }])),
 
-    candidates: (search.candidates || []).map(c => candidateRecord(c, { includeContact: true })),
+    candidates: (search.candidates || []).map(c => candidateRecord(c, {
+      includeContact: true,
+      superseded: (search.history || []).filter(h => h.kind === 'response' && h.candidateId === c.id)
+    })),
 
     evaluation: sealed
       ? {
@@ -285,8 +332,14 @@ function build(search, { viewer, users, dataDir, release }) {
         note: 'Resumes, application materials and background check results are held in the county-approved '
           + 'external repository, not in Slate. They must be exported from that system to complete this '
           + 'record. Slate holds only the references recorded above.',
-        // Populated once external document references are implemented in DEP-08.
-        references: []
+        // Every reference recorded against a candidate, gathered so a records
+        // custodian can reconcile this file against the repository holding the
+        // documents themselves without reading the whole bundle.
+        references: (search.candidates || []).flatMap(c => (c.documents || []).map(doc => ({
+          candidateId: c.id, candidateName: c.name,
+          kind: doc.kind, label: doc.label, location: doc.url || null,
+          receivedAt: doc.receivedAt || null, restricted: Boolean(doc.restricted)
+        })))
       }
     },
 
@@ -302,8 +355,8 @@ function build(search, { viewer, users, dataDir, release }) {
       missing: [
         sealed ? 'Individual scores and their explanations (sealed).' : null,
         'External documents held outside Slate (see documents.external).',
-        'Communications with candidates, until the manual contact log in DEP-08 exists.',
-        'Candidate disposition beyond stage, until DEP-09 defines outcomes.'
+        'The documents themselves. Slate records what exists and where it is held, never the file.',
+        'Delivery confirmation for candidate contact. Every entry is staff-recorded; Slate sends nothing.'
       ].filter(Boolean),
       unconfirmedFacts: jurisdictions.factStatus(search).outstanding
     }
@@ -370,6 +423,17 @@ function report(bundle) {
   if (!bundle.profile.criteria.length) lines.push('  No criteria adopted.');
 
   head('Candidates');
+  // One shape for a submitted response, used for the current answers and for
+  // any the reader has to be able to compare them against.
+  const answered = response => {
+    for (const question of response.questions || []) {
+      lines.push('      Q' + question.n + '. ' + question.prompt);
+      lines.push('      A. ' + String(response.answers?.['q' + question.n] || '(no answer)').replace(/\n/g, '\n         '));
+    }
+    if (!(response.questions || []).length) {
+      lines.push('      The questions as asked were not kept with this response.');
+    }
+  };
   for (const candidate of bundle.candidates) {
     lines.push('  ' + candidate.name + ' [' + candidate.id + '] — ' + (candidate.stage || 'no stage'));
     field('    Organization', candidate.organization);
@@ -377,13 +441,60 @@ function report(bundle) {
     for (const [key, response] of Object.entries(candidate.responses)) {
       lines.push('    ' + key + ' submitted ' + (response.submittedAt || 'not submitted')
         + (response.version != null ? ' (question version ' + response.version + ')' : ''));
-      for (const question of response.questions || []) {
-        lines.push('      Q' + question.n + '. ' + question.prompt);
-        lines.push('      A. ' + String(response.answers?.['q' + question.n] || '(no answer)').replace(/\n/g, '\n         '));
-      }
+      answered(response);
+    }
+    for (const doc of candidate.documents || []) {
+      lines.push('    document  ' + doc.kind.padEnd(12) + doc.label
+        + (doc.restricted ? '  [restricted]' : '')
+        + (doc.location ? '\n      Held at: ' + doc.location : '\n      No location recorded.'));
+    }
+    for (const entry of candidate.communications || []) {
+      lines.push('    contact   ' + String(entry.at).slice(0, 10) + '  ' + entry.channel + ' · ' + entry.purpose
+        + (entry.actorName ? ' · ' + entry.actorName : '') + '  [staff-recorded, delivery not confirmed]');
+      lines.push('      ' + entry.summary.replace(/\n/g, '\n      '));
+    }
+    for (const prior of candidate.supersededResponses || []) {
+      lines.push('    ' + (prior.questionnaire || 'response') + ' SUPERSEDED — submitted '
+        + (prior.submittedAt || 'unknown') + ', replaced ' + (prior.replacedAt || 'unknown')
+        + (prior.reopenedBy ? ' by ' + prior.reopenedBy : ''));
+      if (prior.reason) lines.push('      Reopened because: ' + prior.reason);
+      answered(prior);
     }
   }
   if (!bundle.candidates.length) lines.push('  No candidates recorded.');
+
+  // Outcomes and the lifecycle were in the bundle but never in the readable
+  // report, which is the copy a records officer is actually handed: it said who
+  // applied and what they answered, and nothing about what was decided. Every
+  // decision is printed with its reason, its job-related basis, its author, and
+  // — for a correction — the entry it supersedes, which stays above it.
+  head('Outcomes');
+  for (const person of bundle.dispositions) {
+    if (!person.history.length) {
+      lines.push('  ' + person.name + ' [' + person.candidateId + '] — no outcome recorded (' + (person.stage || 'no stage') + ')');
+      continue;
+    }
+    lines.push('  ' + person.name + ' [' + person.candidateId + ']');
+    for (const entry of person.history) {
+      lines.push('    ' + String(entry.at).slice(0, 10) + '  ' + entry.outcome.toUpperCase()
+        + (entry.supersedes ? '  (corrects ' + entry.supersedes + ')' : '')
+        + '  ' + (entry.actorName || 'unattributed') + ' [' + (entry.actorId || 'no id') + ']'
+        + (entry.source === 'staff-recorded-from-candidate' ? '  [reported by the candidate, recorded by staff]' : ''));
+      lines.push('      Reason:   ' + entry.reason.replace(/\n/g, '\n                '));
+      if (entry.evidence) lines.push('      Evidence: ' + entry.evidence.replace(/\n/g, '\n                '));
+    }
+  }
+  if (!bundle.dispositions.length) lines.push('  No candidates on the file.');
+
+  head('Lifecycle');
+  field('Status', bundle.lifecycle.status);
+  field('Concluded', bundle.lifecycle.closedAt);
+  field('Most recent reason', bundle.lifecycle.reason);
+  field('Times reopened', bundle.lifecycle.reopenCount);
+  if (bundle.lifecycle.undecided.length) {
+    lines.push('  Still undecided when this record was taken: '
+      + bundle.lifecycle.undecided.map(p => p.name).join(', '));
+  }
 
   head('Evaluation');
   if (bundle.evaluation.sealed) {
@@ -411,6 +522,16 @@ function report(bundle) {
   }
   lines.push('');
   lines.push('  ' + bundle.documents.external.note.replace(/(.{1,68})(\s|$)/g, '$1\n  ').trim());
+  lines.push('');
+  lines.push('  External inventory — what is held elsewhere, and where:');
+  for (const item of bundle.documents.external.references) {
+    lines.push('  - ' + item.candidateName + ' · ' + item.kind + ' · ' + item.label
+      + (item.restricted ? ' [restricted]' : '')
+      + (item.location ? '\n      ' + item.location : '\n      No location recorded.'));
+  }
+  if (!bundle.documents.external.references.length) {
+    lines.push('  - Nothing recorded. If material exists outside Slate, this file does not name it.');
+  }
 
   head('Known gaps in this record');
   for (const gap of bundle.completeness.missing) lines.push('  - ' + gap);

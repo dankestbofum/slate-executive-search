@@ -209,6 +209,12 @@ test('a populated workspace screen has no WCAG 2.1 AA violations, in either them
 });
 
 test('the record-keeping screens have no WCAG 2.1 AA violations, in either theme', async ({ page }, testInfo) => {
+  // Ten axe runs across five populated surfaces. On WebKit that sat just under
+  // the default timeout, and adding the export panel to closeout pushed it
+  // over — a duration, not a violation. Marked slow rather than trimmed: the
+  // surfaces are the point, and dropping one to save seconds would leave a
+  // record-keeping screen unscanned.
+  test.slow();
   await installClerk(page);
   await page.goto('/');
   await page.waitForLoadState('networkidle');

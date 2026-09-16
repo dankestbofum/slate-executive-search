@@ -27,6 +27,7 @@ const telemetry = require('./telemetry');
 const exporter = require('./export');
 const candidates = require('./candidates');
 const disposition = require('./disposition');
+const authority = require('./authority');
 const aibudget = require('./aibudget');
 const researchOp = require('./research-op');
 const researchJobs = require('./research-jobs');
@@ -219,6 +220,11 @@ function painted(req, search){
   // tomorrow, reconnects to the same operation instead of losing it or
   // starting a second paid one.
   out.researchJob = db.canEdit(search, req.access) ? jobs.referenceFor(search.id) : null;
+  // Which late-stage decisions this viewer may make, from the same table the
+  // routes enforce (server/authority.js). The client draws its controls from
+  // this rather than re-deriving authority from a role name, so a policy change
+  // moves the buttons and the refusals together.
+  if (req.access && out.you) out.you.may = authority.permissions(search, req.access);
   return out;
 }
 
@@ -910,6 +916,9 @@ app.get('/api/searches', ...requireWorkspace, (req, res) => {
       accountManager: d.accountManager ? { name: d.accountManager.name, init: d.accountManager.init } : null,
       people: (s.members || []).length,
       searchRole: searchRole ? searchRole.searchRole : null,
+      // Home offers archiving across the book, so it needs the same answer the
+      // archive route will give, per search rather than per person.
+      mayArchive: authority.allows('archiveSearch', s, req.access),
       // Drives the "you owe them an answer" prompt on Home. A member should not
       // have to open every search to find the one waiting on them.
       intakeOpen: intake.status === 'open',
@@ -1119,13 +1128,33 @@ app.patch('/api/searches/:id/members/:uid', ...requireWorkspace, requireSearch, 
     if (!db.isStaffOf(user.id, req.access.orgId)) {
       return res.status(400).json({ error:'The account manager is a consultant or administrator in this workspace.' });
     }
+    // Handover is the one move that changes who holds every other late-stage
+    // decision, so it cannot be a move anybody can make. Without this, a
+    // consultant refused a closeout could simply take the account and close the
+    // search anyway, and the whole matrix would be advisory.
+    const refusal = authority.refusalFor('handoverManager', req.search, req.access);
+    if (refusal) return res.status(refusal.status).json(refusal);
+    const reason = String(req.body?.reason || '').trim().slice(0, 600);
+    // An administrator reassigning a search they do not run is the emergency
+    // path. It is allowed, and it is never silent: it says why, on the file.
+    const reassignment = !db.canManage(req.search, req.access);
+    if (reassignment && !reason) {
+      return res.status(400).json({
+        error: 'Record why this account is being reassigned. An administrator taking a search from its manager is written down.',
+        code: 'REASON_REQUIRED'
+      });
+    }
     // Exactly one manager. The outgoing one stays on the search as a
     // consultant rather than losing their place.
+    const outgoing = db.accountManager(req.search);
+    const outgoingName = outgoing ? (db.findUserById(outgoing.userId)?.name || 'the previous manager') : '';
     for (const other of req.search.members) {
       if (other.searchRole === 'manager') other.searchRole = 'consultant';
     }
     m.searchRole = 'manager';
-    db.touch(req.search, req.user, 'handed the account to ' + user.name);
+    db.touch(req.search, req.user, (reassignment
+      ? 'reassigned the account from ' + outgoingName + ' to ' + user.name
+      : 'handed the account to ' + user.name) + (reason ? ': ' + reason : ''));
   } else {
     if (!db.canManage(req.search, req.access)) {
       const mgr = db.accountManager(req.search);
@@ -1283,13 +1312,33 @@ app.get('/api/archives', ...requireWorkspace, (req, res) => {
   if (!db.isStaff(req.access)) return res.status(403).json({ error:'A consultant manages archived searches.' });
   res.json(db.db.archivedSearches
     .filter(s => s.organizationId === req.access.orgId)
-    .map(s => ({ id:s.id, no:s.no, client:s.client, position:s.position, archivedAt:s.archivedAt })));
+    // Whether this reader can take it back out, so the list can say who to ask
+    // instead of offering a button that will be refused. The manager's name
+    // comes with it for exactly that sentence; the roster itself does not,
+    // because the listing is an index rather than a way to read a filed search.
+    .map(s => {
+      const mgr = db.accountManager(s);
+      return {
+        id:s.id, no:s.no, client:s.client, position:s.position, archivedAt:s.archivedAt,
+        mayRestore: authority.allows('restoreArchive', s, req.access),
+        managerName: mgr ? (db.findUserById(mgr.userId)?.name || '') : ''
+      };
+    }));
 });
 
+// Restoring is the alternate way back into a search file, so it answers to the
+// same table as everything else that reaches one. The archived record still
+// carries its roster, which is what `canManage` reads: the person who ran the
+// search before it was filed away is the person who takes it back out.
 app.post('/api/archives/:id/restore', ...requireWorkspace, (req, res) => {
-  if (!db.isStaff(req.access)) return res.status(403).json({ error:'A consultant restores a search.' });
+  // Ahead of the lookup, as it was before: somebody who cannot see the archive
+  // at all must not be able to tell a real archived id from an invented one by
+  // reading which refusal comes back.
+  if (!db.isStaff(req.access)) return res.status(403).json({ error:'A consultant manages archived searches.' });
   const s = db.db.archivedSearches.find(s => s.id === req.params.id && s.organizationId === req.access.orgId);
   if (!s) return res.status(404).json({ error:'Archived search not found.' });
+  const refusal = authority.refusalFor('restoreArchive', s, req.access);
+  if (refusal) return res.status(refusal.status).json(refusal);
   for (const u of s.archivedUsers || []) {
     const current = db.findUserByEmail(u.email);
     if (current && current.id !== u.id) return res.status(409).json({ error:'A different account now uses ' + u.email + '. Resolve that account conflict before restoring this roster.' });
@@ -1335,7 +1384,7 @@ app.post('/api/archives/:id/restore', ...requireWorkspace, (req, res) => {
  * ------------------------------------------------------------------------- */
 
 /** Record an outcome for one candidate. */
-app.post('/api/searches/:id/candidates/:cid/disposition', ...requireWorkspace, requireSearch, requireEditor, (req, res) => {
+app.post('/api/searches/:id/candidates/:cid/disposition', ...requireWorkspace, requireSearch, requireEditor, authority.requireAuthority('recordOutcome'), (req, res) => {
   const candidate = candidateOr404(req, res);
   if (!candidate) return;
 
@@ -1359,7 +1408,7 @@ app.post('/api/searches/:id/candidates/:cid/disposition', ...requireWorkspace, r
 });
 
 /** Close or cancel the search. */
-app.post('/api/searches/:id/close', ...requireWorkspace, requireSearch, requireEditor, (req, res) => {
+app.post('/api/searches/:id/close', ...requireWorkspace, requireSearch, requireEditor, authority.requireAuthority('closeSearch'), (req, res) => {
   if (disposition.isFrozen(req.search)) {
     return res.status(409).json({ error: 'This search is already ' + disposition.lifecycleOf(req.search) + '.' });
   }
@@ -1382,7 +1431,7 @@ app.post('/api/searches/:id/close', ...requireWorkspace, requireSearch, requireE
 });
 
 /** Reopen a closed search, deliberately and with a reason. */
-app.post('/api/searches/:id/reopen', ...requireWorkspace, requireSearch, requireEditor, (req, res) => {
+app.post('/api/searches/:id/reopen', ...requireWorkspace, requireSearch, requireEditor, authority.requireAuthority('reopenSearch'), (req, res) => {
   if (!disposition.isFrozen(req.search)) {
     return res.status(409).json({ error: 'This search is already active.' });
   }
@@ -1492,7 +1541,7 @@ app.put('/api/searches/:id/verification', ...requireWorkspace, requireSearch, re
   res.json(painted(req, req.search));
 });
 
-app.get('/api/searches/:id/export', ...requireWorkspace, requireSearch, requireEditor, (req, res) => {
+app.get('/api/searches/:id/export', ...requireWorkspace, requireSearch, requireEditor, authority.requireAuthority('exportRecords'), (req, res) => {
   const bundle = exporter.build(req.search, {
     viewer: req.user,
     users: db.db.users,
@@ -1523,7 +1572,7 @@ app.get('/api/searches/:id/history', ...requireWorkspace, requireSearch, require
   res.json({ history, activity: req.search.activity || [] });
 });
 
-app.post('/api/searches/:id/history/:entry/restore', ...requireWorkspace, requireSearch, requireEditor, (req, res) => {
+app.post('/api/searches/:id/history/:entry/restore', ...requireWorkspace, requireSearch, requireEditor, authority.requireAuthority('restoreHistory'), (req, res) => {
   const entry = /^\d+$/.test(req.params.entry) && req.search.history[Number(req.params.entry)];
   if (!entry || !['artifact', 'profile', 'facts'].includes(entry.kind)) return res.status(400).json({ error:'Choose a saved document, profile, or search facts.' });
   if (entry.kind === 'artifact') {
@@ -1537,10 +1586,27 @@ app.post('/api/searches/:id/history/:entry/restore', ...requireWorkspace, requir
 });
 
 app.post('/api/searches/bulk-delete', ...requireWorkspace, (req, res) => {
-  if (req.user.role !== 'consultant') return res.status(403).json({ error:'The consultant deletes a search.' });
   const raw = Array.isArray(req.body?.ids) ? req.body.ids : [];
   const ids = [...new Set(raw.map(id => String(id || '').trim()).filter(Boolean))];
   if (!ids.length) return res.status(400).json({ error:'Pick at least one search.' });
+  // Archiving in bulk is archiving, one search at a time, and each one needs
+  // its own manager's authority. A batch is refused whole rather than partly
+  // applied: a request that archives four of five searches and reports success
+  // leaves the caller no way to tell which four.
+  const refused = [];
+  for (const id of ids) {
+    const s = db.db.searches.find(x => x.id === id);
+    if (!s || !db.canView(s, req.access)) continue;
+    if (!authority.allows('archiveSearch', s, req.access)) refused.push(s);
+  }
+  if (refused.length) {
+    return res.status(403).json({
+      code: 'AUTHORITY_REQUIRED', action: 'archiveSearch', requires: 'manager',
+      error: 'You do not run ' + (refused.length === 1
+        ? refused[0].client + ' · ' + refused[0].position
+        : refused.length + ' of the searches you picked') + '. Archiving a search is its manager’s decision. Nothing was archived.'
+    });
+  }
   const deleted = [];
   for (const id of ids) {
     const s = db.db.searches.find(x => x.id === id);
@@ -1554,8 +1620,7 @@ app.post('/api/searches/bulk-delete', ...requireWorkspace, (req, res) => {
   res.json({ ok:true, deleted: deleted.length, ids: deleted });
 });
 
-app.delete('/api/searches/:id', ...requireWorkspace, requireSearch, requireEditor, (req, res) => {
-  if (req.user.role !== 'consultant') return res.status(403).json({ error:'The consultant deletes a search.' });
+app.delete('/api/searches/:id', ...requireWorkspace, requireSearch, requireEditor, authority.requireAuthority('archiveSearch'), (req, res) => {
   // Research in flight is stopped and its history goes with the search, so a
   // deleted record leaves no job pointing at an id nobody can read.
   jobs.dropForSearch(req.search.id);
@@ -1567,10 +1632,15 @@ app.delete('/api/searches/:id', ...requireWorkspace, requireSearch, requireEdito
   res.json({ ok:true, id: req.search.id });
 });
 
+// The generic facts path carries one field that is not a fact: `released`
+// decides whether the committee's private scores become visible to each other
+// and to an export. It needs its own authority, and it needs it here rather
+// than only on whichever button the client draws, because this route is the
+// route — sending `{ released: true }` to it is the whole action.
 const PATCH_FIELDS = [
   'jurisdictionType',
   'client', 'position', 'state', 'website', 'fog', 'population', 'budget', 'salary', 'opened', 'firstReview', 'notes',
-  { key: 'released', role: 'consultant', roleError: 'The consultant releases scores.' }
+  { key: 'released', action: 'releaseScores' }
 ];
 
 app.patch('/api/searches/:id', ...requireWorkspace, requireSearch, requireEditor, (req, res) => {
@@ -1582,10 +1652,10 @@ app.patch('/api/searches/:id', ...requireWorkspace, requireSearch, requireEditor
   }
   if ('released' in body && typeof body.released !== 'boolean') return res.status(400).json({ error:'Released must be true or false.' });
   for (const f of PATCH_FIELDS) {
-    if (typeof f !== 'object' || !f.role) continue;
-    if (f.key in body && req.user.role !== f.role) {
-      return res.status(403).json({ error: f.roleError });
-    }
+    if (typeof f !== 'object' || !f.action) continue;
+    if (!(f.key in body) || body[f.key] === req.search[f.key]) continue;
+    const refusal = authority.refusalFor(f.action, req.search, req.access);
+    if (refusal) return res.status(refusal.status).json(refusal);
   }
   for (const f of PATCH_FIELDS) {
     const key = typeof f === 'string' ? f : f.key;
@@ -1657,10 +1727,12 @@ app.put('/api/searches/:id/artifact/:key', ...requireWorkspace, requireSearch, r
   res.json(painted(req, req.search));
 });
 
-app.post('/api/searches/:id/artifact/:key/review', ...requireWorkspace, requireSearch, requireEditor, artifactOnFile, (req, res) => {
+// Signing off on recruiting copy is the firm’s ordinary work. It used to read
+// the legacy account-level role, which only the seeded accounts carry: a
+// consultant invited into a workspace today was refused by it.
+app.post('/api/searches/:id/artifact/:key/review', ...requireWorkspace, requireSearch, requireEditor, authority.requireAuthority('certifyStaffWork'), artifactOnFile, (req, res) => {
   const key = req.params.key;
   if (!db.REVIEW_STEPS.has(key)) return res.status(400).json({ error:'That step does not take a review.' });
-  if (req.user.role !== 'consultant') return res.status(403).json({ error:'A consultant signs off on recruiting copy.' });
   if (!req.search.artifacts[key]) return res.status(400).json({ error:'Nothing on file yet to review.' });
   req.search.reviews = req.search.reviews || {};
   const approve = Boolean(req.body?.approve);
@@ -2207,9 +2279,15 @@ app.patch('/api/searches/:id/candidates/:cid', ...requireWorkspace, requireSearc
   if (!c) return res.status(404).json({ error:'Candidate not found.' });
   const body = req.body || {};
   if ('stage' in body) {
-    if (req.user.role !== 'consultant') return res.status(403).json({ error:'The consultant advances candidates.' });
     const ok = ['applicant','semifinalist','finalist','declined'];
     if (!ok.includes(body.stage)) return res.status(400).json({ error:'Unknown stage.' });
+    // Reaching the finalist stage, and coming back off it, is the decision the
+    // matrix reserves to the manager. Moving through the earlier stages is the
+    // consultant's ordinary screening work, so the authority asked for depends
+    // on which side of the line this change crosses — in either direction.
+    const finalistChange = body.stage !== c.stage && (body.stage === 'finalist' || c.stage === 'finalist');
+    const refusal = authority.refusalFor(finalistChange ? 'advanceFinalist' : 'advanceStage', req.search, req.access);
+    if (refusal) return res.status(refusal.status).json(refusal);
     // An outcome is a decision about this person's participation. Advancing
     // them afterwards would put the pipeline and the record in contradiction.
     const blocked = disposition.blocksAdvancement(c);
@@ -2220,8 +2298,15 @@ app.patch('/api/searches/:id/candidates/:cid', ...requireWorkspace, requireSearc
       });
     }
   }
+  const wasFinalist = c.stage === 'finalist';
   const allow = ['name','cur','org','yrs','email','stage'];
   for (const k of allow) if (k in body) c[k] = body[k];
+  // A certification describes the finalists who were on the file when it was
+  // made. Changing who they are makes that statement untrue, so it is withdrawn
+  // here rather than left standing over a roster it never covered.
+  if ((c.stage === 'finalist') !== wasFinalist) {
+    reopenReferences(req.search, req.user, 'the finalists changed');
+  }
   db.touch(req.search, req.user, 'updated '+c.name);
   db.persist();
   res.json(painted(req, req.search));
@@ -2289,6 +2374,31 @@ function staffCandidateFor(req, res){
   return { ok: true, candidate: c };
 }
 
+/**
+ * Withdraw a completion whose supporting record has changed.
+ *
+ * A completion stamp is a statement about a body of evidence at a moment: this
+ * work was done, and here is what it consisted of. Any change to that evidence
+ * makes the statement describe something that is no longer on the file, so the
+ * stamp comes off and somebody has to look again and re-certify. The reason is
+ * written to the activity feed, because a certification disappearing without
+ * explanation is worse than one that never existed.
+ *
+ * Returns true when something was actually withdrawn, so callers can leave the
+ * feed alone in the ordinary case where nothing was certified.
+ */
+function uncertify(record, search, user, why){
+  if (!record || !record.doneAt) return false;
+  record.doneAt = null; record.doneBy = null; record.doneByName = '';
+  db.touch(search, user, 'reopened a completed step because ' + why);
+  return true;
+}
+
+/** The same, reached from outside the staff routes: consent and the finalist roster. */
+function reopenReferences(search, user, why){
+  return uncertify((search.staff || {}).references, search, user, why);
+}
+
 app.post('/api/searches/:id/staff/:key/log', ...requireWorkspace, requireSearch, requireEditor, requireStaffStep, (req, res) => {
   const text = String(req.body?.text || '').trim().slice(0, LOG_MAX);
   if (!text) return res.status(400).json({ error:'Write down what was done.' });
@@ -2307,7 +2417,7 @@ app.post('/api/searches/:id/staff/:key/log', ...requireWorkspace, requireSearch,
   if (req.staff.log.length > STAFF_LOG_CAP) req.staff.log.length = STAFF_LOG_CAP;
   // Fresh work on a step that was marked complete reopens it; the completion
   // stamp described a record that has since changed.
-  if (req.staff.doneAt) { req.staff.doneAt = null; req.staff.doneBy = null; req.staff.doneByName = ''; }
+  uncertify(req.staff, req.search, req.user, 'new work was logged');
   const step = db.STEPS.find(s => s.key === req.staffKey);
   db.touch(req.search, req.user, 'logged ' + (step ? step.t.toLowerCase() : req.staffKey) + (who.candidate ? ' for ' + who.candidate.name : ''));
   db.persist();
@@ -2318,20 +2428,35 @@ app.delete('/api/searches/:id/staff/:key/log/:lid', ...requireWorkspace, require
   const before = req.staff.log.length;
   req.staff.log = req.staff.log.filter(e => e.id !== req.params.lid);
   if (req.staff.log.length === before) return res.status(404).json({ error:'That entry is not on the log.' });
+  // Removing evidence changes the record the completion certified, exactly as
+  // adding to it does. The stamp comes off on both edges; leaving it on would
+  // let a step be certified and then quietly emptied.
+  uncertify(req.staff, req.search, req.user, 'an entry was removed');
   db.touch(req.search, req.user, 'removed a ' + req.staffKey + ' log entry');
   db.persist();
   res.json(painted(req, req.search));
 });
 
 app.put('/api/searches/:id/staff/:key', ...requireWorkspace, requireSearch, requireEditor, requireStaffStep, (req, res) => {
-  req.staff.notes = String(req.body?.notes || '').slice(0, 8000);
+  const next = String(req.body?.notes || '').slice(0, 8000);
+  const changed = next !== String(req.staff.notes || '');
+  req.staff.notes = next;
+  // Working notes can be the only evidence a step has: completion accepts a
+  // step with notes and no log. Rewriting them after certification is the same
+  // change of record as rewriting the log.
+  if (changed) uncertify(req.staff, req.search, req.user, 'the notes were rewritten');
   db.touch(req.search, req.user, 'updated ' + req.staffKey + ' notes');
   db.persist();
   res.json(painted(req, req.search));
 });
 
 app.post('/api/searches/:id/staff/:key/complete', ...requireWorkspace, requireSearch, requireEditor, requireStaffStep, (req, res) => {
-  if (req.user.role !== 'consultant') return res.status(403).json({ error:'A consultant signs off on staff work.' });
+  // Reference completion is a certification about people outside the firm who
+  // agreed to be contacted, so the matrix keeps it with the manager. Sourcing
+  // and interview sign-off stay with the consultant who did the work.
+  const refusal = authority.refusalFor(
+    req.staffKey === 'references' ? 'certifyReferences' : 'certifyStaffWork', req.search, req.access);
+  if (refusal) return res.status(refusal.status).json(refusal);
   const done = Boolean(req.body?.done);
   const step = db.STEPS.find(s => s.key === req.staffKey);
   if (done) {
@@ -2369,6 +2494,10 @@ app.post('/api/searches/:id/candidates/:cid/consent', ...requireWorkspace, requi
   } else {
     delete c.referenceConsentAt;
     delete c.referenceConsentBy;
+    // Completion required consent from every current finalist. Withdrawing one
+    // person's consent takes that support away, so the certification goes with
+    // it rather than standing over a finalist who has since said no.
+    if (c.stage === 'finalist') reopenReferences(req.search, req.user, c.name + ' withdrew reference consent');
     db.touch(req.search, req.user, 'withdrew ' + c.name + '\'s reference consent');
   }
   db.persist();
@@ -2377,8 +2506,7 @@ app.post('/api/searches/:id/candidates/:cid/consent', ...requireWorkspace, requi
 
 const send2OnFile = requireStepOnFile(() => 'send2');
 
-app.post('/api/searches/:id/candidates/:cid/send2', ...requireWorkspace, requireSearch, requireEditor, send2OnFile, (req, res) => {
-  if (req.user.role !== 'consultant') return res.status(403).json({ error:'The consultant sends the semifinalist survey.' });
+app.post('/api/searches/:id/candidates/:cid/send2', ...requireWorkspace, requireSearch, requireEditor, authority.requireAuthority('advanceStage'), send2OnFile, (req, res) => {
   const c = req.search.candidates.find(x=>x.id===req.params.cid);
   if (!c) return res.status(404).json({ error:'Candidate not found.' });
   try {
@@ -2390,8 +2518,7 @@ app.post('/api/searches/:id/candidates/:cid/send2', ...requireWorkspace, require
   res.json(painted(req, req.search));
 });
 
-app.post('/api/searches/:id/send2', ...requireWorkspace, requireSearch, requireEditor, send2OnFile, (req, res) => {
-  if (req.user.role !== 'consultant') return res.status(403).json({ error:'The consultant sends the semifinalist survey.' });
+app.post('/api/searches/:id/send2', ...requireWorkspace, requireSearch, requireEditor, authority.requireAuthority('advanceStage'), send2OnFile, (req, res) => {
   const deadline = req.body?.deadline;
   const eligible = req.search.candidates.filter(isSemifinalistOrFinalist);
   if (!eligible.length) return res.status(400).json({ error:'Advance at least one candidate to semifinalist first.' });

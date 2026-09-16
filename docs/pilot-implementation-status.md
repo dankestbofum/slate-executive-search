@@ -28,6 +28,32 @@ release evidence. A checked implementation item is not a pilot approval.
   separates them from release-runtime and hosted evidence.
 - Obsolete PIN, first-boot credential and `accounts.js audit` checklist text is
   reconciled with Clerk-only authentication.
+- The late-stage authority matrix is stated once in `server/authority.js` and
+  enforced from there, including the generic facts `PATCH`, bulk archiving,
+  archive restoration and manager handover. `/api/searches/:id` returns the same
+  answers to the browser as `you.may`, and the screens draw their controls from
+  them. `tests/authority.js` pins every row. **The matrix values are proposals
+  until the search owner accepts them after the P2 tabletop.**
+- The legacy account-level `user.role` guards are gone. They admitted only the
+  three seeded accounts, so a consultant invited into a workspace could not
+  advance candidates, release scores, sign off staff work, or send a
+  semifinalist questionnaire.
+- A completion is withdrawn whenever the evidence under it changes: a log entry
+  removed, working notes rewritten, reference consent withdrawn, or the finalist
+  roster changed. The reason is written to the activity feed.
+- The export carries what it already claimed to: the questions beside the
+  answers and the submission date (it was reading field names the record does
+  not use, so every export shipped answers with neither), the document inventory
+  and contact log from DEP-08, superseded questionnaire responses, and the
+  outcomes and lifecycle in the readable report as well as the bundle.
+- The record is downloadable from the browser. The export route existed with no
+  control anywhere in the interface.
+- `tests/browser/late-stage.spec.js` carries the connected B07–B09 journey —
+  three semifinalists, two finalists, consent, certification and its withdrawal,
+  three outcomes with a correction, closeout, reopening and three exports —
+  through the browser in two sessions.
+- The P3 operating procedure is drafted at `docs/search-operating-procedure.md`
+  with owners and systems left explicitly unassigned.
 
 ## Requires execution outside this repository
 
@@ -42,6 +68,12 @@ release evidence. A checked implementation item is not a pilot approval.
   unassisted consultant, committee and candidate sessions.
 - Named primary/backup operators, alert recipient, support contact, county
   decisions, second-person review and owner go/no-go.
+- The P2 tabletop with a practicing consultant, and the search owner's
+  acceptance or revision of the authority matrix. Until that happens the matrix
+  in `server/authority.js` is an engineer's reading of a proposal, and the
+  screens enforce a policy nobody has agreed to.
+- Owners, systems and timings in `docs/search-operating-procedure.md`, and the
+  P7 walkthrough by somebody who did not write it.
 
 Until those items are recorded in a release-specific run, every affected case
 remains `NOT RUN` and no release gate is reached.

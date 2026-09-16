@@ -44,6 +44,7 @@ async function suite(file, suiteEnv) {
     const counties = await suite('jurisdictions.js', suiteEnv);
     const security = await suite('security.js', suiteEnv);
     const roles = await suite('roles.js', suiteEnv);
+    const authority = await suite('authority.js', suiteEnv);
     const storage = await suite('storage.js', suiteEnv);
     const recover = await suite('recovery.js', suiteEnv);
     const monitoring = await suite('monitoring.js', suiteEnv);
@@ -53,7 +54,7 @@ async function suite(file, suiteEnv) {
     const aichecks = await suite('aireliability.js', suiteEnv);
     const researchChecks = await suite('research.js', suiteEnv);
     const regression = await suite('integrity.js', suiteEnv);
-    process.exitCode = organizationsSuite || auth || clerkAuth || baseline || counties || regression || security || roles || storage || recover || monitoring || exports_ || cands || dispo || aichecks || researchChecks;
+    process.exitCode = organizationsSuite || auth || clerkAuth || baseline || counties || regression || security || roles || authority || storage || recover || monitoring || exports_ || cands || dispo || aichecks || researchChecks;
     console.log('Isolated test data: ' + directory);
   } catch (error) { console.error(error); process.exitCode = 1; }
   finally { server.kill(); }
