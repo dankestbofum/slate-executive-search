@@ -14,7 +14,8 @@
     "preflight": "node scripts/preflight.js",
     "test:load": "node tests/load.js",
     "test:hosted-load": "node tests/hosted/pilot-load.js",
-    "print:samples": "node scripts/print-samples.js"
+    "print:samples": "node scripts/print-samples.js",
+    "seed:tabletop": "node scripts/tabletop.js"
   },
   "engines": {
     "node": ">=24"

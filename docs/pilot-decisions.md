@@ -177,6 +177,44 @@ destination as `NOT CONFIGURED` until one is set.
 
 ---
 
+## Closing a decision (P5)
+
+A status that reads `DECIDED` is not a closed decision. Moving an item there
+means filling in the row below, and an item whose implementation is code or
+infrastructure is not closed by a signature: the verification link has to point
+at something that was actually checked.
+
+| Field | What it holds |
+|---|---|
+| Approver | The named person who decided, not a role |
+| Date | When they decided, absolute |
+| Rationale | Why, in their words, short enough to read |
+| Supporting artifact | The policy, schedule, contract or opinion it rests on |
+| Implementation owner | Who makes the application or the operation match it |
+| Verification | Where the evidence is that it was implemented — a run record row, a configuration capture, a test case |
+| Target date | Set at kickoff; a missed date escalates to the app owner |
+
+Copy this block under any item as it closes:
+
+```
+> **Decided** 2026-__-__ by ____. Rationale: ____.
+> Artifact: ____. Implementation owner: ____. Verification: ____.
+```
+
+Three reconciliations belong to P5 rather than to any single item, because each
+is a conflict between two things this repository currently says:
+
+1. Shared firm sign-in language against the current Clerk identity model. Slate
+   keeps no session of its own, and the shared team account identifies a firm
+   rather than a person — the export labels it that way. Decide whether a shared
+   account may make material decisions at all.
+2. Proposed session length against the session policy actually configured in the
+   hosted Clerk instance. The proposal is not the configuration.
+3. "Nothing is deleted automatically" against the documented 14-day expiry of a
+   candidate's saved draft. Both cannot be true. Decide which drafts and records
+   must be preserved under the accepted retention and legal-hold policy, and
+   make the application and the notice say the same thing.
+
 ## Before real candidate information is entered
 
 The plan's rule: **do not enter real candidate information while a P0 control

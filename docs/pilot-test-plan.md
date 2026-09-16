@@ -1,5 +1,9 @@
 # Pilot-readiness test plan
 
+Execution follow-up: [Late-stage tabletop pilot and live-readiness plan](late-stage-pilot-plan.md)
+sequences the three-semifinalist rehearsal, authority decisions, connected
+B07–B09 journeys, external operating procedure, and hosted/human acceptance.
+
 Prepared 2026-09-16 from the working tree at `3be3db1`, including existing uncommitted changes.
 
 **Status: plan prepared; execution and pilot approval pending.** This review inspected application code, test harnesses, CI configuration, and the handoff documents. It did not run the suites, exercise the UI, contact external services, or establish that this release passes. Existing reported results are historical evidence only.

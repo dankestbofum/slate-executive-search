@@ -259,9 +259,10 @@ async function request(url, method = 'GET', body, auth, revision) {
   });
   assert.ok((await request('/api/archives', 'GET', undefined, auth)).body.some(a=>a.id===fresh.body.id));
   const restored = await request('/api/archives/'+fresh.body.id+'/restore', 'POST', {}, auth);
-  check('archived searches restore responses, history and fresh links', () => {
-    assert.equal(restored.status, 200); assert.notEqual(restored.body.candidates[0].invite, liveInvite); assert.equal(restored.body.artifacts.survey1.intro, 'Original');
+  check('archived searches restore responses and history without candidate access', () => {
+    assert.equal(restored.status, 200); assert.equal(restored.body.candidates[0].invite, null); assert.equal(restored.body.artifacts.survey1.intro, 'Original');
   });
+  assert.equal((await request('/api/apply/'+liveInvite)).status, 404);
   assert.equal((await request('/api/me', 'GET', undefined, archive)).status, 200);
   check('archive restoration recovers the committee roster and accounts', () => assert.ok(restored.body.roster.some(r=>r.email==='archive-integrity@example.test')));
 

@@ -529,6 +529,24 @@ function you(){
 }
 function canEdit(){ return Boolean(you().canEdit); }
 function canManage(){ return Boolean(you().canManage); }
+/**
+ * May I take this late-stage decision?
+ *
+ * The answers come from the server, computed by server/authority.js on every
+ * read, so a control this file draws and the route behind it are reading one
+ * table. Unknown while a search is loading, and in the sample preview, which is
+ * why the fallback is `canEdit()` rather than false: the preview is showing what
+ * the screen looks like, not deciding anything.
+ */
+function may(action){
+  const answers = you().may;
+  return answers ? Boolean(answers[action]) : canEdit();
+}
+/** Who to ask, for the line under a control this person cannot use. */
+function askManager(){
+  const mgr = state.search?.accountManager;
+  return mgr && mgr.name ? mgr.name + ' runs this search.' : 'The search manager decides this.';
+}
 // Works across this workspace's whole book: a consultant or an administrator.
 function isStaff(){ return Boolean(state.caps?.staff); }
 function isAdmin(){ return Boolean(state.caps?.admin); }
@@ -2541,7 +2559,10 @@ function searchesNotice(){
 }
 
 function pickedIds(){
-  const known = new Set((state.searches||[]).map(s => s.id));
+  // Only searches this person may archive. Home offers the checkbox across the
+  // firm's whole book, but archiving is the manager's decision on each file, so
+  // a selection that could not be carried out is never allowed to form.
+  const known = new Set((state.searches||[]).filter(s => s.mayArchive).map(s => s.id));
   return (state.picked||[]).filter(id => known.has(id));
 }
 
@@ -2599,7 +2620,9 @@ function vHome(){
     const counts = s.candidateCounts;
     const due = summaryDeadline(s);
     return `<tr${on?' class="is-picked"':''}>
-      ${manage?`<td class="pickcell"><input type="checkbox" data-pick-search="${s.id}" ${on?'checked':''} aria-label="Select ${esc(s.client||s.no||'this search')}"></td>`:''}
+      ${manage?(s.mayArchive
+        ? `<td class="pickcell"><input type="checkbox" data-pick-search="${s.id}" ${on?'checked':''} aria-label="Select ${esc(s.client||s.no||'this search')}"></td>`
+        : `<td class="pickcell"><span class="u-sr">${esc(s.accountManager?s.accountManager.name+' runs this search':'Another consultant runs this search')}</span></td>`):''}
       <th scope="row"><button type="button" class="candlink" data-open="${s.id}">${esc(s.client||'Untitled')}</button>
         <span class="candmeta">${esc(s.position||'')}${s.packageLabel?' · '+esc(s.packageLabel):''} · <span class="mono">${esc(s.no)}</span></span>
         ${due?`<span class="candmeta">${esc(due)}</span>`:''}</th>
@@ -2609,7 +2632,9 @@ function vHome(){
         : '<span class="t-small">Not on this package</span>'}</td>
       <td data-label="Account manager">${s.accountManager?esc(s.accountManager.name):'<span class="t-small">Unassigned</span>'}${s.people>1?' <span class="t-small">+'+(s.people-1)+'</span>':''}</td>
       <td data-label="Next action">${n?esc(STEP_NAME[n.key]||n.t):'<span class="t-small">Every step complete</span>'}</td>
-      ${manage?`<td data-label="" class="candacts"><button class="btn btn--danger btn--sm" data-act="delete-search" data-id="${s.id}" data-name="${esc(s.client||s.no||'this search')}">Archive</button></td>`:''}
+      ${manage?(s.mayArchive
+        ? `<td data-label="" class="candacts"><button class="btn btn--danger btn--sm" data-act="delete-search" data-id="${s.id}" data-name="${esc(s.client||s.no||'this search')}">Archive</button></td>`
+        : `<td data-label="" class="candacts"><span class="t-small">Their search</span></td>`):''}
     </tr>`;
   }).join('');
 
@@ -3178,7 +3203,7 @@ function vOverview(){
          canEdit() ? `<button class="btn btn--ghost btn--sm" data-go="verify">County fact verification</button>` : '',
          `<button class="btn btn--ghost btn--sm" data-go="process">Process checklist</button>`,
          canEdit() ? `<button class="btn btn--ghost btn--sm" data-go="closeout">${isFrozen(s)?'Closeout and reopening':'Close this search'}</button>` : '',
-         canEdit() ? `<button class="btn btn--ghost btn--sm btn--danger" data-act="delete-search" data-id="${s.id}" data-name="${esc(s.client||s.no||'this search')}">Archive search</button>` : ''
+         may('archiveSearch') ? `<button class="btn btn--ghost btn--sm btn--danger" data-act="delete-search" data-id="${s.id}" data-name="${esc(s.client||s.no||'this search')}">Archive search</button>` : ''
        ])}`)}
     <div class="band"><div class="wrap stack">
       ${overviewInner(s)}
@@ -3545,7 +3570,14 @@ function vCloseout(){
             recorded as references on each candidate and must be exported from the repository that holds them.</p>
         </div></div>
 
-      ${frozen ? `<div class="spec"><div class="spec__bar">Reopen</div>
+      ${!may(frozen ? 'reopenSearch' : 'closeSearch')
+        ? `<div class="spec"><div class="spec__bar">${frozen ? 'Reopening' : 'Closing'} this search</div>
+        <div class="spec__body stack stack--tight">
+          <p class="t-small">${esc(askManager())} ${frozen
+            ? 'Reopening a closed search is their decision, and it needs a reason on the file.'
+            : 'Closing or cancelling a search is their decision. Prepare the closeout inventory above and ask them.'}</p>
+        </div></div>`
+      : frozen ? `<div class="spec"><div class="spec__bar">Reopen</div>
         <div class="spec__body">
           <form id="reopenform" class="stack stack--tight">
             <p class="t-small">Reopening restores ordinary editing. It does not put revoked candidate links back
@@ -3569,6 +3601,22 @@ function vCloseout(){
             <div class="row"><button type="button" class="btn btn--primary" data-act="close-search">Close this search</button></div>
           </form>
         </div></div>`}
+
+      ${may('exportRecords') ? `<div class="spec"><div class="spec__bar">Export the record</div>
+        <div class="spec__body stack stack--tight">
+          <p class="t-small">The permitted record of this search, for county records review: the questions as each
+            candidate was asked them, their answers, decisions with their authors, the document inventory, and the
+            staff work. Sealed scores are declared as withheld rather than omitted silently. Candidate links,
+            credentials and other firms' records are never in it.</p>
+          ${!s.released ? `<p class="t-small">Scores are sealed, so this export will say so and leave them out.
+            Releasing them first is the manager's decision.</p>` : ''}
+          <div class="row">
+            ${withTip(`<button type="button" class="btn btn--secondary btn--sm" data-act="export-record" data-format="text">Download the report</button>`,
+              'The readable report, for a records request or a county file.')}
+            ${withTip(`<button type="button" class="btn btn--secondary btn--sm" data-act="export-record" data-format="json">Download the data bundle</button>`,
+              'The same record as structured data, for archiving or transfer.')}
+          </div>
+        </div></div>` : ''}
 
       <div class="spec"><div class="spec__bar">Where the rest of the record is</div>
         <div class="spec__body stack stack--tight">
@@ -3603,8 +3651,7 @@ function memberRow(m, mgr){
     </div>
     <div class="rosterrow__tags">${searchRolePill(m.searchRole)}${answered?pill('ok','Answered'):''}</div>
     <div class="rosterrow__acts">
-      ${manage && m.searchRole==='consultant' ? `<button class="btn btn--ghost btn--sm" data-act="make-manager" data-uid="${m.userId}">Hand over the account</button>` : ''}
-      ${!manage && me && you().consultant ? `<button class="btn btn--secondary btn--sm" data-act="make-manager" data-uid="${m.userId}">Take the account</button>` : ''}
+      ${may('handoverManager') && m.searchRole==='consultant' ? `<button class="btn btn--ghost btn--sm" data-act="make-manager" data-uid="${m.userId}">${manage ? 'Hand over the account' : 'Reassign the account'}</button>` : ''}
       ${manage && m.userId !== mgr?.userId ? `<button class="btn btn--ghost btn--sm" data-act="remove-person" data-uid="${m.userId}" data-name="${esc(m.name)}">Remove</button>` : ''}
     </div>
   </div>`;
@@ -5240,9 +5287,9 @@ function candidateRow(c){
   // URL is never a column, and the controls that hand it out sit in a labelled
   // menu on the row rather than competing with Review.
   const invite = canEdit() ? menu('cand-'+c.id, 'Invite', [
-    withTip(`<button type="button" class="btn btn--ghost btn--sm" data-act="copy-invite" data-cid="${c.id}">Copy invite link</button>`, TIPS.copyInvite),
-    withTip(`<a class="btn btn--ghost btn--sm" href="/apply/${esc(c.invite)}" target="_blank" rel="noopener">Open questionnaire</a>`, TIPS.openQuestionnaire),
-    withTip(`<button type="button" class="btn btn--ghost btn--sm" data-act="replace-invite" data-cid="${c.id}">Replace candidate link</button>`, TIPS.replaceInvite)
+    c.invite ? withTip(`<button type="button" class="btn btn--ghost btn--sm" data-act="copy-invite" data-cid="${c.id}">Copy invite link</button>`, TIPS.copyInvite) : '',
+    c.invite ? withTip(`<a class="btn btn--ghost btn--sm" href="/apply/${esc(c.invite)}" target="_blank" rel="noopener">Open questionnaire</a>`, TIPS.openQuestionnaire) : '',
+    withTip(`<button type="button" class="btn btn--ghost btn--sm" data-act="replace-invite" data-cid="${c.id}">${c.invite ? 'Replace candidate link' : 'Issue a new link'}</button>`, TIPS.replaceInvite)
   ]) : '';
   return `<tr>
     <th scope="row"><button type="button" class="candlink" data-cand="${c.id}">${esc(c.name)}</button>
@@ -5333,8 +5380,10 @@ function vScreen(){
       </table></div>` : ''}
       ${actionBar(
         nextBtn('screen') || `<button class="btn btn--primary" data-go="overview">Back to this search</button>`,
-        canEdit() ? withTip(`<button type="button" class="btn btn--secondary" data-act="toggle-release">${s.released?'Seal scores':'Release scores'}</button>`, s.released ? TIPS.seal : TIPS.release) : '',
-        canEdit() ? (s.released ? 'Panel scores are visible to the committee.' : 'Each person sees only their own scores.') : '')}
+        may('releaseScores') ? withTip(`<button type="button" class="btn btn--secondary" data-act="toggle-release">${s.released?'Seal scores':'Release scores'}</button>`, s.released ? TIPS.seal : TIPS.release) : '',
+        !canEdit() ? '' : may('releaseScores')
+          ? (s.released ? 'Panel scores are visible to the committee.' : 'Each person sees only their own scores.')
+          : (s.released ? 'Panel scores are visible to the committee. ' : 'Each person sees only their own scores. ') + askManager())}
     </div></div>`);
 }
 
@@ -5352,7 +5401,7 @@ function vSend2(){
           ? withTip(`<button type="button" class="btn btn--primary btn--sm" data-act="send2-one" data-cid="${c.id}">Open questionnaire</button>`,
               'Make the semifinalist questionnaire available on this candidate’s existing invite link.')
           : ''}
-        ${canEdit() ? withTip(`<button type="button" class="btn btn--secondary btn--sm" data-act="copy-invite" data-cid="${c.id}">Copy invite</button>`, TIPS.copyInvite) : ''}
+        ${canEdit() && c.invite ? withTip(`<button type="button" class="btn btn--secondary btn--sm" data-act="copy-invite" data-cid="${c.id}">Copy invite</button>`, TIPS.copyInvite) : ''}
         ${withTip(`<button type="button" class="btn btn--ghost btn--sm" data-cand="${c.id}">Review</button>`, 'Open this candidate to read their responses and scores.')}
       </td>
     </tr>`).join('');
@@ -5388,7 +5437,7 @@ function vFinalists(){
         ${surveyRead(survey, c.survey2)}
         <div class="row">
           ${withTip(`<button type="button" class="btn btn--ghost btn--sm" data-cand="${c.id}">Review and score</button>`, 'Open this candidate to read every response and score them.')}
-          ${canEdit() && c.stage==='semifinalist'
+          ${may('advanceFinalist') && c.stage==='semifinalist'
             ? withTip(`<button type="button" class="btn btn--secondary btn--sm" data-act="advance-final" data-cid="${c.id}">Advance to finalist</button>`, TIPS.advanceFinal)
             : ''}
         </div>
@@ -5444,7 +5493,7 @@ function documentsPanel(c){
           <div class="formgrid">
             ${field('Type','', `<select class="input" name="kind">${Object.entries(DOC_KIND).map(([k,v])=>`<option value="${esc(k)}">${esc(v.label)}</option>`).join('')}</select>`)}
             ${field('Label','What this document is, in a few words.', `<input class="input" name="label" placeholder="Resume, received 4 Sep" required>`, { req:true })}
-            ${field('Link','https only, to the approved repository. Leave blank if it is held offline.', `<input class="input" name="url" placeholder="https://">`, { span:true })}
+            ${field('Link','Permanent https URL requiring repository sign-in, without query parameters, fragments or sharing credentials. Otherwise leave blank and put the document identifier in its label.', `<input class="input" name="url" placeholder="https://">`, { span:true })}
             ${field('Note','', `<textarea class="input ed" name="note"></textarea>`, { span:true })}
           </div>
           <div class="row"><button type="button" class="btn btn--primary btn--sm" data-act="add-doc" data-cid="${esc(c.id)}">Record this document</button></div>
@@ -5532,7 +5581,10 @@ function outcomePanel(c){
       </div></div>
 
     ${frozen ? `<div class="notice notice--info"><div><div class="notice__t">The search is ${esc(lifecycleOf())}</div>
-      <div class="notice__b">Reopen it from closeout before recording anything further.</div></div></div>` : `
+      <div class="notice__b">Reopen it from closeout before recording anything further.</div></div></div>`
+      : !may('recordOutcome') ? `<div class="notice notice--info"><div><div class="notice__t">Recording the outcome is the manager's decision</div>
+      <div class="notice__b">${esc(askManager())} Log the source communication on this candidate's contact record,
+        then ask them to record it. The entries above are the file as it stands.</div></div></div>` : `
     <div class="spec"><div class="spec__bar">${current ? 'Correct the outcome' : 'Record an outcome'}</div>
       <div class="spec__body">
         <form id="outcomeform" class="stack stack--tight" data-cid="${esc(c.id)}">
@@ -5621,7 +5673,7 @@ function vPerson(){
   return shell(`
     ${head('Candidate', c.name,
       `${esc(c.cur||'')}${c.cur && c.org ? ', ' : ''}${esc(c.org||'')} ${stagePill(c.stage)}${outcomePill(c)}`,
-      canEdit() && nextStage
+      nextStage && may(nextStage==='finalist' ? 'advanceFinalist' : 'advanceStage')
         ? withTip(`<button type="button" class="btn btn--secondary" data-act="advance" data-stage="${nextStage}">${esc(nextLabel)}</button>`,
             nextStage==='semifinalist' ? TIPS.advanceSemi : TIPS.advanceFinal)
         : '')}
@@ -5798,6 +5850,10 @@ function vStaff(key){
         c.referenceConsentAt ? 'Remove this finalist’s consent. Reference entries about them are blocked again.' : 'Record that this finalist agreed to have their references contacted.') : ''}</td>
     </tr>`).join('') : '';
   const logged = (rec.log||[]).length;
+  // Reference completion certifies work about people outside the firm who agreed
+  // to be contacted, so it answers to the manager; sourcing and interview
+  // sign-off stay with the consultant who did the work.
+  const mayCertify = may(key==='references' ? 'certifyReferences' : 'certifyStaffWork');
   return shell(`
     ${head('Step '+stepNo(key), meta.title, meta.lede+' '+pill(done?'ok':logged?'wait':'idle', done?'Complete':logged?logged+' logged':'Not started')+' '+pill('info','Staff work'))}
     <div class="band"><div class="wrap stack">
@@ -5836,12 +5892,14 @@ function vStaff(key){
           <div class="row"><button type="button" class="btn btn--secondary" data-act="staff-notes" data-key="${key}">Save notes</button></div>
         </div></div>` : ''}
       ${actionBar(
-        canEdit()
+        mayCertify
           ? withTip(`<button type="button" class="btn btn--${done?'secondary':'primary'}" data-act="staff-done" data-key="${esc(key)}" data-done="${done?'0':'1'}">${done?'Reopen this step':'Mark complete'}</button>`,
               done ? 'Reopen the step so more work can be logged against it.' : esc(meta.doneWhen))
           : '',
         nextBtn(key).replace('btn--primary','btn--secondary'),
-        esc(meta.doneWhen))}
+        canEdit() && !mayCertify
+          ? esc(askManager() + ' Certifying reference completion is their decision; record the consent and the contacts here.')
+          : esc(meta.doneWhen))}
     </div></div>`);
 }
 
@@ -5853,8 +5911,10 @@ function vArchives(){
         <div class="hubrow">
           <div class="hubrow__id"><b>${esc(s.client)}</b> · ${esc(s.position)}<div class="t-small">Archived ${esc(s.archivedAt)}</div></div>
           <div class="hubrow__st"></div>
-          <div class="hubrow__act">${withTip(`<button type="button" class="btn btn--secondary btn--sm" data-act="restore-search" data-id="${esc(s.id)}">Restore search</button>`,
-            'Put this search back on the book. Candidate links are reissued, so the old ones stay dead.')}</div>
+          <div class="hubrow__act">${s.mayRestore
+            ? withTip(`<button type="button" class="btn btn--secondary btn--sm" data-act="restore-search" data-id="${esc(s.id)}">Restore search</button>`,
+              'Put this search back on the book. Candidate links stay revoked; reissue a link separately if needed.')
+            : `<span class="t-small">${esc(s.managerName ? s.managerName + ' ran this search and restores it.' : 'Its search manager restores it.')}</span>`}</div>
         </div>
       </div></div>`).join('')
       : emptyState('No archived searches',
@@ -6648,11 +6708,45 @@ document.addEventListener('click', async e => {
     await withBusy(() => loadSearch(state.search.id));
     return;
   }
+  if (act==='export-record') {
+    // The export is an authorized GET, so it cannot be a plain link: the bearer
+    // token lives in memory and a browser navigation would not carry it. Fetch
+    // it with the session, then hand the bytes to the person as a file.
+    const format = t.dataset.format === 'json' ? 'json' : 'text';
+    await withBusy(async () => {
+      const token = await window.SlateAuth.token();
+      const res = await fetch('/api/searches/'+state.search.id+'/export'+(format==='text'?'?format=text':''),
+        { headers: token ? { authorization:'Bearer ' + token } : {} });
+      if (!res.ok) {
+        const detail = await res.json().catch(() => ({}));
+        throw new Error(detail.error || 'The export could not be prepared.');
+      }
+      const url = URL.createObjectURL(await res.blob());
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'slate-' + (state.search.no || state.search.id) + (format==='text' ? '.txt' : '.json');
+      document.body.append(link);
+      link.click();
+      link.remove();
+      // Revoked on a later turn: revoking it in this one races the download the
+      // click has only just started.
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      // Exporting is recorded on the file, so the view behind this reads as
+      // stale until it is reloaded.
+      await loadSearch(state.search.id);
+      toast('Export downloaded. It is recorded on the activity feed.');
+    }, {
+      kicker: 'Slate', title: 'Preparing the record',
+      copy: 'Gathering the whole search. Stay on this page.',
+      steps: ['Assembling the record', 'Preparing the download'], tick: 2000
+    });
+    return;
+  }
   if (act==='restore-search') {
     await withBusy(async () => {
       state.search = await api('/api/archives/'+t.dataset.id+'/restore', { method:'POST', body:{} });
       await loadSearches();
-      toast('Search restored. Copy and share the new candidate links from Screening.');
+      toast('Search restored. Candidate links remain revoked; reissue a link separately if needed.');
       await go('overview');
     });
     return;
@@ -6850,7 +6944,7 @@ document.addEventListener('click', async e => {
   }
   if (act==='copy-invite'){
     const c = (state.search?.candidates||[]).find(x => x.id === t.dataset.cid);
-    if (!c) return;
+    if (!c?.invite) { toast('This candidate has no live link. Issue a new link from their record if needed.'); return; }
     const link = location.origin + '/apply/' + c.invite;
     try {
       await navigator.clipboard.writeText(link);
@@ -6876,7 +6970,7 @@ document.addEventListener('click', async e => {
   if (act==='pick-all'){
     // Select-all means the rows on screen. Selecting searches the filter is
     // hiding is how a bulk archive takes files nobody was looking at.
-    const shown = (state.searches || []).filter(matchesHomeQuery);
+    const shown = (state.searches || []).filter(matchesHomeQuery).filter(s => s.mayArchive);
     const picked = pickedIds();
     const already = shown.length > 0 && shown.every(s => picked.includes(s.id));
     state.picked = already ? [] : shown.map(s => s.id);
@@ -6925,7 +7019,12 @@ document.addEventListener('click', async e => {
     if (!id) return;
     if (!confirm('Archive '+name+'? You can restore it from Archived searches.')) return;
     await withBusy(async () => {
-      await api('/api/searches/'+id, { method:'DELETE', body:{} });
+      // Home has no loaded search, but the archive still needs the revision
+      // that was shown to the user. Do not silently refresh past newer work.
+      const revision = state.search?.id === id ? state.search.revision
+        : (state.searches || []).find(s => s.id === id)?.revision;
+      if (revision === undefined) throw new Error('Reload the search list before archiving.');
+      await api('/api/searches/'+id, { method:'DELETE', body:{}, headers:{ 'if-match':String(revision) } });
       if (state.search && state.search.id===id) state.search = null;
       state.picked = (state.picked||[]).filter(x => x !== id);
       await loadSearches();
@@ -6958,15 +7057,23 @@ document.addEventListener('click', async e => {
     await withBusy(async () => {
       const out = await api('/api/searches/'+state.search.id+'/members/self', { method:'POST', body:{} });
       state.search = out.search;
-      toast('You are on this search. Take the account if you are running it.');
+      toast('You are on this search. The manager or a workspace administrator can hand the account over.');
     }, waitSave('Joining the search'));
     return;
   }
   if (act==='make-manager'){
     const uid = t.dataset.uid;
     const taking = uid === state.user.id;
+    if (!may('handoverManager')) return;
+    let reason;
+    if (!canManage()) {
+      reason = prompt('Why are you reassigning this account? The reason is recorded on the search.');
+      if (reason === null) return;
+      reason = reason.trim();
+      if (!reason) { toast('Enter a reason before reassigning the account.'); return; }
+    }
     await withBusy(async () => {
-      const out = await api('/api/searches/'+state.search.id+'/members/'+uid, { method:'PATCH', body:{ searchRole:'manager' } });
+      const out = await api('/api/searches/'+state.search.id+'/members/'+uid, { method:'PATCH', body:{ searchRole:'manager', ...(reason ? { reason } : {}) } });
       state.search = out.search;
       toast(taking ? 'You run this search now. The previous manager keeps a consultant role.' : 'Account handed over. You keep a consultant role.');
     }, waitSave(taking ? 'Taking the account' : 'Handing over the account'));

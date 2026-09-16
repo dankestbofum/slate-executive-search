@@ -836,20 +836,45 @@ async function run(){
     await req('/api/searches/'+search.id+'/members/self', { method:'POST', auth: team.auth, expect:409, body:{} });
     record('Joining a search twice is refused', true);
 
-    const took = await req('/api/searches/'+search.id+'/members/'+team.json.user.id, {
-      method:'PATCH', auth: team.auth, expect:200, body:{ searchRole:'manager' }
+    // A consultant on the roster used to be able to take the account off its
+    // manager silently. That is the one move which hands over every other
+    // late-stage decision, so it is no longer theirs to make: with it, a
+    // consultant refused a closeout could take the account and close the search
+    // anyway, and the authority matrix would be advisory. Nobody is stranded —
+    // a workspace administrator reassigns it, and says why.
+    const refused = await req('/api/searches/'+search.id+'/members/'+team.json.user.id, {
+      method:'PATCH', auth: team.auth, expect:403, body:{ searchRole:'manager' }
     });
-    record('Any consultant can take an account rather than being stranded by it',
+    record('A consultant cannot take the account off its manager',
+      refused.json.code === 'AUTHORITY_REQUIRED', JSON.stringify(refused.json));
+
+    // The holder handing it on is the ordinary path, and needs no reason.
+    const took = await req('/api/searches/'+search.id+'/members/'+team.json.user.id, {
+      method:'PATCH', auth: abe.auth, expect:200, body:{ searchRole:'manager' }
+    });
+    record('The manager can hand the account to another consultant',
       took.json.search.accountManager.userId===team.json.user.id);
     record('The outgoing manager keeps a consultant role',
       took.json.roster.find(m => m.userId===abe.json.user.id).searchRole==='consultant');
     await req('/api/searches/'+search.id+'/team/confirm', { method:'POST', auth: team.auth, expect:200, body:{ confirmed:true } });
     record('Taking the account carries the powers that go with it', true);
 
-    // Hand it back so later assertions see the search as they expect.
+    // Abe is now an administrator who does not run this search. That is the
+    // emergency path: allowed, and never silent.
     await req('/api/searches/'+search.id+'/members/'+abe.json.user.id, {
-      method:'PATCH', auth: team.auth, expect:200, body:{ searchRole:'manager' }
+      method:'PATCH', auth: abe.auth, expect:400, body:{ searchRole:'manager' }
     });
+    record('Reassigning an account away from its manager needs a reason', true);
+
+    const back = await req('/api/searches/'+search.id+'/members/'+abe.json.user.id, {
+      method:'PATCH', auth: abe.auth, expect:200,
+      body:{ searchRole:'manager', reason:'Manager unreachable during the rehearsal.' }
+    });
+    record('An administrator can reassign the account so nobody is stranded by it',
+      back.json.search.accountManager.userId===abe.json.user.id);
+    record('The reassignment says who moved it and why',
+      (back.json.search.activity||[]).some(e => /reassigned the account/.test(e.x||'') && /unreachable/.test(e.x||'')),
+      JSON.stringify((back.json.search.activity||[])[0]));
     await req('/api/searches/'+search.id+'/members/'+team.json.user.id, {
       method:'DELETE', auth: abe.auth, expect:200
     });

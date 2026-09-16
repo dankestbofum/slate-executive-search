@@ -123,15 +123,34 @@ Within one workspace the roles on a search are unchanged:
 |---|---|---|---|
 | See every search in this workspace | yes | yes | only their own |
 | Edit the search file | yes | yes | no |
-| Add members, run intake, adopt consensus | no | yes | no |
 | Answer intake, score candidates | yes | yes | yes |
+| Screen candidates, log staff work, export the record | yes | yes | no |
+| Add members, run intake, adopt consensus | no | yes | no |
+| Advance to finalist, release scores, record outcomes | no | yes | no |
+| Certify reference completion | no | yes | no |
+| Close, reopen, archive, restore | no | yes | no |
+| Hand the account to someone else | no | yes | no |
 
-The account manager is whichever consultant holds that role. **Any consultant in
-the workspace can join a search and take the account** — who runs a file is a
-firm decision, not a wall between colleagues, and gating it on the current
-manager would strand a search whenever that person is unavailable. Everything
-else the manager does (adding members, running the intake window, adopting
-consensus) stays with whoever holds it.
+The account manager is whichever consultant holds that role, one per search.
+Consultants do the firm's work on any file; the decisions in the lower half of
+that table are the ones a county is later shown a record of, so they stay with
+the person accountable for the search. A consultant prepares the recommendation
+and asks.
+
+That includes handing the account over. An earlier version let any consultant
+take it, so that a search would not be stranded when its manager was
+unavailable; the cost was that the split above was advisory, since anyone
+refused a decision could take the account and make it anyway. Nobody is
+stranded: **a workspace administrator can reassign the account**, and Slate
+requires a written reason, which goes on the file.
+
+Every one of these answers comes from one table, `server/authority.js`. The
+routes ask it, `/api/searches/:id` returns its answers to the browser as
+`you.may`, and the screens draw their controls from those — so a control that
+appears is a decision the server will accept, and a decision the server refuses
+is one the screen explains rather than offers. The rows are the proposed matrix
+in [docs/late-stage-pilot-plan.md](docs/late-stage-pilot-plan.md), which the
+search owner has not yet accepted or revised.
 
 The same person can be a consultant in one firm's workspace and a committee
 member in another's. The answer always comes from the membership verified for
@@ -597,8 +616,11 @@ evidence, actor, and any corrections.
 on their page — records and corrects the decision and lists the history, with
 the earlier entries marked superseded. Closeout is its own screen, reached from
 **More** on the search overview; it summarises the outcomes, names the
-candidates still undecided, lists the final documents, and holds both the close
-and the reopen form. While a search is closed, every screen in it carries a
+candidates still undecided, lists the final documents, offers the record as a
+download, and holds both the close and the reopen form. Recording an outcome,
+closing and reopening are the account manager's; a consultant who opens those
+screens is told who runs the search rather than shown a control that would be
+refused. While a search is closed, every screen in it carries a
 notice saying so — the alternative is a Save button that quietly fails.
 
 ## Candidate intake and submission recovery
@@ -685,12 +707,17 @@ facts carries a count of what is still outstanding.
 
 ## Records export
 
-`GET /api/searches/:id/export` produces the complete record of one search:
-facts and sources, committee and intake, adopted criteria with their revision,
-artifacts and approvals, candidates with their responses **and the questions
-those responses answer**, staff work, decision history with actor attribution,
-and a document inventory. Add `?format=text` for a plain-text report that
-stands alone without the application.
+Closeout offers the record as a readable report and as a data bundle;
+`GET /api/searches/:id/export` is the route behind both, with `?format=text`
+for the report. It produces the complete record of one search: facts and
+sources, committee and intake, adopted criteria with their revision, artifacts
+and approvals, candidates with their responses **and the questions those
+responses answer**, any responses a reopened questionnaire replaced, the
+inventory of material held elsewhere, the contact log, staff work, every outcome
+with its reason and job-related basis, the lifecycle, and decision history with
+actor attribution. The plain-text report stands alone without the application
+and carries all of it — a records officer reads the same record, not a summary
+of it.
 
 Restricted to consultants. A committee member cannot obtain through an export
 what they cannot read in the app — the export is a different format for the
@@ -971,7 +998,8 @@ must contact the candidate and share the link.
 
 **Archive** replaces permanent search deletion. Archived searches and their media
 can be restored from **Archived searches**. Their candidate links stop working
-while archived and are replaced on restoration. Committee accounts with no active
+while archived and remain revoked on restoration. Reissue a candidate link
+separately when access is appropriate. Committee accounts with no active
 places are retired; roster accounts are recovered on restoration.
 If an email was reassigned to a different account, restoration stops for that
 conflict to be resolved. No permanent purge is exposed in the app.
