@@ -327,7 +327,7 @@ support as unavailable rather than showing a contact nobody reads.
 
 | Symptom | First step |
 |---|---|
-| Someone cannot sign in | `node scripts/accounts.js list` — check for `disabled`; `reset` issues a new PIN |
+| Someone cannot sign in | `node scripts/accounts.js list` — check for `disabled`; then verify their Clerk account, active organization and membership. Slate has no local password or PIN reset. |
 | Candidate link not working | Replace it from the candidate record; old links stop working immediately |
 | Candidate says a submission failed | Check whether it committed before asking them to resubmit |
 | "This search changed since you opened it" | Expected stale-write protection. Their edits were not lost; copy, reload, reapply |

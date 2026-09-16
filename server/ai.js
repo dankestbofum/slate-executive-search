@@ -1,11 +1,12 @@
 'use strict';
 
 const Anthropic = require('@anthropic-ai/sdk');
-const { fetchCitySite, publicUrl } = require('./site');
+const { fetchCitySite, publicUrl, operationEnded } = require('./site');
 const { PLACE_KEYS, GOV_KEYS } = require('./brochure');
 const { STEPS } = require('./steps');
 const desk = require('./desk');
 const budget = require('./aibudget');
+const researchOp = require('./research-op');
 const jurisdictions = require('./jurisdictions');
 
 // Prompts name their own step number so a draft can say which step it belongs
@@ -34,7 +35,17 @@ function apiKey(){
   return String(process.env.ANTHROPIC_API_KEY || '').trim().replace(/^['"]|['"]+$/g, '');
 }
 
-function client(){
+/**
+ * The provider client.
+ *
+ * `forResearch` turns automatic SDK retries off. The SDK retries connection
+ * errors and timeouts, which is sensible for a short drafting call and was the
+ * mechanism that turned one stalled research attempt into a six-minute failure:
+ * a 180-second attempt plus one retry. Research bounds itself on the operation
+ * deadline instead, and any retry there has to be an explicit decision with
+ * budget left to pay for it.
+ */
+function client({ forResearch = false } = {}){
   const key = apiKey();
   if (!key) {
     const err = new Error('ANTHROPIC_API_KEY is not set. Add it locally in .env or as a platform variable.');
@@ -49,19 +60,127 @@ function client(){
   // Retries are deliberately low. The SDK default of 2 means one slow call can
   // become three billed calls, and drafting is not latency-critical enough to
   // justify that.
-  return new Anthropic({ apiKey: key, timeout: max.timeoutMs, maxRetries: max.retries });
+  return new Anthropic({
+    apiKey: key,
+    timeout: max.timeoutMs,
+    maxRetries: forResearch ? 0 : max.retries
+  });
 }
 
 function pickModel(wantPremium){
   return wantPremium ? PREMIUM : MODEL;
 }
 
-function normalizeClaudeError(err){
-  if (!err || err.code) return err;
-  if (err instanceof Anthropic.AuthenticationError) err.code = 'AUTH_ERROR';
-  else if (err instanceof Anthropic.RateLimitError) err.code = 'RATE_LIMIT';
-  else if (err instanceof Anthropic.APIConnectionError) err.code = 'CONNECTION_ERROR';
+function isAbortError(err){
+  return Boolean(err) && (err instanceof Anthropic.APIUserAbortError || err.name === 'AbortError' || err.name === 'TimeoutError');
+}
+
+/** The provider's request id, for correlating a failure with Anthropic's logs. */
+function requestIdOf(err){
+  const id = err && (err.request_id || err.requestID || err.requestId
+    || (err.headers && (err.headers['request-id'] || err.headers.get?.('request-id'))));
+  return id ? String(id).slice(0, 80) : null;
+}
+
+/**
+ * The underlying network failure, if there was one.
+ *
+ * A code such as ECONNRESET or ETIMEDOUT is what distinguishes "the provider
+ * was slow" from "an idle connection was dropped", which is exactly the
+ * distinction the existing logs could not make. It is a short, safe token, so
+ * it is kept; the message it came with is not.
+ */
+function safeNetworkCode(err){
+  const cause = err && err.cause;
+  const code = (cause && cause.code) || err?.code;
+  return typeof code === 'string' && /^[A-Z_]{3,32}$/.test(code) ? code : null;
+}
+
+/**
+ * Give an error a stable code, most specific first.
+ *
+ * Order matters here in a way it did not before. Cancellation and the shared
+ * deadline are the operation's own verdict; the SDK reports both as an aborted
+ * request, and a timeout arrives as `APIConnectionTimeoutError`, which extends
+ * `APIConnectionError`. Classifying connection errors first is what made every
+ * research timeout land in the logs as `CONNECTION_ERROR` with nothing to say
+ * whether the provider was slow or the socket was dropped.
+ */
+function normalizeClaudeError(err, op = null){
+  if (!err) return err;
+
+  // The operation's verdict outranks the transport's.
+  if (op && (op.cancelled || op.timedOut)) {
+    const own = op.terminal();
+    if (own && (isAbortError(err) || err.code === 'RESEARCH_CANCELLED' || err.code === 'RESEARCH_TIMEOUT')) {
+      own.requestId = requestIdOf(err);
+      return own;
+    }
+  }
+  if (err.code === 'RESEARCH_CANCELLED' || err.code === 'RESEARCH_TIMEOUT') return err;
+
+  if (!err.code) {
+    if (err instanceof Anthropic.APIConnectionTimeoutError || err.name === 'TimeoutError') err.code = 'TIMEOUT';
+    else if (err instanceof Anthropic.APIUserAbortError || err.name === 'AbortError') err.code = 'TIMEOUT';
+    else if (err instanceof Anthropic.AuthenticationError) err.code = 'AUTH_ERROR';
+    else if (err instanceof Anthropic.PermissionDeniedError) err.code = 'AUTH_ERROR';
+    else if (err instanceof Anthropic.RateLimitError) err.code = 'RATE_LIMIT';
+    else if (err instanceof Anthropic.NotFoundError) err.code = 'MODEL_UNAVAILABLE';
+    else if (err instanceof Anthropic.BadRequestError) err.code = 'BAD_REQUEST';
+    else if (err instanceof Anthropic.InternalServerError) err.code = 'PROVIDER_ERROR';
+    else if (err instanceof Anthropic.APIConnectionError) err.code = 'CONNECTION_ERROR';
+  }
+  // Operator-only detail. Kept off the response body; see researchFail().
+  err.sdkClass = err.constructor?.name || null;
+  err.requestId = requestIdOf(err);
+  err.networkCode = safeNetworkCode(err);
   return err;
+}
+
+/**
+ * One provider call, streamed, under both the round budget and the operation.
+ *
+ * Anthropic recommends streaming for long requests because an idle connection
+ * can be dropped, which is a plausible reading of the six-minute failures. The
+ * non-streaming call also left the timer measuring only the wait for response
+ * headers; the timer here runs until the last event of the stream, so a body
+ * that stalls halfway is bounded the same way a request that never answers is.
+ */
+async function streamMessage(anthropic, request, { timeoutMs, signal = null, maxRetries = 0 } = {}){
+  const controller = new AbortController();
+  let roundTimedOut = false;
+  const stop = reason => { try { controller.abort(reason); } catch { /* already settled */ } };
+  const onOuter = () => stop(signal.reason);
+
+  const timer = setTimeout(() => {
+    roundTimedOut = true;
+    stop(researchOp.fail('TIMEOUT', 'The provider did not finish this round in time.'));
+  }, Math.max(1, timeoutMs));
+  if (timer.unref) timer.unref();
+
+  if (signal) {
+    if (signal.aborted) stop(signal.reason);
+    else signal.addEventListener('abort', onOuter, { once: true });
+  }
+
+  const stream = anthropic.messages.stream(request, {
+    signal: controller.signal,
+    timeout: Math.max(1, timeoutMs),
+    maxRetries
+  });
+  try {
+    return await stream.finalMessage();
+  } catch (err) {
+    try { stream.abort(); } catch { /* the stream is already finished */ }
+    // The outer signal wins: a cancelled operation must not be reported as a
+    // provider timeout just because our own round timer fired in the same tick.
+    if (signal && signal.aborted) throw signal.reason || err;
+    if (roundTimedOut) throw researchOp.fail('TIMEOUT', 'The provider did not answer within the time allowed for one research round.');
+    throw err;
+  } finally {
+    clearTimeout(timer);
+    if (signal) signal.removeEventListener('abort', onOuter);
+  }
 }
 
 /**
@@ -247,6 +366,22 @@ function normalizeResearch(json){
   return { facts, community, sources };
 }
 
+// Figures a jurisdiction may genuinely not publish. Asking once is right;
+// asking forever is the completeness loop that spent the whole budget demanding
+// a budget document that does not exist. After the first submission these are
+// allowed to stand as unknown.
+const UNPUBLISHABLE = /population|budget|form of government/;
+
+function wroteUp(community){
+  return Boolean(asText(community.lede)
+    || sectionsHaveText(community.government)
+    || sectionsHaveText(community.community)
+    || asText(community.organization)
+    || asText(community.why)
+    || asText(community.government)
+    || asText(community.community));
+}
+
 function researchGaps(file, attempt){
   const facts = (file && file.facts) || {};
   const community = (file && file.community) || {};
@@ -256,17 +391,29 @@ function researchGaps(file, attempt){
   if (!asText(facts.fog)) missing.push('form of government');
   if (!asText(facts.population)) missing.push('population (Census or ACS, with year)');
   if (!asText(facts.budget)) missing.push('operating or general-fund budget');
-  const wroteUp = asText(community.lede)
-    || sectionsHaveText(community.government)
-    || sectionsHaveText(community.community)
-    || asText(community.organization)
-    || asText(community.why)
-    || asText(community.government)
-    || asText(community.community);
-  if (!wroteUp) missing.push('community / government write-up');
+  if (!wroteUp(community)) missing.push('community / government write-up');
   if (attempt >= 2) {
-    return missing.filter(m => !/population|budget/.test(m));
+    return missing.filter(m => !UNPUBLISHABLE.test(m));
   }
+  return missing;
+}
+
+/**
+ * What must be on the file for it to be research at all.
+ *
+ * The jurisdiction's own name, its state, and something written about it. A
+ * file missing any of these is not a partial result worth reviewing; it is a
+ * failure. Everything else can be reported as unknown and filled by hand,
+ * which is a better outcome than a loop that never terminates or a number the
+ * model invented to satisfy a checklist.
+ */
+function researchShortfall(file){
+  const facts = (file && file.facts) || {};
+  const community = (file && file.community) || {};
+  const missing = [];
+  if (!asText(facts.client)) missing.push('official jurisdiction name');
+  if (!asText(facts.state)) missing.push('state');
+  if (!wroteUp(community)) missing.push('community / government write-up');
   return missing;
 }
 
@@ -378,20 +525,152 @@ function addUsage(sum, usage){
   };
 }
 
-async function runResearchAgent(anthropic, request){
+/* ------------------------------------------------------------------ *
+ * Is the web tooling actually available?
+ *
+ * This used to be `/web_search|web_fetch|tool/i.test(err.message)`, which
+ * matched any error message containing the word "tool" — including a rate limit
+ * or a transient 500 — and answered it by starting a second research loop that
+ * threw the first one's progress away. The classification is now explicit and
+ * covers the case the message test could never see: a response that succeeded
+ * at the HTTP level while every tool call inside it failed.
+ * ------------------------------------------------------------------ */
+
+// Server-tool error codes that mean the tool is not serving this request. A
+// bad query or an exhausted max_uses is not a reason to abandon the tools.
+const TOOL_GONE_CODES = new Set(['unavailable', 'not_available', 'tool_unavailable']);
+
+const TOOL_RESULT_TYPES = new Set(['web_search_tool_result', 'web_fetch_tool_result']);
+
+function toolUnavailableError(err){
+  if (!err) return false;
+  if (err.code === 'MODEL_UNAVAILABLE') return true;
+  if (err.code !== 'BAD_REQUEST' && err.code !== 'AUTH_ERROR') return false;
+  // Anthropic reports an unentitled or unknown server tool as a request error
+  // naming the tool. Both the SDK's flattened message and the structured error
+  // body are checked, because which one is populated depends on the failure.
+  const detail = [
+    err.message,
+    err.error && err.error.error && err.error.error.message,
+    err.error && err.error.message
+  ].filter(Boolean).join(' ').toLowerCase();
+  if (!/web_search|web_fetch/.test(detail)) return false;
+  return /not |unsupported|unavailable|unknown|invalid|disabled|entitle|permission/.test(detail);
+}
+
+/**
+ * Did every tool call in this response fail with "unavailable"?
+ *
+ * A response can be a perfectly successful HTTP 200 whose tool results are all
+ * errors. One failed search is normal. All of them failing the same way means
+ * the tools are not there, and the page-only fallback is the right answer.
+ */
+function toolUnavailableResponse(msg){
+  let errors = 0;
+  let ok = 0;
+  for (const block of (msg && msg.content) || []) {
+    if (!TOOL_RESULT_TYPES.has(block.type)) continue;
+    const body = block.content;
+    const rows = Array.isArray(body) ? body : [body];
+    let blockFailed = false;
+    for (const row of rows) {
+      if (!row) continue;
+      if (typeof row.type === 'string' && row.type.endsWith('_error')) {
+        if (TOOL_GONE_CODES.has(String(row.error_code || '').toLowerCase())) blockFailed = true;
+        else return false; // a real tool error that is not unavailability
+      }
+    }
+    if (blockFailed) errors += 1;
+    else ok += 1;
+  }
+  return errors > 0 && ok === 0;
+}
+
+/**
+ * Run one research conversation inside the operation's budget.
+ *
+ * Every round is charged to the shared round allowance and the shared deadline,
+ * so continuations and the fallback cannot each help themselves to a fresh one.
+ * When the budget runs low the agent is told to stop gathering and submit what
+ * it has; when it runs out, the best submission so far is returned as a partial
+ * result rather than discarded.
+ */
+async function runResearchAgent(anthropic, request, op, { label = 'research' } = {}){
   const messages = request.messages.map(m => ({ role: m.role, content: m.content }));
   const transcripts = [];
-  let usage = { input_tokens: 0, output_tokens: 0 };
   let submitted = null;
+  // The most complete submission that clears the hard requirements, kept in
+  // case the budget ends before a complete one arrives.
+  let best = null;
   let submits = 0;
   let last = null;
+  let toolTrouble = false;
+  let nudged = false;
+  let exhausted = false;
+  let refusal = null;
+  // Set when a submission is accepted with gaps that a jurisdiction may simply
+  // not publish. There is nothing more to ask for, but the file is not complete
+  // either, so it goes back as a partial with those gaps named rather than as
+  // a finished result whose blanks nobody mentioned.
+  let acceptedWithGaps = false;
 
-  for (let i = 0; i < 6; i++) {
-    last = await anthropic.messages.create({ ...request, messages }, { timeout: 180000 });
-    usage = addUsage(usage, last.usage);
+  while (!submitted && !acceptedWithGaps) {
+    op.throwIfDone();
+    if (!op.roundsLeft() || op.roundBudget() <= 0) { exhausted = true; break; }
+
+    // Near the limit, stop asking for more sources and spend what is left
+    // writing up what has already been found.
+    if (op.synthesisOnly() && !nudged && messages.length > 1) {
+      nudged = true;
+      op.stageIs('synthesizing');
+      messages.push({
+        role: 'user',
+        content: 'Time is nearly up. Stop searching. Call submit_research now with everything you have already found, and use "" for any figure you did not find. Do not invent numbers.'
+      });
+    }
+
+    op.useRound();
+    const round = op.rounds;
+    const startedAt = Date.now();
+    try {
+      last = await streamMessage(anthropic, { ...request, messages }, {
+        timeoutMs: op.roundBudget(),
+        signal: op.signal,
+        maxRetries: op.limits.retries
+      });
+    } catch (err) {
+      const normalized = normalizeClaudeError(err, op);
+      op.record({
+        label, round, ms: Date.now() - startedAt, ok: false,
+        code: normalized.code || null,
+        sdkClass: normalized.sdkClass || null,
+        network: normalized.networkCode || null,
+        requestId: normalized.requestId || null
+      });
+      // A failure after a usable submission is not worth throwing that
+      // submission away for; the caller decides whether a partial is enough.
+      if (best && (normalized.code === 'TIMEOUT' || normalized.code === 'CONNECTION_ERROR' || normalized.code === 'PROVIDER_ERROR')) {
+        exhausted = true;
+        break;
+      }
+      throw normalized;
+    }
+    op.addUsage(last.usage);
+    op.record({
+      label, round, ms: Date.now() - startedAt, ok: true,
+      stopReason: last.stop_reason || null,
+      requestId: last._request_id || null
+    });
     transcripts.push(last);
 
+    if (toolUnavailableResponse(last)) toolTrouble = true;
+
+    if (last.stop_reason === 'refusal') {
+      refusal = 'The model declined to research this jurisdiction.';
+      break;
+    }
     if (last.stop_reason === 'pause_turn') {
+      // Expected for server tools: continue the same content and tool set.
       messages.push({ role: 'assistant', content: last.content });
       continue;
     }
@@ -412,25 +691,60 @@ async function runResearchAgent(anthropic, request){
         }
         submits += 1;
         const file = normalizeResearch(use.input || {});
+        const shortfall = researchShortfall(file);
+        // Everything still blank, whether or not we will ask for it again.
+        const gaps = researchGaps(file, 1);
+        if (!shortfall.length && (!best || gaps.length < best.warnings.length)) {
+          best = { file, warnings: gaps };
+        }
+        // What is worth asking for again. After the first submission the
+        // figures a jurisdiction may not publish drop out of this list.
         const missing = researchGaps(file, submits);
-        if (missing.length) {
+        // Keep asking only while there is budget to do something about it.
+        const roomToImprove = missing.length && op.roundsLeft() > 0 && !op.synthesisOnly();
+        if (roomToImprove) {
           results.push({
             type: 'tool_result',
             tool_use_id: use.id,
-            content: 'Not saved. Still missing: '+missing.join('; ')+'. Search those sources, then call submit_research again. Use "" only if the figure is unpublished.'
+            content: 'Not recorded yet. Still missing: ' + missing.join('; ')
+              + '. Search those sources, then call submit_research again. Use "" only if the figure is unpublished.'
+          });
+        } else if (shortfall.length) {
+          results.push({
+            type: 'tool_result',
+            tool_use_id: use.id,
+            content: 'Cannot be used: ' + shortfall.join('; ') + ' must be filled. Call submit_research again with those.',
+            is_error: true
+          });
+        } else if (!gaps.length) {
+          submitted = file;
+          // Not "saved": nothing has been written to the search file yet. The
+          // database write happens after this returns, and may still be
+          // refused as stale or unauthorized.
+          results.push({
+            type: 'tool_result',
+            tool_use_id: use.id,
+            content: 'Recorded for review. You are done.'
           });
         } else {
-          submitted = file;
+          // Accepted, with blanks. There is no more to ask for, and a blank
+          // that nobody mentions is worse than a blank that is named.
+          acceptedWithGaps = true;
           results.push({
             type: 'tool_result',
             tool_use_id: use.id,
-            content: 'Saved to the search file. You are done.'
+            content: 'Recorded for review, with these left blank: ' + gaps.join('; ') + '. You are done.'
           });
         }
       }
       messages.push({ role: 'user', content: results });
-      if (submitted) break;
       continue;
+    }
+
+    if (last.stop_reason === 'max_tokens') {
+      // A truncated turn cannot be parsed and cannot be continued usefully.
+      refusal = 'The research response was cut off before it was complete.';
+      break;
     }
 
     const text = extractText(last);
@@ -438,15 +752,26 @@ async function runResearchAgent(anthropic, request){
       try {
         const file = normalizeResearch(parseJson(text));
         submits += 1;
+        const shortfall = researchShortfall(file);
+        const gaps = researchGaps(file, 1);
+        if (!shortfall.length && (!best || gaps.length < best.warnings.length)) {
+          best = { file, warnings: gaps };
+        }
         const missing = researchGaps(file, submits);
-        if (!missing.length) {
+        if (!gaps.length) {
           submitted = file;
+          break;
+        }
+        if (!missing.length && !shortfall.length) {
+          // Nothing left to ask for, but not complete either. Same answer as
+          // the tool path: offered with its blanks named.
+          acceptedWithGaps = true;
           break;
         }
         messages.push({ role: 'assistant', content: last.content });
         messages.push({
           role: 'user',
-          content: 'Still missing: '+missing.join('; ')+'. Keep researching, then call submit_research. Use "" only if unpublished.'
+          content: 'Still missing: ' + missing.join('; ') + '. Keep researching, then call submit_research. Use "" only if unpublished.'
         });
         continue;
       } catch { /* not JSON yet */ }
@@ -459,7 +784,17 @@ async function runResearchAgent(anthropic, request){
     });
   }
 
-  return { submitted, last, transcripts, usage };
+  return {
+    submitted,
+    partial: submitted ? null : (best ? best.file : null),
+    warnings: submitted ? [] : (best ? best.warnings : []),
+    last,
+    transcripts,
+    usage: op.usage,
+    exhausted,
+    toolTrouble,
+    refusal
+  };
 }
 
 const SCHEMAS = {
@@ -649,18 +984,44 @@ function collectSources(msg, extra=[]){
   return out.slice(0, 12);
 }
 
-async function researchCity({ city, website, position, state, jurisdictionType='municipality', premium=false }={}){
+/**
+ * Research one jurisdiction, inside one bounded operation.
+ *
+ * `op` is the operation context (server/research-op.js). It is created here
+ * when a caller does not supply one, so a direct call is still bounded; the
+ * route and the job runner pass their own so cancellation and status reporting
+ * reach the same deadline the work is running under.
+ */
+async function researchCity({ city, website, position, state, jurisdictionType='municipality', premium=false }={}, op=null){
   publicUrl(website);
-  const anthropic = client();
+  const operation = op || researchOp.begin({ searchId: null });
+  try {
+    return await runResearch({ city, website, position, state, jurisdictionType, premium }, operation);
+  } finally {
+    // Release the deadline timer only if this call owns the operation; a caller
+    // that supplied one is still using it to report the outcome.
+    if (!op) operation.end();
+  }
+}
+
+async function runResearch({ city, website, position, state, jurisdictionType, premium }, op){
+  const anthropic = client({ forResearch: true });
   const model = pickModel(premium);
-  let site = { canonical: website, pages: [] };
-  try { site = await fetchCitySite(website, jurisdictions.typeOf(jurisdictionType)); }
+
+  op.stageIs('crawling');
+  let site = { canonical: website, pages: [], truncated: false };
+  try { site = await fetchCitySite(website, jurisdictions.typeOf(jurisdictionType), op); }
   catch (err) {
     if (err.code === 'BAD_URL') throw err;
+    // The crawl deadline or a cancellation ends the operation; an unreachable
+    // site does not, and research continues from the web tools.
+    if (operationEnded(err)) throw normalizeClaudeError(err, op);
   }
+  op.throwIfDone();
 
   const pageBlock = site.pages.length
     ? site.pages.map(p => untrusted(p.url, p.text)).join('\n\n')
+      + (site.truncated ? '\n\n(The crawl budget ended before every page on that site was read.)' : '')
     : '(Could not read the website. Use web_search and web_fetch.)';
 
   const prompt = `Research this US local government for an executive search.
@@ -692,50 +1053,82 @@ ${RESEARCH_CHECKLIST}`;
     tools
   };
 
+  // Every round the agent takes, including the fallback, is charged to the same
+  // deadline and the same round allowance. Pages already read and usage already
+  // measured survive the switch; the fallback is a second chance at the answer,
+  // not a second budget.
+  const pageOnlyRequest = {
+    ...request,
+    tools: [SUBMIT_TOOL],
+    messages: [{
+      role: 'user',
+      content: prompt + '\n\nWeb tools are unavailable. Use only the pages above, then call submit_research. Empty string if a figure is not on those pages.'
+    }]
+  };
+  const canFallBack = () => !op.done() && op.roundsLeft() > 0 && site.pages.length > 0;
+
+  op.stageIs('researching');
+  const transcripts = [];
   let out;
   try {
-    out = await runResearchAgent(anthropic, request);
-  } catch (err) {
-    const fallback = String(err.message || '');
-    if (/web_search|web_fetch|tool/i.test(fallback)) {
-      try {
-        out = await runResearchAgent(anthropic, {
-          ...request,
-          tools: [SUBMIT_TOOL],
-          messages: [{
-            role: 'user',
-            content: prompt + '\n\nWeb tools are unavailable. Use only the pages above, then call submit_research. Empty string if a figure is not on those pages.'
-          }]
-        });
-      } catch (err2) {
-        throw normalizeClaudeError(err2);
-      }
-    } else {
-      throw normalizeClaudeError(err);
+    out = await runResearchAgent(anthropic, request, op);
+    transcripts.push(...out.transcripts);
+    // Tool results that all failed as unavailable look like success at the HTTP
+    // level. One fallback, only if the budget still allows it.
+    if (!out.submitted && !out.partial && out.toolTrouble && canFallBack()) {
+      const second = await runResearchAgent(anthropic, pageOnlyRequest, op, { label: 'fallback' });
+      transcripts.push(...second.transcripts);
+      out = second;
     }
+  } catch (err) {
+    const normalized = normalizeClaudeError(err, op);
+    if (!toolUnavailableError(normalized) || !canFallBack()) throw normalized;
+    const second = await runResearchAgent(anthropic, pageOnlyRequest, op, { label: 'fallback' });
+    transcripts.push(...second.transcripts);
+    out = second;
   }
 
-  if (!out.submitted) {
-    const err = new Error('Jurisdiction lookup finished without a usable file. Try again, or fill the facts by hand.');
-    err.code = 'BAD_JSON';
+  const file = out.submitted || out.partial;
+  if (!file) {
+    const err = new Error(out.refusal
+      || (out.exhausted
+        ? 'Research ran out of time before it found enough to fill the search file. Try again, or fill the facts by hand.'
+        : 'Jurisdiction lookup finished without a usable file. Try again, or fill the facts by hand.'));
+    err.code = 'RESEARCH_INCOMPLETE';
+    err.warnings = out.warnings || [];
     throw err;
   }
 
-  const sources = collectSources(out.transcripts, [
+  const sources = collectSources(transcripts, [
     { title: city + ' website', url: site.canonical || website },
     ...(site.pages || []).map(p => ({ title: 'Official site', url: p.url })),
-    ...(out.submitted.sources || [])
+    ...(file.sources || [])
   ]);
   return {
     model,
     json: {
-      facts: out.submitted.facts,
-      community: out.submitted.community,
-      sources: out.submitted.sources
+      facts: file.facts,
+      community: file.community,
+      sources: file.sources
     },
     sources,
-    usage: out.usage
+    // Counted across every round and both loops. `usageKnown` is false when the
+    // provider reported nothing back, which is not the same claim as free.
+    usage: op.usage,
+    usageKnown: op.usageKnown,
+    // A partial result is supported findings with named gaps. It is offered for
+    // review rather than written straight onto the file.
+    partial: !out.submitted,
+    warnings: out.warnings || [],
+    operation: op.snapshot(),
+    pagesRead: (site.pages || []).length,
+    crawlTruncated: Boolean(site.truncated)
   };
 }
 
-module.exports = { generate, researchCity, normalizeResearch, researchGaps, addUsage, untrusted, UNTRUSTED_RULE, MODEL, PREMIUM };
+module.exports = {
+  generate, researchCity, normalizeResearch, researchGaps, researchShortfall,
+  addUsage, untrusted, UNTRUSTED_RULE, MODEL, PREMIUM,
+  normalizeClaudeError, toolUnavailableError, toolUnavailableResponse,
+  runResearchAgent, streamMessage
+};

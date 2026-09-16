@@ -64,6 +64,13 @@
 .lookup__steps li.is-now::before{background:var(--accent)}
 .lookup__steps li.is-done{color:var(--ink-2)}
 .lookup__steps li.is-done::before{background:var(--ok)}
+/* The stage the server actually reported, and how long the operation has been
+   running. Shown instead of a timed list of claims about work nobody measured. */
+.lookup__live{font-size:13.5px; color:var(--ink); font-weight:600; min-height:1.2em}
+.lookup__live:empty{display:none}
+.lookup__clock{color:var(--ink-3); font-variant-numeric:tabular-nums}
+.lookup__acts{display:flex; gap:var(--s-2); margin-top:var(--s-3)}
+.lookup__acts[hidden]{display:none !important}
 @keyframes lookup-spin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){
   .lookup__spin{animation:none; border-top-color:var(--line-strong); background:conic-gradient(var(--accent) 0 35%, var(--line) 0)}

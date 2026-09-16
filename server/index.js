@@ -28,11 +28,28 @@ const exporter = require('./export');
 const candidates = require('./candidates');
 const disposition = require('./disposition');
 const aibudget = require('./aibudget');
+const researchOp = require('./research-op');
+const researchJobs = require('./research-jobs');
 const organizations = require('./organizations');
 const {
   assembleBrochure, applyBrochureDefaults, packTheme, packScheme,
   PLACE_FIELDS, GOV_FIELDS, PACK_THEMES, PACK_SCHEMES
 } = require('./brochure');
+
+/**
+ * Research jobs.
+ *
+ * Built here rather than inside the module so the module carries no opinion
+ * about this application's storage, its permission model, or where a result
+ * lands. `applyResearch` and `authorizeJob` are hoisted declarations further
+ * down this file; nothing calls them until a request arrives.
+ */
+const jobs = researchJobs.create({
+  db, ai, telemetry, aibudget,
+  apply: (search, user, payload) => applyResearch(search, user, payload),
+  authorize: job => authorizeJob(job),
+  research: (input, op) => ai.researchCity(input, op)
+});
 
 const app = express();
 const PORT = Number(process.env.PORT || 4173);
@@ -197,6 +214,11 @@ function painted(req, search){
   // How the search concluded, if it has. Kept separate from Archive: filing a
   // search away is not the same statement as the work having finished.
   out.lifecycle = disposition.summary(search);
+  // The research operation this search has in flight, or the last one it ran.
+  // Carried on every read so refreshing the page, or coming back to it
+  // tomorrow, reconnects to the same operation instead of losing it or
+  // starting a second paid one.
+  out.researchJob = db.canEdit(search, req.access) ? jobs.referenceFor(search.id) : null;
   return out;
 }
 
@@ -218,6 +240,124 @@ function claudeFail(err){
   if (status === 401) return { status: 503, error: 'The Anthropic API key is invalid or expired. Update ANTHROPIC_API_KEY and try again.' };
   if (status === 429) return { status: 429, error: 'Claude is rate-limited. Wait a minute and try again.' };
   return { status: 500, error: err.message || 'Request failed.' };
+}
+
+/**
+ * What research tells the browser when it fails.
+ *
+ * Every outcome gets its own code and status, because "it failed" is not
+ * actionable and the previous single generic error is what made the hosted
+ * six-minute failures unreadable: an expired deadline, a dropped socket and an
+ * invalid key all arrived as the same `CONNECTION_ERROR`. What a consultant can
+ * do about each of those is different, so the answer distinguishes them.
+ *
+ * The provider's own text, request id and network error code stay in operator
+ * telemetry. What travels to the browser is the operation reference, so a
+ * support request can be matched to a log line without the log line's contents
+ * being published.
+ */
+function researchFail(err, op = null){
+  const reference = op ? op.id : (err && err.operation) || null;
+  const body = extra => ({ ...extra, ...(reference ? { operation: reference } : {}) });
+
+  if (err.code === 'RESEARCH_CANCELLED') {
+    return { status: 409, body: body({ code: 'RESEARCH_CANCELLED', error: 'Research was cancelled. Nothing was saved.' }) };
+  }
+  if (err.code === 'RESEARCH_TIMEOUT' || err.code === 'TIMEOUT' || err.code === 'DNS_TIMEOUT') {
+    return { status: 504, body: body({
+      code: 'RESEARCH_TIMEOUT',
+      error: 'Research ran past its time limit and was stopped. Nothing was saved. Try again, or fill the facts by hand.',
+      retry: true
+    }) };
+  }
+  if (err.code === 'NO_KEY' || err.code === 'AUTH_ERROR') {
+    return { status: 503, body: body({
+      code: 'AI_AUTH_ERROR',
+      error: err.code === 'NO_KEY'
+        ? err.message
+        : 'The Anthropic API key is invalid or expired. Update ANTHROPIC_API_KEY and try again.',
+      retry: false
+    }) };
+  }
+  if (err.code === 'RATE_LIMIT') {
+    return { status: 429, body: body({ code: 'AI_RATE_LIMIT', error: 'Claude is rate-limited. Wait a minute and try again.', retry: true }) };
+  }
+  if (err.code === 'CONNECTION_ERROR' || err.code === 'PROVIDER_ERROR') {
+    return { status: 502, body: body({
+      code: 'RESEARCH_CONNECTION_ERROR',
+      error: 'Slate could not complete the call to Anthropic. Nothing was saved. Try again in a moment.',
+      retry: true
+    }) };
+  }
+  if (err.code === 'MODEL_UNAVAILABLE' || err.code === 'BAD_REQUEST') {
+    return { status: 502, body: body({
+      code: 'RESEARCH_CONNECTION_ERROR',
+      error: 'Anthropic refused the research request for this model or tool configuration. Fill the facts by hand and tell an operator.',
+      retry: false
+    }) };
+  }
+  if (err.code === 'RESEARCH_INCOMPLETE' || err.code === 'BAD_JSON') {
+    return { status: 422, body: body({
+      code: 'RESEARCH_INCOMPLETE',
+      error: err.message,
+      missing: Array.isArray(err.warnings) ? err.warnings : undefined,
+      retry: true
+    }) };
+  }
+  if (err.code === 'BAD_URL') {
+    return { status: 400, body: body({ code: 'BAD_URL', error: err.message, retry: false }) };
+  }
+  if (err.code === 'STALE_SEARCH') {
+    return { status: 409, body: body({ code: 'STALE_SEARCH', error: err.message, retry: false }) };
+  }
+  const fail = claudeFail(err);
+  return { status: fail.status, body: body({ code: err.code || 'RESEARCH_FAILED', error: fail.error }) };
+}
+
+/** Operator-only detail about a research failure. Never in a response body. */
+function logResearchFailure(err, op, fields = {}){
+  telemetry.log.warn('research-failed', {
+    ...fields,
+    operation: op ? op.id : null,
+    code: err.code || null,
+    stage: op ? op.stage : null,
+    elapsedMs: op ? op.elapsed() : null,
+    rounds: op ? op.rounds : null,
+    sdkClass: err.sdkClass || null,
+    network: err.networkCode || null,
+    providerRequestId: err.requestId || null,
+    timeline: op ? op.timeline : null,
+    attempts: op ? op.attempts : null,
+    usageKnown: op ? op.usageKnown : null
+  });
+}
+
+/**
+ * What a research run actually cost in time, logged whether or not it worked.
+ *
+ * A limit is only worth raising against measurements, and a run that succeeded
+ * in 170 seconds is the most important measurement there is: it says the bound
+ * is nearly too tight. Stage timings, round count and usage; never the
+ * jurisdiction, the prompt, or what was found.
+ */
+function logResearchRun(op, { outcome, partial = false, pages = null, truncated = false, route }){
+  telemetry.log.info('research-run', {
+    route,
+    operation: op.id,
+    outcome,
+    partial: partial || undefined,
+    elapsedMs: op.elapsed(),
+    deadlineMs: op.limits.totalMs,
+    rounds: op.rounds,
+    maxRounds: op.limits.maxRounds,
+    pagesRead: pages,
+    crawlTruncated: truncated || undefined,
+    timeline: op.timeline,
+    attempts: op.attempts,
+    usage: op.usage,
+    usageKnown: op.usageKnown,
+    unknownUsageAttempts: op.unknownUsageAttempts
+  });
 }
 
 // Clerk is the only way into the workspace. Identity is proven by the request's
@@ -244,6 +384,10 @@ function clampWeight(w){
 // to remember which lines carry the room behind them.
 const CRIT_SOURCES = new Set(['committee', 'draft', 'consultant']);
 
+// Requests that stop work rather than change the record. They skip the
+// revision precondition and the frozen-search refusal; see requireSearch.
+const STOP_WORK_PATH = /\/research-jobs\/[^/]+\/cancel\/?$/;
+
 function requireSearch(req, res, next){
   const s = db.findSearch(req.params.id);
   if (!s) return res.status(404).json({ error:'Search not found.' });
@@ -253,17 +397,23 @@ function requireSearch(req, res, next){
   // is unknown is refused on the same terms rather than falling through.
   if (!db.canView(s, req.access)) return res.status(404).json({ error:'Search not found.' });
   req.search = s;
-  if (!['GET', 'HEAD'].includes(req.method) && req.headers['if-match'] === undefined) {
+  const reads = ['GET', 'HEAD'].includes(req.method);
+  // Stopping work already underway is not an edit to the search. A consultant
+  // must be able to cancel research whose search has changed under them, or
+  // been closed, without first reloading to collect a fresh revision — the
+  // alternative is a paid operation nobody can stop.
+  const stopsWork = STOP_WORK_PATH.test(req.path);
+  if (!reads && !stopsWork && req.headers['if-match'] === undefined) {
     return res.status(428).json({ error:'Reload this search before saving.', code:'REVISION_REQUIRED' });
   }
-  if (!['GET', 'HEAD'].includes(req.method) && req.headers['if-match'] !== undefined
+  if (!reads && !stopsWork && req.headers['if-match'] !== undefined
       && req.headers['if-match'] !== String(s.revision)) {
     return res.status(409).json({ error:'This search changed since you opened it. Your edits were not saved. Copy your edits, then reload the search and try again.', code:'STALE_SEARCH' });
   }
   // A closed or cancelled search accepts no ordinary edits, so a concluded
   // record cannot drift afterwards. Reads continue, and reopening is the one
   // deliberate act that is allowed through.
-  if (!['GET', 'HEAD'].includes(req.method) && disposition.isFrozen(s) && !/\/reopen\/?$/.test(req.path)) {
+  if (!reads && !stopsWork && disposition.isFrozen(s) && !/\/reopen\/?$/.test(req.path)) {
     return res.status(409).json({
       error: 'This search is ' + disposition.lifecycleOf(s) + '. Reopen it deliberately before making further changes.',
       code: 'SEARCH_CLOSED'
@@ -341,6 +491,14 @@ app.get('/api/ready', (_req, res) => {
     // reported separately so an Anthropic outage never reads as the
     // application being down.
     ai: { configured: aiConfigured(), degraded: !aiConfigured(), budget: aibudget.status() },
+    // Research runs as a bounded job with a durable record, so an operator can
+    // see what is waiting, what is running, and the limits in force without
+    // reading the logs. Counts and limits only; never what is being researched.
+    research: {
+      jobs: researchJobs.enabled(),
+      limits: researchOp.limits(),
+      ...jobs.counts()
+    },
     recovery: recoveryStatus,
     alerts: telemetry.alerts(),
     metrics: telemetry.metrics({
@@ -1398,6 +1556,9 @@ app.post('/api/searches/bulk-delete', ...requireWorkspace, (req, res) => {
 
 app.delete('/api/searches/:id', ...requireWorkspace, requireSearch, requireEditor, (req, res) => {
   if (req.user.role !== 'consultant') return res.status(403).json({ error:'The consultant deletes a search.' });
+  // Research in flight is stopped and its history goes with the search, so a
+  // deleted record leaves no job pointing at an id nobody can read.
+  jobs.dropForSearch(req.search.id);
   removeSearch(req.search);
   // Committee accounts existed for this search. With it gone they are live
   // sign-ins to nothing, so they go too.
@@ -1695,68 +1856,324 @@ app.post('/api/searches/:id/generate', ...requireWorkspace, requireSearch, requi
   }
 });
 
-app.post('/api/searches/:id/research', ...requireWorkspace, requireSearch, requireEditor, researchLimit, withinAiBudget, async (req, res) => {
+/**
+ * Read the research request off the wire.
+ *
+ * Shared by the synchronous route and the job route so the two contracts
+ * cannot drift into validating different things.
+ */
+function researchInput(req){
   const body = req.body || {};
-  const revision = req.search.revision;
   const city = String(Object.prototype.hasOwnProperty.call(body, 'city') ? body.city : (req.search.client || '')).trim();
   const website = String(Object.prototype.hasOwnProperty.call(body, 'website') ? body.website : (req.search.website || '')).trim();
-  const premium = Boolean(body.premium);
-  if (!city) return res.status(400).json({ error: req.search.jurisdictionType === 'county' ? 'Enter the county name.' : 'Enter the city or jurisdiction name.' });
-  if (!website) return res.status(400).json({ error:'Enter the official jurisdiction website.' });
+  if (!city) {
+    return { error: req.search.jurisdictionType === 'county' ? 'Enter the county name.' : 'Enter the city or jurisdiction name.' };
+  }
+  if (!website) return { error: 'Enter the official jurisdiction website.' };
+  return {
+    input: {
+      city, website,
+      premium: Boolean(body.premium),
+      position: req.search.position,
+      state: req.search.state,
+      jurisdictionType: req.search.jurisdictionType
+    }
+  };
+}
+
+const RESEARCH_NOTE_MARK = '— From city research —';
+
+/**
+ * Write a research result onto the search file.
+ *
+ * One place where research lands, shared by the synchronous route and the job
+ * runner, so there is one set of rules about what it may overwrite.
+ *
+ * A full result behaves as it always has: the research is the authority on the
+ * facts it found. A partial result does not. It has named gaps, it is applied
+ * only after a consultant has reviewed it, and it fills blanks rather than
+ * replacing anything a person has already put on the file — including the
+ * previous completed research, which stays until a full result replaces it.
+ * Whatever it declined to overwrite is returned so the consultant is told
+ * rather than left to notice.
+ */
+function applyResearch(search, user, { city, website, out }){
+  const partial = Boolean(out.partial);
+  const facts = (out.json && out.json.facts) || {};
+  const held = [];
+  const keep = (key, label) => {
+    if (!facts[key]) return false;
+    if (partial && String(search[key] || '').trim() && String(search[key]) !== String(facts[key])) {
+      held.push(label);
+      return false;
+    }
+    return true;
+  };
+
+  search.website = website;
+  if (keep('client', 'jurisdiction name')) search.client = facts.client;
+  else if (!search.client) search.client = city;
+  for (const [k, label] of [['state','state'],['fog','form of government'],['population','population'],['budget','budget'],['salary','salary']]) {
+    if (keep(k, label)) search[k] = facts[k];
+  }
+  if (facts.notes) {
+    const base = String(search.notes || '').split(RESEARCH_NOTE_MARK)[0].trim();
+    search.notes = base ? base + '\n\n' + RESEARCH_NOTE_MARK + '\n' + facts.notes : facts.notes;
+  }
+
+  const community = (out.json && out.json.community) || {};
+  const hasCommunity = Boolean(community.lede || community.government || community.community
+    || community.organization || community.why || (community.facts || []).length);
+  const onFile = search.artifacts && search.artifacts.community;
+  const occupied = Boolean(onFile && Object.keys(onFile).length);
+  if (hasCommunity && (!partial || !occupied)) {
+    search.artifacts.community = community;
+  } else if (hasCommunity && partial && occupied) {
+    held.push('community profile');
+  }
+
+  search.research = {
+    at: db.now(),
+    city,
+    website,
+    sources: out.sources || [],
+    model: out.model,
+    // A reviewed partial is recorded as partial, with the gaps it was accepted
+    // with. Nothing on this file should look more researched than it is.
+    partial: partial || undefined,
+    missing: partial && (out.warnings || []).length ? out.warnings.slice(0, 12) : undefined
+  };
+  db.touch(search, user, (partial ? 'applied partial research for ' : 'researched ') + city + ' from the official website');
+  search.aiUsage = ai.addUsage(search.aiUsage, out.usage);
+  return { held };
+}
+
+/**
+ * Research, synchronously, inside one bounded operation.
+ *
+ * Kept alongside the job contract below for rollback: an already-open browser
+ * that has not reloaded still calls this. It is bounded the same way the job
+ * runner is — the difference is only who holds the connection while it runs.
+ */
+app.post('/api/searches/:id/research', ...requireWorkspace, requireSearch, requireEditor, researchLimit, withinAiBudget, async (req, res) => {
+  const parsed = researchInput(req);
+  if (parsed.error) return res.status(400).json({ error: parsed.error });
+  const input = parsed.input;
+  const revision = req.search.revision;
+
+  const op = researchOp.begin({ searchId: req.search.id });
+  // While one request holds the work, losing the browser means nobody is
+  // waiting for it, so it is stopped rather than left to finish and bill.
+  // `close` fires on a completed response too, hence the guard: a successful
+  // reply must not be read as a disconnect.
+  const onClose = () => { if (!res.writableEnded) op.cancel('client-disconnect'); };
+  res.on('close', onClose);
+
+  const startedAt = Date.now();
+  let settled = false;
+  const settle = (ok, out) => {
+    if (settled) return;
+    settled = true;
+    telemetry.recordAi({ ok, ms: Date.now() - startedAt, usage: out && out.usage, kind: 'research', code: out && out.code });
+    // Recorded on the attempt, and with unknown usage marked as unknown: a
+    // failed round may still have been billed.
+    aibudget.record({
+      searchId: req.search.id,
+      model: (out && out.model) || null,
+      usage: op.usageKnown ? op.usage : null,
+      ok
+    });
+  };
+
+  aibudget.begin();
   try {
-    const researchStartedAt = Date.now();
-    aibudget.begin();
     let out;
     try {
-      out = await ai.researchCity({
-        city, website, premium,
-        position: req.search.position,
-        state: req.search.state,
-        jurisdictionType: req.search.jurisdictionType
-      });
-      telemetry.recordAi({ ok: true, ms: Date.now() - researchStartedAt, usage: out.usage, kind: 'research' });
-      aibudget.record({ searchId: req.search.id, model: out.model, usage: out.usage, ok: true });
+      out = await ai.researchCity(input, op);
     } catch (error) {
-      telemetry.recordAi({ ok: false, ms: Date.now() - researchStartedAt, kind: 'research', code: error.code });
-      aibudget.record({ searchId: req.search.id, model: null, usage: null, ok: false });
-      throw error;
+      const normalized = ai.normalizeClaudeError(error, op);
+      settle(false, { code: normalized.code });
+      throw normalized;
     }
+    settle(true, out);
+
+    // Checked again here, after the wait: authority, lifecycle and revision can
+    // all have changed while research was running, and a late write must not
+    // land in a workspace nobody asked it to.
+    op.throwIfDone();
+    op.stageIs('saving');
     if (!stillAuthorized(req)) {
-      return res.status(409).json({ error:'This search was closed to you while research was running. Nothing was saved.' });
+      return res.status(409).json({ code: 'RESEARCH_UNAUTHORIZED', error: 'This search was closed to you while research was running. Nothing was saved.' });
     }
-    if (req.search.revision !== revision) return res.status(409).json({ error:'This search changed during research. The newer work was kept. Reload before researching again.', code:'STALE_SEARCH' });
-    const facts = (out.json && out.json.facts) || {};
-    req.search.website = website;
-    if (facts.client) req.search.client = facts.client;
-    else if (!req.search.client) req.search.client = city;
-    for (const k of ['state','fog','population','budget','salary']) {
-      if (facts[k]) req.search[k] = facts[k];
+    if (req.search.revision !== revision) {
+      return res.status(409).json({ error: 'This search changed during research. The newer work was kept. Reload before researching again.', code: 'STALE_SEARCH' });
     }
-    if (facts.notes) {
-      const mark = '— From city research —';
-      const incoming = facts.notes;
-      const base = String(req.search.notes || '').split(mark)[0].trim();
-      req.search.notes = base ? base + '\n\n' + mark + '\n' + incoming : incoming;
+    if (out.partial) {
+      // Supported findings with named gaps are offered, not written. The job
+      // contract gives them a review step; this path hands them back so the
+      // consultant can see what is missing and decide.
+      logResearchRun(op, {
+        route: 'research-sync', outcome: 'incomplete', partial: true,
+        pages: out.pagesRead, truncated: out.crawlTruncated
+      });
+      return res.status(422).json({
+        code: 'RESEARCH_INCOMPLETE',
+        error: 'Research found some of the file but not all of it. Review what it found, or fill the rest by hand.',
+        missing: out.warnings,
+        operation: op.id
+      });
     }
-    const community = out.json.community || {};
-    if (community.lede || community.government || community.community || community.organization || community.why || (community.facts||[]).length) {
-      req.search.artifacts.community = community;
-    }
-    req.search.research = {
-      at: db.now(),
-      city,
-      website,
-      sources: out.sources || [],
-      model: out.model
-    };
-    db.touch(req.search, req.user, 'researched '+city+' from the official website');
-    req.search.aiUsage = ai.addUsage(req.search.aiUsage, out.usage);
+    const { held } = applyResearch(req.search, req.user, { city: input.city, website: input.website, out });
     db.persist();
-    res.json({ search: painted(req, req.search), model: out.model, usage: out.usage });
+    op.stageIs('done');
+    logResearchRun(op, {
+      route: 'research-sync', outcome: 'saved',
+      pages: out.pagesRead, truncated: out.crawlTruncated
+    });
+    res.json({
+      search: painted(req, req.search),
+      model: out.model,
+      usage: out.usage,
+      usageKnown: out.usageKnown !== false,
+      held,
+      operation: op.id
+    });
   } catch (err) {
-    const fail = claudeFail(err);
-    res.status(fail.status).json({ error: fail.error });
+    settle(false, { code: err.code });
+    const fail = researchFail(err, op);
+    logResearchFailure(err, op, { route: 'research-sync' });
+    res.status(fail.status).json(fail.body);
+  } finally {
+    res.off('close', onClose);
+    op.end();
   }
+});
+
+/* ===========================================================================
+ * Research as a job
+ *
+ * The same work, started and answered separately, so a consultant is not the
+ * only record that it is happening. See server/research-jobs.js for why this
+ * stays in one process.
+ * ========================================================================= */
+
+// Status polling is frequent by design — roughly every two seconds while the
+// tab is visible — so it gets its own allowance rather than eating the one
+// that bounds starting paid work.
+const researchStatusLimit = http.limiter({
+  windowMs: 10 * 60 * 1000, max: 900, key: req => 'rstatus:' + (req.user?.id || clientIp(req)),
+  message: 'Too many status checks. Wait a moment.'
+});
+
+/**
+ * Is the authority this job started with still the authority it has?
+ *
+ * `stillAuthorized` compares against the access object its request arrived
+ * with, which is right for a call that lasts seconds. A job can outlive the
+ * membership that started it, so this asks the directory again: the person may
+ * have been removed from the firm, had their role changed, or the search may
+ * have been closed, deleted, or edited since.
+ */
+async function authorizeJob(job){
+  const search = db.findSearch(job.searchId);
+  if (!search) {
+    return { ok: false, code: 'SEARCH_GONE', error: 'That search no longer exists, so the research was not saved.' };
+  }
+  if ((search.organizationId || null) !== (job.organizationId || null)) {
+    return { ok: false, code: 'RESEARCH_UNAUTHORIZED', error: 'That search moved to another workspace, so the research was not saved.' };
+  }
+  if (disposition.isFrozen(search)) {
+    return { ok: false, code: 'SEARCH_CLOSED', error: 'This search was ' + disposition.lifecycleOf(search) + ' while research was running, so nothing was saved.' };
+  }
+  const user = db.findUserById(job.requestedBy);
+  if (!user || !job.requestedByClerkId) {
+    return { ok: false, code: 'RESEARCH_UNAUTHORIZED', error: 'The account that started this research is no longer available, so nothing was saved.' };
+  }
+  const access = await auth.accessFor(user, job.requestedByClerkId, job.organizationId);
+  if (!access || !access.orgId || !access.role || !db.canEdit(search, access)) {
+    return { ok: false, code: 'RESEARCH_UNAUTHORIZED', error: 'Your access to this search changed while research was running, so nothing was saved.' };
+  }
+  if (search.revision !== job.revisionAtStart) {
+    return {
+      ok: false,
+      code: 'STALE_SEARCH',
+      error: 'This search changed while research was running. The newer work was kept; review the research before applying it.'
+    };
+  }
+  return { ok: true, search, user, access };
+}
+
+app.post('/api/searches/:id/research-jobs', ...requireWorkspace, requireSearch, requireEditor, researchLimit, async (req, res) => {
+  const parsed = researchInput(req);
+  if (parsed.error) return res.status(400).json({ error: parsed.error });
+  const key = String(req.get('idempotency-key') || (req.body && req.body.idempotencyKey) || '').trim();
+  if (key && key.length > 120) return res.status(400).json({ error: 'That idempotency key is too long.' });
+
+  const started = jobs.start({
+    search: req.search,
+    access: req.access,
+    user: req.user,
+    input: parsed.input,
+    idempotencyKey: key
+  });
+  if (started.error) {
+    if (started.code === 'RESEARCH_QUEUE_FULL' || String(started.code || '').startsWith('AI_')) res.set('Retry-After', '120');
+    return res.status(started.status).json({ error: started.error, code: started.code });
+  }
+  // 202, not 200: the work is accepted and recorded, and has not happened yet.
+  // `reused` is how a refresh or a double click learns it found the operation
+  // it already started rather than a second one.
+  res.status(202).json({
+    job: jobs.publicJob(started.job),
+    reused: Boolean(started.reused),
+    status: '/api/searches/' + encodeURIComponent(req.search.id) + '/research-jobs/' + encodeURIComponent(started.job.id)
+  });
+});
+
+app.get('/api/searches/:id/research-jobs/:jobId', ...requireWorkspace, requireSearch, requireEditor, researchStatusLimit, (req, res) => {
+  const job = jobs.find(req.params.jobId);
+  // A job belonging to another search, or another firm, is not found rather
+  // than refused: an unauthorized read must look the same as a missing record.
+  if (!job || job.searchId !== req.search.id) return res.status(404).json({ error: 'That research job was not found.' });
+  res.json({ job: jobs.publicJob(job, { includeResult: Boolean(job.result && job.result.reviewable) }) });
+});
+
+app.post('/api/searches/:id/research-jobs/:jobId/cancel', ...requireWorkspace, requireSearch, requireEditor, (req, res) => {
+  const job = jobs.find(req.params.jobId);
+  if (!job || job.searchId !== req.search.id) return res.status(404).json({ error: 'That research job was not found.' });
+  const out = jobs.cancel(job, req.user);
+  res.json({
+    job: jobs.publicJob(out.job, { includeResult: Boolean(out.job.result && out.job.result.reviewable) }),
+    // Cancelling something that already saved is reported as what happened,
+    // not as a cancellation that undid nothing.
+    alreadyCompleted: Boolean(out.alreadyDone),
+    search: out.alreadyDone ? painted(req, req.search) : undefined
+  });
+});
+
+/**
+ * Apply findings that were held back for review.
+ *
+ * Partial results and results a conflict refused always land here rather than
+ * being written the moment they arrive. Authority and the revision are checked
+ * again at this point, against this request, because this is the moment the
+ * write happens.
+ */
+app.post('/api/searches/:id/research-jobs/:jobId/apply', ...requireWorkspace, requireSearch, requireEditor, (req, res) => {
+  const job = jobs.find(req.params.jobId);
+  if (!job || job.searchId !== req.search.id) return res.status(404).json({ error: 'That research job was not found.' });
+  if (!job.result || !job.result.json || job.result.applied) {
+    return res.status(409).json({ error: 'There is nothing from this research to apply.', code: 'NOTHING_TO_APPLY' });
+  }
+  const out = jobs.applyReviewed(job, { search: req.search, user: req.user });
+  if (out.error) return res.status(out.status).json({ error: out.error, code: out.code });
+  res.json({
+    search: painted(req, req.search),
+    job: jobs.publicJob(job),
+    // Anything the partial declined to overwrite, so the consultant is told
+    // rather than left to notice that a figure did not change.
+    held: out.held || []
+  });
 });
 
 app.post('/api/searches/:id/candidates', ...requireWorkspace, requireSearch, requireEditor, (req, res) => {
@@ -2184,6 +2601,17 @@ app.post('/api/apply/:token/draft', candidateLimit, (req, res) => {
   const { search: s, candidate: c } = found;
   const which = req.body?.which || 'survey1';
   if (!['survey1', 'survey2'].includes(which)) return res.status(400).json({ error: 'Unknown questionnaire.' });
+  if (which === 'survey2' && !c.survey2SentAt) {
+    return res.status(400).json({ error: 'The search team has not sent this questionnaire yet.' });
+  }
+  const issued = c.issuedSurveys?.[which];
+  if (!issued || req.body?.surveyVersion !== issued.version) {
+    return res.status(409).json({ error: 'Reload this questionnaire before saving a draft. Your submitted response has not changed.' });
+  }
+  const allowed = new Set((issued.survey?.questions || []).map(question => 'q' + question.n));
+  if (Object.keys(req.body?.answers || {}).some(key => !allowed.has(key))) {
+    return res.status(400).json({ error: 'That draft does not match this questionnaire. Reload it before saving.' });
+  }
 
   const result = candidates.saveDraft(c, which, req.body?.answers);
   if (result.error) return res.status(400).json({ error: result.error });
@@ -2235,6 +2663,15 @@ const server = app.listen(PORT, HOST, () => {
     // serving work that is already underway.
     console.error('Recovery: not scheduled. ' + error.message);
   }
+  // Whatever was in flight when the last process stopped. A running job is
+  // marked interrupted rather than replayed: the provider may already have
+  // billed it, and a silent re-run would bill it twice.
+  try {
+    const interrupted = jobs.recover();
+    if (interrupted) console.log('Slate: ' + interrupted + ' research job(s) marked interrupted after restart.');
+  } catch (error) {
+    console.error('Slate: research job recovery failed: ' + error.message);
+  }
   telemetry.watchEventLoop();
   watchAlerts();
   console.log('Alerts:', telemetry.alerts().destination);
@@ -2259,6 +2696,9 @@ function shutdown(signal){
   if (shuttingDown) return;
   shuttingDown = true;
   console.log('Slate: ' + signal + ' received, draining requests.');
+  // A draining process must stop paying for work it will not be able to save.
+  // The records stay; the next process marks them interrupted.
+  jobs.stop();
 
   // Hard ceiling well inside a typical platform termination allowance, so the
   // process exits deliberately rather than being killed mid-write.

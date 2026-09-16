@@ -36,7 +36,7 @@ const PACKAGES = {
     lede: 'Post, track, screen, recommend. The committee still writes the profile; the firm runs the announcement and the applicant file.',
     services: [
       'Position profile', 'Job announcement', 'Online advertising', 'Applicant tracking',
-      'Resume screening', 'AI candidate screening', 'Candidate recommendation'
+      'Resume screening', 'Candidate screening workspace (human decisions)', 'Candidate recommendation'
     ],
     // How the search reads on its overview. A Basic file is a posting and a
     // screen, so it opens on an applicant dashboard rather than a nineteen-step
@@ -114,7 +114,7 @@ const COMPARE = [
   { t: 'Online advertising', pkg: 'basic' },
   { t: 'Applicant tracking', pkg: 'basic' },
   { t: 'Resume screening', pkg: 'basic' },
-  { t: 'AI candidate screening', pkg: 'basic' },
+  { t: 'Candidate screening workspace (human decisions)', pkg: 'basic' },
   { t: 'Candidate recommendation', pkg: 'basic' },
   { t: 'Active candidate sourcing', pkg: 'enhanced' },
   { t: 'Passive candidate recruitment', pkg: 'enhanced' },

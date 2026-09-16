@@ -1,5 +1,8 @@
 # Design audit deliverables
 
+- [Research reliability diagnosis and implementation plan](RESEARCH_RELIABILITY_IMPLEMENTATION_PLAN.md) — verified hosted failures, request deadlines, cancellation, progress, and durable research jobs.
+- [Research reliability status](RESEARCH_RELIABILITY_IMPLEMENTATION_STATUS.md) — what that plan built, how it was verified offline, and the hosted run still outstanding.
+
 - [Organization workspaces and onboarding implementation plan](ORGANIZATION_IMPLEMENTATION_PLAN.md) — organization selection, staff invitations, shared searches, permissions, and migration work.
 - [Organization workspaces status](ORGANIZATION_IMPLEMENTATION_STATUS.md) — what that plan built, how it was verified, and what still needs a hosted Clerk instance.
 

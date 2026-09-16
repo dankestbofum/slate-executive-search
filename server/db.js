@@ -281,7 +281,7 @@ function releaseWriterLock(){
  * newer release is refused outright: rolling the application back onto a store
  * it does not understand is how a rollback turns into data loss.
  * ------------------------------------------------------------------ */
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 
 function removeLegacyPins(store){
   const users = [...(store.users || []),
@@ -332,7 +332,15 @@ const MIGRATIONS = [
       for (const m of s.members || []) rename(m);
     }
     for (const p of store.pendingAssignments || []) rename(p);
-  }
+  },
+  // 5 -> 6: research has a durable job record (server/research-jobs.js), so a
+  // consultant can leave the page and come back to the same operation instead
+  // of the browser being the only thing that knows it exists. The table starts
+  // empty; there is no history to reconstruct, and inventing one would be
+  // inventing spend. An older build cannot open this store, which is what
+  // stops a rollback from serving a client that polls a job table the previous
+  // release neither writes nor recovers.
+  store => { store.researchJobs ||= []; }
 ];
 
 function runMigrations(store){
@@ -395,6 +403,7 @@ function load(){
 // work locked behind a step that did not exist when it was done.
 function migrate(store){
   store.archivedSearches ||= [];
+  store.researchJobs ||= [];
   store.users = store.users || [];
   organizations.ensureTables(store);
   for (const u of store.users) {

@@ -944,6 +944,25 @@ details.toggle[open] summary::before{transform:rotate(90deg) translateX(-1px)}
 .artitem__t{font-size:13px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--ink-3)}
 .artitem__hd .btn{margin-left:auto}
 .editor{gap:var(--s-3)}
+.print-value{display:none}
+.print-note{display:none}
+
+@media print{
+  /* Inputs clip long values on paper. The editor carries the same value as
+     wrapping text for print, while keeping the real input on screen. */
+  .plan-editor{overflow:visible}
+  .plan-editor table{table-layout:fixed; width:100%; font-size:10px}
+  .plan-editor input{display:none !important}
+  .plan-editor .print-value{display:block; white-space:normal; overflow-wrap:anywhere}
+  .plan-editor th:last-child,.plan-editor td:last-child{display:none}
+  .pagehead .btn,.sechead .btn,.candacts .btn{display:none !important}
+  .srcjson{display:none !important}
+  .candtable:has(.candacts) th:last-child,.candtable td.candacts{display:none}
+  .rating__scale button:not([aria-pressed="true"]){display:none !important}
+  .rating__scale button[aria-pressed="true"]{pointer-events:none; box-shadow:none}
+  #cnote{display:none !important}
+  .print-note{display:block; white-space:pre-wrap; overflow-wrap:anywhere}
+}
 
 /* --- long forms: section navigation with completion counts ---------------- */
 .secnav{

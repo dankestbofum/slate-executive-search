@@ -212,7 +212,10 @@ const as = (base, email, route = '/api/me') => fetch(base + route, { headers: si
     await stop();
 
     const upgraded = JSON.parse(fs.readFileSync(file, 'utf8'));
-    assert.equal(upgraded.schemaVersion, 5);
+    assert.equal(upgraded.schemaVersion, 6);
+    // 5 -> 6 added the research job table. It starts empty; a legacy store has
+    // no research history to reconstruct.
+    assert.ok(Array.isArray(upgraded.researchJobs), 'the research job table was not created');
     // 4 -> 5 renamed the field the roster is read through. A row left at the old
     // spelling reads as no role at all, so all three places it lives are checked.
     const legacyRoster = upgraded.searches.find(s => s.id === 'sr-legacy').members[0];
@@ -229,7 +232,7 @@ const as = (base, email, route = '/api/me') => fetch(base + route, { headers: si
     assert.equal(upgraded.sessions, undefined, 'the session table survived the migration');
     assert.ok(upgraded.users.every(u => !('pin' in u) && !('pinHash' in u)));
     assert.equal(upgraded.archivedSearches[0].archivedUsers[0].pinHash, undefined);
-    assert.ok(fs.readdirSync(path.join(directory, 'backups')).some(n => n.startsWith('pre-migration-1-to-5-')));
+    assert.ok(fs.readdirSync(path.join(directory, 'backups')).some(n => n.startsWith('pre-migration-1-to-6-')));
     console.log('PASS  Account linking, disabled accounts, public sign-up, workspace creation, and migration to organization ownership');
   } finally { await stop(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

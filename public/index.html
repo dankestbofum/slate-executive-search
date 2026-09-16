@@ -26,6 +26,14 @@
       <p class="lookup__copy" id="lookup-copy">Stay on this page.</p>
       <div class="mono t-small" id="lookup-site"></div>
       <ol class="lookup__steps" id="lookup-steps" aria-live="polite"></ol>
+      <!-- The real stage the server reports, announced when it changes. The
+           elapsed clock beside it is visual only: a screen reader does not
+           need to be told the second every second. -->
+      <div class="lookup__live" id="lookup-stage" aria-live="polite"></div>
+      <div class="lookup__clock mono t-small" id="lookup-elapsed" aria-hidden="true" hidden></div>
+      <div class="lookup__acts" id="lookup-acts" hidden>
+        <button type="button" class="btn btn--ghost btn--sm" id="lookup-cancel">Cancel</button>
+      </div>
     </div>
   </div>
   <div class="toast" id="toast" hidden role="status"></div>

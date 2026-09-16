@@ -87,7 +87,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report
-          path: playwright-report/
+          path: |
+            playwright-report/
+            test-results/
           retention-days: 7
 
   container:
@@ -129,7 +131,7 @@ jobs:
           [ "$status" -ne 0 ] || { echo "FAIL: started without DATA_DIR"; exit 1; }
           echo "$output" | grep -q "persistent disk" || { echo "FAIL: unclear message"; exit 1; }
 
-      - name: Boots on an empty writable volume without PIN configuration
+      - name: Boots on an empty writable volume with Clerk-only identity
         run: |
           mkdir -p "${RUNNER_TEMP}/data" && chmod 777 "${RUNNER_TEMP}/data"
           docker run -d --name slate-ci -p 4173:4173 \
@@ -157,8 +159,13 @@ jobs:
       - name: Persists across restart
         run: |
           test -f "${RUNNER_TEMP}/data/slate.json" || { echo "FAIL: no store written to the volume"; exit 1; }
+          docker stop --time 20 slate-ci
+          docker run --rm \
+            -e DATA_DIR=/data \
+            -v "${RUNNER_TEMP}/data:/data" \
+            slate:ci node scripts/container-persistence.js seed /data
           before=$(sha256sum "${RUNNER_TEMP}/data/slate.json" | cut -d' ' -f1)
-          docker restart slate-ci
+          docker start slate-ci
           for i in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:4173/api/health >/dev/null 2>&1; then break; fi
             sleep 2
@@ -166,6 +173,7 @@ jobs:
           curl -fsS http://127.0.0.1:4173/api/health >/dev/null \
             || { echo "FAIL: did not come back after restart"; docker logs slate-ci; exit 1; }
           test -f "${RUNNER_TEMP}/data/slate.json" || { echo "FAIL: store lost on restart"; exit 1; }
+          docker exec slate-ci node scripts/container-persistence.js verify /data
           echo "store sha256 before restart: $before"
           echo "store sha256 after restart:  $(sha256sum "${RUNNER_TEMP}/data/slate.json" | cut -d' ' -f1)"
 

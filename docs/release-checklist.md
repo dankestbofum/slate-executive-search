@@ -23,8 +23,7 @@ breadth, print, and load testing. See `docs/handoff.md` §6.
 
 - [x] The image builds
 - [x] It refuses to start without `DATA_DIR`
-- [x] It refuses to start without first-boot credentials
-- [x] It boots on an empty writable volume
+- [x] It boots on an empty writable volume with Clerk as the only identity provider; no local first-boot credential exists
 - [x] It runs as a non-root user
 - [x] It survives a restart with records intact
 - [x] It shuts down cleanly on SIGTERM and releases the write lock
@@ -37,7 +36,8 @@ breadth, print, and load testing. See `docs/handoff.md` §6.
 - [x] Workspace isolation: neither firm can read, write, list, count, archive,
       restore, export or fetch media from the other, and a forged organization
       claim buys nothing
-- [x] Credential strength policy; weak-credential audit
+- [x] Clerk JWT signature, issuer, audience, expiry and active membership are verified; disabled accounts fail closed
+- [x] The current schema stores no PIN, password hash, local session or demonstration credential
 - [x] Failure-safe media commit; schema version; single-writer lock
 - [x] No secret, session, or bearer token in any export or log
 
@@ -127,7 +127,7 @@ None of this is code. All of it is in `docs/pilot-decisions.md`.
 - [ ] **Named backup operator:** ____________________
 - [ ] **Alert recipient and escalation:** ____________________
 - [ ] Operators have executed the runbook once
-- [ ] Demonstration credentials disabled; `accounts.js audit` clean
+- [ ] Synthetic Clerk users and invitations removed or revoked; `accounts.js list` shows no unexpected local account records
 - [ ] One authorised AI run measured for latency and cost
 - [ ] Last-good image and matching snapshot identified
 - [ ] A second person has reviewed this checklist

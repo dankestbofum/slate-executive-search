@@ -3,7 +3,7 @@
 What has actually been verified, by what, and what has not. Written so that a
 green build is not mistaken for a broader claim than it supports.
 
-Last updated: 2026-09-13.
+Last updated: 2026-09-14.
 
 ---
 
@@ -11,9 +11,9 @@ Last updated: 2026-09-13.
 
 | Suite | Command | Count | Runs in CI |
 |---|---|---|---|
-| Syntax | `npm run check` | 65 files parsed | yes |
-| Isolated server suite | `npm test` | **518 checks** | yes |
-| Browser, accessibility, policy | `npm run test:browser` | **213 checks** (71 each: Chromium desktop, WebKit desktop, mobile Chromium emulation) | yes |
+| Syntax | `npm run check` | 69 files parsed | yes |
+| Isolated server suite | `npm test` | **566 checks** | yes |
+| Browser, accessibility, policy | `npm run test:browser` | **234 checks** (78 each: Chromium desktop, WebKit desktop, mobile Chromium emulation) | yes |
 | Container build and boot | CI only | 12 steps | yes |
 | Load measurement | `npm run test:load` | 1 run, ~30s | no — a measurement, not a pass |
 | Print samples | `npm run print:samples` | 7 PDFs + PNGs | no — output for a person to review |
@@ -40,6 +40,7 @@ The server suite runs against temporary data directories with an empty
 | `monitoring.js` | 14 | Health, metrics, alerts (DEP-06) |
 | `recovery.js` | 11 | Snapshots, off-volume copies, restore drill (DEP-05) |
 | `aireliability.js` | 18 | Budgets, spend accounting, outage behaviour, prompt-injection boundary (DEP-11) |
+| `research.js` | 47 | Research operation deadline, cancellation, round bounds, error classification, partial results, crawl budget, and the job lifecycle including restart recovery |
 | `integrity.js` | 40 | Regression checks for previously fixed defects |
 
 ## What the browser coverage found
@@ -130,7 +131,7 @@ accessibility problems. Nothing here shows the application is usable with a
 screen reader, and no person has tried. The following remain **untested**:
 
 - Screen-reader flow (NVDA, JAWS, VoiceOver)
-- Modal focus trapping and focus restoration after a dialog closes
+- Modal focus trapping. Focus restoration is now asserted for the research wait dialog (it takes focus on Cancel and hands it back when it closes); no other dialog is covered, and no screen reader has been used on any of them.
 - Live-region announcements for status changes and errors
 - Real device behaviour on iPhone Safari and Android Chrome
 - Print and PDF output
@@ -260,6 +261,7 @@ Two browser checks now pin both, including the unflagged Ctrl+P path.
 | **No print/PDF verification** | Brochures, panel materials and long answers have not been printed and looked at. A browser-printed PDF is also not an accessible tagged document. | DEP-12 |
 | **Load measured on a developer machine only** | The envelope has been measured against loopback on Windows, not against a Render starter instance and its network disk. The numbers bound the application's own cost; they do not predict the pilot. | DEP-04 |
 | **No real AI calls** | Model IDs, tool compatibility, latency and cost are configuration, not evidence. | DEP-11 |
+| **No hosted research run** | The research deadline, cancellation, job lifecycle and partial-result handling are proved offline against a mock provider and an injected clock. Whether a real jurisdiction completes inside the 180-second bound, and what it costs, is unmeasured. One bounded run against the Render deployment is the outstanding gate. | [Research reliability status](design-audit/RESEARCH_RELIABILITY_IMPLEMENTATION_STATUS.md) |
 | **No manual restore drill** | The mechanism is tested on synthetic data in milliseconds. That is not evidence an operator can recover under pressure. | DEP-05 |
 | **Print samples generated but not signed off** | `npm run print:samples` produces seven PDFs and PNGs from a search shaped to break layout; two defects were found and fixed from them, but nobody has opened the current set or printed one on paper. | DEP-12 |
 | **Graceful shutdown unverifiable locally** | Windows emulates SIGTERM as unconditional termination. Checked in CI via `docker stop`. | DEP-04 |

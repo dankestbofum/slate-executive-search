@@ -111,8 +111,9 @@ function assembleBrochure(search){
   if (skills.length) parts.push('Essential skills: ' + asList(skills) + '.');
   if (traits.length) parts.push('Leadership traits: ' + asList(traits) + '.');
 
+  const reviewText = /^first review\b/i.test(firstReview) ? firstReview : 'First review: ' + firstReview;
   const howToApply = firstReview
-    ? 'Submit a letter, resume, and the initial candidate survey at the link in the advertisement. First review: ' + firstReview + '. Applications stay confidential to the extent state law allows until finalists are named.'
+    ? 'Submit a letter, resume, and the initial candidate survey at the link in the advertisement. ' + reviewText + '. Applications stay confidential to the extent state law allows until finalists are named.'
     : 'Submit a letter, resume, and the initial candidate survey at the link in the advertisement. Applications stay confidential to the extent state law allows until finalists are named.';
 
   return {

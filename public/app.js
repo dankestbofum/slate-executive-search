@@ -205,6 +205,12 @@ const state = {
   // than by the browser (see photoSource). Revoked when the workspace changes.
   media:{},
   sel:null, busy:false, premium:false, apply:null,
+  // The research operation this tab is driving, and what a finished one left
+  // behind. `token` invalidates late responses from a previous search, a
+  // previous workspace, or an attempt that was cancelled. `error` and `review`
+  // outlive the dialog on purpose: a failure has to stay on the page long
+  // enough to be read and acted on. See startResearch.
+  research:{ token:0, active:null, error:null, review:null, key:null },
   // The intake answers being edited, held here rather than read back off the
   // DOM so a re-render never drops what somebody typed. Cleared when the
   // search changes or the answers are saved.
@@ -543,12 +549,8 @@ function stepNo(key){
   return st ? st.n : (STEP_FLOW.indexOf(key)+1 || '');
 }
 
-const LOOKUP_STEPS = [
-  'Opening the official website',
-  'Searching public records',
-  'Checking Census and the budget',
-  'Writing the search file'
-];
+// Research no longer has a list of steps on a timer. It reports the stage the
+// server is actually in; see RESEARCH_STAGE_TEXT.
 const DRAFT_STEPS = [
   'Reading the search file',
   'Drafting from the profile',
@@ -567,6 +569,11 @@ function paintLookupStep(i){
   });
 }
 
+// Where focus goes when a wait dialog closes. The dialog takes focus so a
+// keyboard user is not tabbing around an inert page; without this they would be
+// left on <body> when it closed, with no way back to the control they pressed.
+let waitReturnFocus = null;
+
 function showWait(opts={}){
   const el = $('#lookup');
   if (!el) return;
@@ -575,6 +582,7 @@ function showWait(opts={}){
   const copy = $('#lookup-copy');
   const site = $('#lookup-site');
   const steps = $('#lookup-steps');
+  if (el.hidden) waitReturnFocus = document.activeElement;
   if (kicker) kicker.textContent = opts.kicker || 'Working';
   if (title) title.textContent = opts.title || 'Working';
   if (copy) copy.textContent = opts.copy || 'Stay on this page.';
@@ -585,9 +593,37 @@ function showWait(opts={}){
   const list = Array.isArray(opts.steps) ? opts.steps : [];
   if (steps) steps.innerHTML = list.map(s => `<li>${esc(s)}</li>`).join('');
   paintLookupStep(0);
+
+  // The real stage, when there is one to report, and a clock. Both empty for
+  // the short saves that use this dialog.
+  setWaitStage(opts.stage || '');
+  const clock = $('#lookup-elapsed');
+  clearInterval(showWait._clock);
+  if (clock){
+    clock.hidden = !opts.elapsed;
+    clock.textContent = '';
+    if (opts.elapsed){
+      // From when the operation was accepted, not from when this dialog
+      // opened, so reconnecting to a running job shows its real age.
+      const from = Number.isFinite(opts.elapsedFrom) ? opts.elapsedFrom : Date.now();
+      const paint = () => { clock.textContent = elapsedLabel(Date.now() - from); };
+      paint();
+      showWait._clock = setInterval(paint, 1000);
+    }
+  }
+  const acts = $('#lookup-acts');
+  showWait._cancel = typeof opts.cancel === 'function' ? opts.cancel : null;
+  if (acts) acts.hidden = !showWait._cancel;
+  const cancelButton = $('#lookup-cancel');
+  if (cancelButton){
+    cancelButton.textContent = opts.cancelLabel || 'Cancel';
+    cancelButton.disabled = false;
+  }
+
   el.hidden = false;
   $('#app')?.setAttribute('inert','');
-  $('#lookup .lookup__card')?.focus();
+  (showWait._cancel && cancelButton ? cancelButton : $('#lookup .lookup__card'))?.focus();
+
   clearInterval(showWait._t);
   if (!list.length) return;
   let i = 0;
@@ -598,32 +634,495 @@ function showWait(opts={}){
   }, opts.tick || 8000);
 }
 
-function hideWait(){
-  clearInterval(showWait._t);
-  const el = $('#lookup');
-  if (el) el.hidden = true;
-  $('#app')?.removeAttribute('inert');
+function setWaitStage(text){
+  const el = $('#lookup-stage');
+  if (!el) return;
+  const next = String(text || '');
+  // Only write when it changes, so a polite live region announces a new stage
+  // rather than repeating the same one every poll.
+  if (el.textContent !== next) el.textContent = next;
 }
 
-function showLookup(city, website){
-  const name = String(city||'').trim() || 'the jurisdiction';
+function elapsedLabel(ms){
+  const total = Math.max(0, Math.round(ms / 1000));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return m ? m + 'm ' + String(s).padStart(2,'0') + 's' : s + 's';
+}
+
+function hideWait(){
+  clearInterval(showWait._t);
+  clearInterval(showWait._clock);
+  showWait._cancel = null;
+  const el = $('#lookup');
+  if (el) el.hidden = true;
+  const acts = $('#lookup-acts');
+  if (acts) acts.hidden = true;
+  setWaitStage('');
+  // inert is removed unconditionally: if this is ever skipped the whole
+  // application is unreachable, which is the failure this replaces.
+  $('#app')?.removeAttribute('inert');
+  const back = waitReturnFocus;
+  waitReturnFocus = null;
+  if (back && document.contains(back) && typeof back.focus === 'function') back.focus();
+  else $('#main')?.focus();
+}
+
+/* ===========================================================================
+ * Research
+ *
+ * This used to be: open a modal, advance four labels on an eight-second timer,
+ * and await one promise. After about twenty-four seconds the dialog said it was
+ * writing the search file whether or not the server had answered, and there was
+ * no Cancel, no deadline, and no way out if the promise never settled — the
+ * page stayed inert until it did.
+ *
+ * What replaces it:
+ *
+ *  - the stage shown is the stage the server reported, and the clock beside it
+ *    is real elapsed time rather than a claim about progress;
+ *  - Cancel returns control at once and then tells the server;
+ *  - one operation per tab, with a token so a result belonging to a previous
+ *    search, a previous workspace or a cancelled attempt is ignored;
+ *  - failure leaves a panel on the page with Retry and fill-by-hand, instead of
+ *    a toast that is gone before it is read;
+ *  - findings that are supported but incomplete are offered for review rather
+ *    than discarded or written over a consultant's own work.
+ * ========================================================================= */
+
+const RESEARCH_TERMINAL = new Set(['succeeded','partial','failed','cancelled','interrupted']);
+
+// Frequent while somebody is looking at it, rare when they are not: a
+// backgrounded tab does not need second-by-second news.
+const RESEARCH_POLL_VISIBLE_MS = 2000;
+const RESEARCH_POLL_HIDDEN_MS = 15000;
+// Each status check gets its own short deadline, so one hanging poll never
+// becomes the reason the operation looks stuck.
+const RESEARCH_POLL_TIMEOUT_MS = 10000;
+// Room beyond the server's own deadline for it to deliver a structured timeout,
+// rather than the browser inventing a verdict first.
+const RESEARCH_GRACE_MS = 20000;
+const RESEARCH_POLL_FAILURES = 10;
+
+const RESEARCH_STAGE_TEXT = {
+  queued: 'Waiting for a free slot',
+  starting: 'Starting',
+  crawling: 'Reading the official website',
+  researching: 'Searching public records',
+  synthesizing: 'Writing up what it found',
+  saving: 'Saving to the search file',
+  done: 'Finished'
+};
+
+function stageText(stage){
+  return RESEARCH_STAGE_TEXT[stage] || 'Working';
+}
+
+/**
+ * Has this operation stopped being the one this tab is showing?
+ *
+ * A search change, a workspace switch, a cancellation, or a second attempt all
+ * make an in-flight response irrelevant. Applying it anyway is how one client's
+ * material ends up under another client's name.
+ */
+function researchStale(active){
+  return !active
+    || state.research.active !== active
+    || state.research.token !== active.token
+    || state.search?.id !== active.searchId
+    || (state.org?.id || null) !== active.orgId;
+}
+
+function researchWait(active){
   showWait({
     kicker: 'Jurisdiction lookup',
-    title: 'Looking up '+name,
-    copy: 'A research agent is reading the official website and public records, then filling the search file. Stay on this page. It often takes a minute or two.',
-    site: website ? hostOf(website) : '',
-    steps: LOOKUP_STEPS
+    title: 'Looking up ' + (String(active.city || '').trim() || 'the jurisdiction'),
+    copy: 'A research agent is reading the official website and public records. Nothing is written to the search file until it finishes, and you can cancel at any time.',
+    site: active.website ? hostOf(active.website) : '',
+    stage: stageText(active.stage),
+    elapsed: true,
+    elapsedFrom: active.startedAt,
+    cancel: () => void cancelResearch(active)
   });
 }
 
-function hideLookup(){ hideWait(); }
-
-async function withLookup(city, website, fn){
-  showLookup(city, website);
-  try { return await fn(); }
-  catch (err) { toast(err.message); }
-  finally { hideLookup(); }
+function pollSignal(active){
+  const own = AbortSignal.timeout(RESEARCH_POLL_TIMEOUT_MS);
+  return AbortSignal.any ? AbortSignal.any([active.controller.signal, own]) : active.controller.signal;
 }
+
+/** Turn a failed request into something the failure panel can say. */
+function researchProblem(error){
+  const detail = error.detail || {};
+  const fatal = ['AI_AUTH_ERROR','BAD_URL','MODEL_UNAVAILABLE','RESEARCH_JOBS_OFF'];
+  return {
+    code: error.code || 'RESEARCH_FAILED',
+    error: error.message || 'Research did not finish.',
+    missing: Array.isArray(detail.missing) ? detail.missing : [],
+    operation: detail.operation || null,
+    retry: !fatal.includes(error.code),
+    // Only set when the outcome is genuinely unknown. Never claim nothing was
+    // saved when we cannot tell.
+    reload: false
+  };
+}
+
+/**
+ * Start research.
+ *
+ * `patch` is the facts the consultant typed in the form, saved first so their
+ * typing is never lost to the operation that follows. Both are inside the same
+ * abort signal, so cancelling during the save does not leave a request in
+ * flight with nobody waiting for it.
+ */
+async function startResearch({ city, website, premium, patch }){
+  const s = state.search;
+  if (!s) return;
+  if (state.research.active) {
+    toast('Research is already running on this search. Cancel it if you want to start again.');
+    return;
+  }
+  const token = ++state.research.token;
+  const active = {
+    token,
+    searchId: s.id,
+    orgId: state.org?.id || null,
+    city, website, premium,
+    controller: new AbortController(),
+    jobId: null,
+    stage: 'starting',
+    startedAt: Date.now(),
+    deadlineAt: null,
+    pollTimer: null,
+    pollFailures: 0,
+    // Held across a retry, so a consultant whose start response was lost finds
+    // the operation they already paid for rather than starting a second one.
+    key: state.research.key || ('rk-' + s.id + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10))
+  };
+  state.research.key = active.key;
+  state.research.active = active;
+  state.research.error = null;
+  state.research.review = null;
+  researchWait(active);
+
+  try {
+    if (patch) {
+      const saved = await api('/api/searches/' + s.id, { method: 'PATCH', body: patch, signal: active.controller.signal });
+      if (researchStale(active)) return;
+      state.search = saved;
+    }
+    let started;
+    try {
+      started = await api('/api/searches/' + active.searchId + '/research-jobs', {
+        method: 'POST',
+        signal: active.controller.signal,
+        headers: { 'idempotency-key': active.key },
+        body: { city, website, premium }
+      });
+    } catch (error) {
+      // The job contract can be switched off for rollback. An already-open
+      // client falls back to holding the connection itself.
+      if (error.code === 'RESEARCH_JOBS_OFF') { await researchInline(active, { city, website, premium }); return; }
+      throw error;
+    }
+    if (researchStale(active)) return;
+    active.jobId = started.job.id;
+    if (started.job.createdAt) active.startedAt = Date.parse(started.job.createdAt);
+    if (started.job.deadlineAt) active.deadlineAt = Date.parse(started.job.deadlineAt);
+    if (started.reused) setWaitStage(stageText(started.job.stage) + ' · already running');
+    if (researchStatus(active, started.job)) return;
+  } catch (error) {
+    if (error.aborted) return;
+    endResearch(active, { error: researchProblem(error) });
+    return;
+  }
+  pollResearch(active);
+}
+
+/**
+ * The synchronous contract, kept for rollback.
+ *
+ * The browser cannot read the server's configured deadline from here, so it
+ * carries its own: the default total plus the same grace period, which is the
+ * point past which holding the connection open tells us nothing. It is a
+ * backstop for a contract that is on its way out, not the bound — the bound is
+ * the operation deadline on the server.
+ */
+const RESEARCH_INLINE_DEADLINE_MS = 180000 + RESEARCH_GRACE_MS;
+
+async function researchInline(active, input){
+  const own = AbortSignal.timeout(RESEARCH_INLINE_DEADLINE_MS);
+  const signal = AbortSignal.any ? AbortSignal.any([active.controller.signal, own]) : active.controller.signal;
+  try {
+    const out = await api('/api/searches/' + active.searchId + '/research', {
+      method: 'POST', signal, body: input
+    });
+    if (researchStale(active)) return;
+    state.search = out.search;
+    endResearch(active, { saved: true, held: out.held || [] });
+  } catch (error) {
+    if (error.aborted) {
+      // Cancellation has already tidied up. The browser's own deadline firing
+      // has not, and its honest report is that the outcome is unknown.
+      if (!active.controller.signal.aborted) endResearch(active, { error: researchUnknownOutcome() });
+      return;
+    }
+    endResearch(active, { error: researchProblem(error) });
+  }
+}
+
+function pollResearch(active){
+  if (researchStale(active) || !active.jobId) return;
+  clearTimeout(active.pollTimer);
+  const base = document.hidden ? RESEARCH_POLL_HIDDEN_MS : RESEARCH_POLL_VISIBLE_MS;
+  // Backing off while disconnected, so a server that is down is asked less
+  // often rather than every two seconds by every open tab.
+  const backoff = Math.min(8, 2 ** Math.max(0, active.pollFailures - 1));
+  active.pollTimer = setTimeout(() => void checkResearch(active), base * backoff);
+}
+
+/**
+ * The browser's own deadline.
+ *
+ * A small grace period past the server's, so the server has room to deliver its
+ * structured timeout rather than the browser inventing a verdict first. Past
+ * that, the honest answer is that the outcome is not known here.
+ */
+function researchOverdue(active){
+  return Boolean(active.deadlineAt) && Date.now() > active.deadlineAt + RESEARCH_GRACE_MS;
+}
+
+function researchUnknownOutcome(){
+  return {
+    code: 'RESEARCH_UNKNOWN',
+    // Deliberately does not claim nothing was saved. We cannot see the
+    // server, so we do not know, and saying otherwise would be a guess
+    // presented as a fact about a client's file.
+    error: 'Slate stopped hearing back about this research, so its outcome is not known here. Reload this search to see whether it finished.',
+    missing: [], retry: false, reload: true
+  };
+}
+
+async function checkResearch(active){
+  if (researchStale(active)) return;
+  let out;
+  try {
+    out = await api('/api/searches/' + active.searchId + '/research-jobs/' + active.jobId, { signal: pollSignal(active) });
+    active.pollFailures = 0;
+  } catch (error) {
+    // Cancellation aborts the poll too; that is not a poll failure.
+    if (error.aborted && active.controller.signal.aborted) return;
+    if (error.status === 404) {
+      endResearch(active, { error: {
+        code: 'RESEARCH_LOST',
+        error: 'Slate could not find that research operation any more. Reload this search to see where it got to.',
+        missing: [], retry: false, reload: true
+      } });
+      return;
+    }
+    active.pollFailures += 1;
+    // A status check that failed is not a job that failed. Say which.
+    setWaitStage(stageText(active.stage) + ' · reconnecting');
+    if (active.pollFailures >= RESEARCH_POLL_FAILURES || researchOverdue(active)) {
+      endResearch(active, { error: researchUnknownOutcome() });
+      return;
+    }
+    pollResearch(active);
+    return;
+  }
+  if (researchStale(active)) return;
+  if (researchStatus(active, out.job)) return;
+  // Reachable, answering, and still not finished past its own deadline. The
+  // server bounds this operation, so this is a last resort rather than the
+  // mechanism; without it the browser would poll a stuck job forever.
+  if (researchOverdue(active)) { endResearch(active, { error: researchUnknownOutcome() }); return; }
+  pollResearch(active);
+}
+
+/** Read one status. Returns true when the operation is over. */
+function researchStatus(active, job){
+  active.stage = job.stage || active.stage;
+  if (job.deadlineAt) active.deadlineAt = Date.parse(job.deadlineAt);
+  if (!RESEARCH_TERMINAL.has(job.state)) {
+    setWaitStage(stageText(job.stage));
+    return false;
+  }
+  if (job.state === 'succeeded') { endResearch(active, { saved: true, job }); return true; }
+  if (job.state === 'cancelled' && !job.reviewable) { endResearch(active, { cancelled: true, job }); return true; }
+
+  // Findings worth a decision, and separately the reason the job did not apply
+  // them itself. A stale-search conflict has both: the work is good and the
+  // file moved under it. A plain partial has only the first, and a cancelled
+  // job that still produced findings has no failure to report at all.
+  const review = job.reviewable ? job : null;
+  const noFailureToReport = job.state === 'partial' || job.state === 'cancelled';
+  const failure = job.failure
+    ? {
+      code: job.failure.code || 'RESEARCH_FAILED',
+      error: job.failure.error || 'Research did not finish.',
+      missing: job.failure.missing || job.missing || [],
+      operation: job.id,
+      retry: !['AI_AUTH_ERROR','NO_KEY','AUTH_ERROR','BAD_URL','MODEL_UNAVAILABLE'].includes(job.failure.code),
+      reload: false
+    }
+    : (noFailureToReport ? null : {
+      code: 'RESEARCH_FAILED',
+      error: 'Research did not finish.', missing: job.missing || [], operation: job.id, retry: true, reload: false
+    });
+  endResearch(active, { review, error: failure });
+  return true;
+}
+
+/**
+ * Finish, whatever the reason.
+ *
+ * Timers, the signal and the dialog are released unconditionally and first:
+ * if that is ever skipped the application is unreachable, which is the failure
+ * this whole change exists to remove. Only then is the outcome applied, and
+ * only if it still belongs to what is on screen.
+ */
+function endResearch(active, outcome = {}){
+  clearTimeout(active.pollTimer);
+  active.pollTimer = null;
+  const mine = state.research.active === active;
+  if (mine) state.research.active = null;
+  hideWait();
+  if (!mine) return;
+  if (state.search?.id !== active.searchId || (state.org?.id || null) !== active.orgId) return;
+
+  if (outcome.saved) {
+    state.research.key = null;
+    state.research.error = null;
+    state.research.review = null;
+    const held = outcome.held || [];
+    toast(held.length
+      ? 'Filled from public sources. Kept what you had already entered for: ' + held.join(', ') + '.'
+      : 'Filled from public sources. Check the numbers, then edit.');
+    // Reload so the page shows what was actually written, not what the client
+    // hoped was written.
+    void refreshAfterResearch(active.searchId, 'community');
+    render();
+    return;
+  }
+  if (outcome.cancelled) {
+    state.research.key = null;
+    toast(outcome.alreadyCompleted
+      ? 'That research had already finished and been saved.'
+      : 'Research cancelled. Nothing was saved.');
+    render();
+    return;
+  }
+  state.research.review = outcome.review || null;
+  state.research.error = outcome.error || null;
+  // The key is kept only while we never learned a job id. That is the case
+  // where the start response was lost and we cannot tell whether the server
+  // recorded the operation: the retry must carry the same key so it finds the
+  // one operation rather than paying for a second. Once a job id is known the
+  // operation is identified and finished, and a retry is a new one.
+  if (outcome.error && active.jobId) state.research.key = null;
+  render();
+}
+
+async function refreshAfterResearch(searchId, view){
+  try {
+    await loadSearch(searchId);
+    if (state.view !== view && state.search?.id === searchId) go(view);
+    else render();
+  } catch { render(); }
+}
+
+/**
+ * Cancel.
+ *
+ * Control comes back before the server is told, because somebody who pressed
+ * Cancel should not have to wait on the network to get their page back. The
+ * server is then asked to stop the work; if it had already saved, that is
+ * reported as what happened rather than as a cancellation that undid nothing.
+ */
+async function cancelResearch(active){
+  if (!active || active.cancelling) return;
+  active.cancelling = true;
+  const button = $('#lookup-cancel');
+  if (button) { button.disabled = true; button.textContent = 'Cancelling…'; }
+  const { jobId, searchId } = active;
+  clearTimeout(active.pollTimer);
+  active.controller.abort();
+  endResearch(active, { cancelled: true });
+  if (!jobId) return;
+  try {
+    const out = await api('/api/searches/' + searchId + '/research-jobs/' + jobId + '/cancel', { method: 'POST', body: {} });
+    if (out.alreadyCompleted) {
+      toast('That research had already finished and been saved.');
+      if (state.search?.id === searchId) void refreshAfterResearch(searchId, 'community');
+    } else if (out.job && out.job.reviewable && state.search?.id === searchId) {
+      state.research.review = out.job;
+      render();
+    }
+  } catch (error) {
+    // The work is bounded by its own deadline on the server, so a cancel that
+    // could not be delivered is worth saying plainly rather than hiding.
+    if (!error.aborted) toast('Slate could not tell the server to stop; it will stop on its own deadline.');
+  }
+}
+
+/**
+ * Reconnect to research that is already running.
+ *
+ * Every search read carries its current or latest operation, so refreshing the
+ * page, or coming back to it tomorrow, finds the same one instead of losing it
+ * or starting a second paid run.
+ */
+function adoptResearchJob(){
+  const job = state.search && state.search.researchJob;
+  if (!job || state.research.active) return;
+  if (RESEARCH_TERMINAL.has(job.state)) {
+    // Findings still waiting for a decision are surfaced. A failure that has
+    // already been reported once is not re-announced on every visit.
+    if (job.reviewable && !state.research.review) state.research.review = job;
+    return;
+  }
+  const active = {
+    token: ++state.research.token,
+    searchId: state.search.id,
+    orgId: state.org?.id || null,
+    city: job.city,
+    website: job.website,
+    premium: job.premium,
+    controller: new AbortController(),
+    jobId: job.id,
+    stage: job.stage,
+    startedAt: job.createdAt ? Date.parse(job.createdAt) : Date.now(),
+    deadlineAt: job.deadlineAt ? Date.parse(job.deadlineAt) : null,
+    pollTimer: null,
+    pollFailures: 0,
+    key: job.id,
+    adopted: true
+  };
+  state.research.active = active;
+  researchWait(active);
+  if (!researchStatus(active, job)) pollResearch(active);
+}
+
+/** Nothing from a previous workspace, search, or session may keep running. */
+function stopResearch(){
+  const active = state.research.active;
+  state.research.token += 1;
+  state.research.active = null;
+  state.research.error = null;
+  state.research.review = null;
+  state.research.key = null;
+  if (!active) return;
+  clearTimeout(active.pollTimer);
+  active.controller.abort();
+}
+
+// Polling slows down when the tab is hidden and picks up again on return,
+// rather than running at the same rate into a sleeping laptop.
+document.addEventListener('visibilitychange', () => {
+  const active = state.research.active;
+  if (!active || !active.jobId) return;
+  if (!document.hidden) void checkResearch(active);
+});
 
 function waitFor(kind){
   if (kind === 'profile') {
@@ -710,19 +1209,41 @@ function stepNextCard(view){
   </div>`;
 }
 
+/** A request that was abandoned rather than one that failed. */
+function abortedError(){
+  const error = new Error('Cancelled.');
+  error.code = 'ABORTED';
+  error.aborted = true;
+  return error;
+}
+
 async function api(path, opts={}){
   const token = path.startsWith('/api/apply/') ? null : await window.SlateAuth.token();
+  // Acquiring the token is itself a wait. A cancelled operation must not start
+  // a request just because the token promise happened to settle afterwards.
+  if (opts.signal && opts.signal.aborted) throw abortedError();
   const writesSearch = opts.method && opts.method !== 'GET' && state.search && path.startsWith('/api/searches/'+state.search.id);
-  const res = await fetch(path, {
-    credentials:'include',
-    ...opts,
-    headers:{ 'content-type':'application/json', ...(token ? { authorization:'Bearer ' + token } : {}), ...(writesSearch ? { 'if-match':String(state.search.revision) } : {}), ...(opts.headers||{}) },
-    body: opts.body ? JSON.stringify(opts.body) : undefined
-  });
+  let res;
+  try {
+    res = await fetch(path, {
+      credentials:'include',
+      ...opts,
+      headers:{ 'content-type':'application/json', ...(token ? { authorization:'Bearer ' + token } : {}), ...(writesSearch ? { 'if-match':String(state.search.revision) } : {}), ...(opts.headers||{}) },
+      body: opts.body ? JSON.stringify(opts.body) : undefined
+    });
+  } catch (error) {
+    // An abort is a decision, not a network fault, and callers have to be able
+    // to tell them apart: one means "you stopped it", the other means "we do
+    // not know what happened".
+    if ((opts.signal && opts.signal.aborted) || error.name === 'AbortError' || error.name === 'TimeoutError') throw abortedError();
+    throw error;
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     const error = new Error(data.error || res.statusText);
     error.code = data.code;
+    error.status = res.status;
+    error.detail = data;
     throw error;
   }
   if (writesSearch && data.revision) state.search.revision = data.revision;
@@ -1392,6 +1913,9 @@ async function loadMe(){
  * thing this feature could do.
  */
 function clearWorkspaceState(){
+  // A research operation belongs to one firm's search. It stops before
+  // anything else, so no late status or result can land in the next workspace.
+  stopResearch();
   for (const url of Object.values(state.media)) URL.revokeObjectURL(url);
   state.media = {};
   state.search = null; state.searches = []; state.users = [];
@@ -1487,9 +2011,14 @@ async function refreshSearches(){
 }
 async function loadSearch(id){
   // An in-progress intake draft belongs to one search. Drop it when the file
-  // changes so answers cannot bleed from one committee into another.
-  if (state.search?.id !== id) { state.intake = null; state.newPin = null; state.newPeople = null; }
+  // changes so answers cannot bleed from one committee into another. Research
+  // is the same: an operation on the previous search must not keep reporting
+  // into this one.
+  if (state.search?.id !== id) { state.intake = null; state.newPin = null; state.newPeople = null; stopResearch(); }
   state.search = await api('/api/searches/'+id);
+  // Research that is already running reconnects here rather than being lost
+  // because the page was reloaded or revisited.
+  adoptResearchJob();
 }
 
 // A committee member is on the search to answer intake and score people, not
@@ -2866,6 +3395,7 @@ function vFacts(){
   const pkgOpen = Boolean(state.open.factspkg);
   return shell(`
     ${head('Search facts', s.client||'Client','These facts feed every generated document. Check them before you draft recruiting copy.')}
+    ${researchNoticeBand()}
     <div class="band"><div class="wrap"><form id="facts" class="stack">
       ${sectionHead('The client')}
       <div class="formgrid">
@@ -3751,6 +4281,11 @@ function packFact(k, v){
   if (!v) return '';
   return `<div class="pack__fact"><span>${esc(k)}</span><b>${esc(v)}</b></div>`;
 }
+function firstReviewLine(value){
+  const text = String(value || '').trim();
+  if (!text) return '';
+  return /^first review\b/i.test(text) ? text : 'First review ' + text;
+}
 const AD_KIND = {
   full: { tag:'Full listing', use:'ICMA, job boards, jurisdiction website' },
   short: { tag:'Short', use:'Newsletters and association briefs' },
@@ -3971,18 +4506,19 @@ function artifactEditor(kind, a){
   }
   if (kind==='plan'){
     const rows = a.rows || [];
+    const planInput = (path, label, value) => `<input class="input" data-path="${esc(path)}" value="${esc(value||'')}" aria-label="${esc(label)}"><span class="print-value">${esc(value||'')}</span>`;
     return editorWrap(kind, `
       ${sectionHead('Where the position is advertised', rows.length ? rows.length+' outlets' : 'None yet', artAdd(kind,'rows','Add an outlet'))}
-      ${rows.length ? `<div class="tablewrap"><table>
+      ${rows.length ? `<div class="tablewrap plan-editor"><table>
       <thead><tr><th>Outlet</th><th>Audience</th><th>Format</th><th>When</th><th>Cost</th><th>Who</th><th>Status</th><th></th></tr></thead>
       <tbody>${rows.map((r,i)=>`<tr>
-        <td><input class="input" data-path="rows.${i}.outlet" value="${esc(r.outlet||'')}" aria-label="Outlet ${i+1}"></td>
-        <td><input class="input" data-path="rows.${i}.audience" value="${esc(r.audience||'')}" aria-label="Audience ${i+1}"></td>
-        <td><input class="input" data-path="rows.${i}.format" value="${esc(r.format||'')}" aria-label="Format ${i+1}"></td>
-        <td><input class="input" data-path="rows.${i}.when" value="${esc(r.when||'')}" aria-label="When ${i+1}"></td>
-        <td><input class="input" data-path="rows.${i}.cost" value="${esc(r.cost||'')}" aria-label="Cost ${i+1}"></td>
-        <td><input class="input" data-path="rows.${i}.who" value="${esc(r.who||'')}" aria-label="Who ${i+1}"></td>
-        <td><input class="input" data-path="rows.${i}.status" value="${esc(r.status||'')}" aria-label="Status ${i+1}"></td>
+        <td>${planInput('rows.'+i+'.outlet', 'Outlet '+(i+1), r.outlet)}</td>
+        <td>${planInput('rows.'+i+'.audience', 'Audience '+(i+1), r.audience)}</td>
+        <td>${planInput('rows.'+i+'.format', 'Format '+(i+1), r.format)}</td>
+        <td>${planInput('rows.'+i+'.when', 'When '+(i+1), r.when)}</td>
+        <td>${planInput('rows.'+i+'.cost', 'Cost '+(i+1), r.cost)}</td>
+        <td>${planInput('rows.'+i+'.who', 'Who '+(i+1), r.who)}</td>
+        <td>${planInput('rows.'+i+'.status', 'Status '+(i+1), r.status)}</td>
         <td>${artDel(kind,'rows',i,'Remove')}</td>
       </tr>`).join('')}</tbody></table></div>`
       : `<p class="t-small">No outlets yet. Add the places this position will be advertised, or draft the plan with Claude.</p>`}
@@ -4112,7 +4648,7 @@ function renderBrochure(a){
       <footer class="pack__apply">
         <div class="pack__h">How to apply</div>
         ${a.howToApply ? `<div class="pack__prose">${prose(a.howToApply)}</div>` : '<p>See the advertisement for the application link and deadline.</p>'}
-        ${s.firstReview ? `<div class="pack__due">First review ${esc(s.firstReview)}</div>` : ''}
+        ${s.firstReview ? `<div class="pack__due">${esc(firstReviewLine(s.firstReview))}</div>` : ''}
       </footer>
     </article>`;
 }
@@ -4213,7 +4749,7 @@ function renderAdPack(kind, a, ctx){
         <div class="pack__h">How to apply</div>
         ${a.apply ? `<div class="pack__prose"><p>${esc(a.apply)}</p></div>` : '<p>See the search file for the application link.</p>'}
         ${a.contact ? `<p class="pack__due">${esc(a.contact)}</p>` : ''}
-        ${(a.firstReview || s.firstReview) ? `<div class="pack__due">First review ${esc(a.firstReview || s.firstReview)}</div>` : ''}
+        ${(a.firstReview || s.firstReview) ? `<div class="pack__due">${esc(firstReviewLine(a.firstReview || s.firstReview))}</div>` : ''}
       </footer>
     </article>
   </div>`;
@@ -4316,6 +4852,72 @@ function communityEmptyNotice(s){
   return `<div class="notice notice--info"><div><div class="notice__t">The community profile is not written yet</div><div class="notice__b">${body}</div></div></div>`;
 }
 
+/**
+ * Why the last research attempt did not land, and what to do about it.
+ *
+ * On the page rather than in a toast, because a toast is gone before it has
+ * been read and this is the one message a consultant has to act on. It stays
+ * until they retry, reload, or say they will fill the facts by hand.
+ */
+function researchFailurePanel(){
+  const e = state.research.error;
+  if (!e) return '';
+  const missing = (e.missing || []).length
+    ? `<div class="t-small">Still missing: ${esc((e.missing||[]).join('; '))}.</div>` : '';
+  return `<div class="notice notice--stop">
+    <div>
+      <div class="notice__t">Research did not finish</div>
+      <div class="notice__b">${esc(e.error)}</div>
+      ${missing}
+      <div class="row u-mt-3">
+        ${e.retry ? `<button type="button" class="btn btn--secondary btn--sm" data-act="research">Try research again</button>` : ''}
+        ${e.reload ? `<button type="button" class="btn btn--secondary btn--sm" data-act="reload-search">Reload this search</button>` : ''}
+        <button type="button" class="btn btn--ghost btn--sm" data-act="research-dismiss">Fill the facts by hand</button>
+      </div>
+      ${e.operation ? `<div class="t-small mono u-mt-2">Reference ${esc(e.operation)}</div>` : ''}
+    </div>
+  </div>`;
+}
+
+/**
+ * Findings that are supported but incomplete, waiting for a decision.
+ *
+ * The alternative used to be discarding the whole run, or a loop that kept
+ * demanding a budget figure a jurisdiction does not publish. Applying this
+ * fills what is blank and leaves alone anything already on the file.
+ */
+function researchReviewPanel(){
+  const job = state.research.review;
+  if (!job) return '';
+  const missing = (job.missing || []).length
+    ? `<div class="t-small">Not found: ${esc((job.missing||[]).join('; '))}. Fill those by hand.</div>`
+    : '';
+  const sources = (job.sources || []).length
+    ? `<ul class="t-small">${(job.sources||[]).slice(0,6).map(sx =>
+        `<li><a href="${esc(safeHref(sx.url))}" target="_blank" rel="noopener">${esc(sx.title || sx.url)}</a></li>`).join('')}</ul>`
+    : '';
+  return `<div class="notice notice--wait">
+    <div>
+      <div class="notice__t">Research found part of the file</div>
+      <div class="notice__b">It has supported findings but not everything on the checklist, so nothing has been written yet. Applying it fills what is blank and keeps anything you have already entered.</div>
+      ${missing}
+      ${sources}
+      <div class="row u-mt-3">
+        <button type="button" class="btn btn--primary btn--sm" data-act="research-apply">Apply what it found</button>
+        <button type="button" class="btn btn--ghost btn--sm" data-act="research-dismiss">Leave it for now</button>
+      </div>
+      <div class="t-small u-mt-2">Leaving it does not throw it away: it is still on the search until you apply it or research this ${esc(jurisdictionInfo().noun)} again.</div>
+    </div>
+  </div>`;
+}
+
+// The same two panels for screens that are not the community profile, drawn
+// only when there is something to say.
+function researchNoticeBand(){
+  const inner = researchReviewPanel() + researchFailurePanel();
+  return inner ? `<div class="band"><div class="wrap stack">${inner}</div></div>` : '';
+}
+
 function vCommunity(){
   const s = state.search, meta = DRAFTS.community, has = Boolean(s.artifacts?.community);
   const profileDone = (s.steps||[]).find(st=>st.key==='profile')?.status==='done';
@@ -4327,6 +4929,8 @@ function vCommunity(){
       ${!profileDone ? prereqNotice('The profile comes first',
         'Adopt the candidate profile — 3 to 5 essential skills — then look up the jurisdiction. Research writes this profile against what the committee said it is looking for.',
         'profile', 'Open Step '+stepNo('profile')+' · Candidate profile') : ''}
+      ${researchReviewPanel()}
+      ${researchFailurePanel()}
       ${!has ? communityEmptyNotice(s) : ''}
       ${docBar('community', has)}
       ${mode==='edit' ? `
@@ -5043,7 +5647,7 @@ function vPerson(){
           <div class="review2__col review2__col--scorecard">
             ${(s.criteria||[]).length ? groups : emptyState('No profile adopted yet',
               'Scoring is against the criteria the committee adopted in the candidate profile.')}
-            ${field('Note to the file','Only you and the search team see this.', `<textarea class="input ed" id="cnote">${esc(note)}</textarea>`)}
+            ${field('Note to the file','Only you and the search team see this.', `<textarea class="input ed" id="cnote">${esc(note)}</textarea><div class="print-note">${esc(note || 'No note recorded.')}</div>`)}
           </div>
         </div>
       </div>
@@ -5129,24 +5733,31 @@ function vApply(){
   const due = which === 'survey2' && a.deadline2 ? ` Respond by ${esc(a.deadline2)}.` : '';
   const questions = survey.questions || [];
   const required = questions.filter(q => q.required).length;
+  const draft = a.drafts?.[which] || null;
+  const draftAnswers = draft?.answers || {};
+  const draftStamp = draft?.at
+    ? 'Draft saved ' + esc(String(draft.at).slice(0, 16).replace('T', ' '))
+    : 'Not submitted';
   return `<div class="apply-shell">
     ${head(a.client, title, esc(survey.intro||'')+due)}
     <div class="applymeta">
       <p class="t-small"><b>${questions.length} question${questions.length===1?'':'s'}.</b>
         ${required ? esc(required)+' of them must be answered; those are marked with an asterisk. ' : 'None of them are required. '}
-        Answers are saved only when you submit, so finish in one sitting.</p>
+        You can save a private draft and return with this same link. Drafts expire after 14 days.</p>
       <p class="t-small"><button type="button" class="btn btn--ghost btn--sm" data-act="jump" data-to="apply-help">Need help or an accommodation?</button></p>
     </div>
     <form id="applyform" class="stack u-mt-5" data-which="${which}">
       ${questions.map(q => `
         <div class="q">
           <div class="q__hd"><span class="q__n" aria-hidden="true">${String(q.n).padStart(2,'0')}</span><span class="q__t" id="q${q.n}-label">${esc(q.prompt)}${q.required?' <span class="req" aria-hidden="true">*</span>':''}</span></div>
-          <div class="q__bd"><textarea class="input ed" name="q${q.n}" id="q${q.n}-input" aria-labelledby="q${q.n}-label" ${q.required?'required aria-required="true"':''}></textarea></div>
+          <div class="q__bd"><textarea class="input ed" name="q${q.n}" id="q${q.n}-input" aria-labelledby="q${q.n}-label" ${q.required?'required aria-required="true"':''}>${esc(draftAnswers['q'+q.n] || '')}</textarea></div>
         </div>`).join('')}
       <div class="applybar">
         <button class="btn btn--primary" type="submit">Submit questionnaire</button>
+        <button class="btn btn--secondary" type="button" data-act="save-apply-draft" data-which="${which}">Save draft</button>
         <span class="t-small" id="applycount" role="status" data-total="${questions.length}">0 of ${questions.length} answered</span>
       </div>
+      <p class="t-small" id="apply-draft-status" role="status">${draftStamp}</p>
     </form>
     ${a.deadlines && a.deadlines.note ? `<p class="t-small u-mt-3">${esc(a.deadlines.note)} (${esc(a.deadlines.timezone||'')})</p>` : ''}
     ${applySupport(a)}
@@ -5663,6 +6274,15 @@ document.addEventListener('keydown', e => {
     return;
   }
   if (e.key !== 'Escape') return;
+  // A wait that can be cancelled is cancellable from the keyboard too. Only
+  // when there is a cancel action: Escape must not appear to dismiss a save
+  // that is still going to happen.
+  if (showWait._cancel && !$('#lookup')?.hidden){
+    e.preventDefault();
+    e.stopPropagation();
+    showWait._cancel();
+    return;
+  }
   // Escape dismisses the description without activating anything.
   if (tipOpen){ hideTip(); e.stopPropagation(); return; }
   if (state.navOpen) setNav(false);
@@ -6436,18 +7056,45 @@ document.addEventListener('click', async e => {
     state.premium = $('#premium')?.checked || false;
     const city = String(body.city || body.client || state.search.client || '').trim();
     const website = String(body.website || state.search.website || '').trim();
-    await withLookup(city, website, async () => {
-      if (form?.id === 'facts') {
-        state.search = await api('/api/searches/'+state.search.id, { method:'PATCH', body });
-      }
-      const out = await api('/api/searches/'+state.search.id+'/research', {
-        method:'POST',
-        body:{ city, website, premium: state.premium }
-      });
-      state.search = out.search;
-      toast('Filled from public sources. Check the numbers, then edit.');
-      go('community');
+    if (!city || !website){
+      toast(city ? 'Enter the official jurisdiction website.' : 'Enter the jurisdiction name and its official website.');
+      return;
+    }
+    await startResearch({
+      city, website, premium: state.premium,
+      // Facts typed on the Search facts form are saved before research starts,
+      // so nothing somebody entered is lost to the operation that follows.
+      patch: form?.id === 'facts' ? body : null
     });
+    return;
+  }
+  if (act==='research-dismiss'){
+    state.research.error = null;
+    state.research.review = null;
+    render();
+    return;
+  }
+  if (act==='reload-search'){
+    await withBusy(async () => {
+      state.research.error = null;
+      await loadSearch(state.search.id);
+    }, waitSave('Reloading this search'));
+    return;
+  }
+  if (act==='research-apply'){
+    const job = state.research.review;
+    if (!job) return;
+    await withBusy(async () => {
+      const out = await api('/api/searches/'+state.search.id+'/research-jobs/'+job.id+'/apply', { method:'POST', body:{} });
+      state.search = out.search;
+      state.research.review = null;
+      state.research.error = null;
+      const held = out.held || [];
+      toast(held.length
+        ? 'Applied what research found. Kept what you had already entered for: '+held.join(', ')+'.'
+        : 'Applied what research found. Fill the remaining facts by hand.');
+      go('community');
+    }, waitSave('Applying what research found'));
     return;
   }
   if (act==='save-facts'){
@@ -6456,6 +7103,25 @@ document.addEventListener('click', async e => {
       state.search = await api('/api/searches/'+state.search.id, { method:'PATCH', body });
       toast('Facts saved.');
     });
+    return;
+  }
+  if (act==='save-apply-draft'){
+    const form = $('#applyform');
+    if (!form) return;
+    const token = location.pathname.split('/').pop();
+    const which = t.dataset.which === 'survey2' ? 'survey2' : 'survey1';
+    const answers = Object.fromEntries(new FormData(form).entries());
+    await withBusy(async () => {
+      const saved = await api('/api/apply/'+token+'/draft', {
+        method:'POST', body:{ which, answers, surveyVersion:state.apply.versions?.[which] }
+      });
+      state.apply.drafts ||= {};
+      state.apply.drafts[which] = { answers, at:saved.savedAt, expiresAt:saved.expiresAt };
+      state.dirty = false;
+      const status = $('#apply-draft-status');
+      if (status) status.textContent = 'Draft saved ' + String(saved.savedAt || '').slice(0, 16).replace('T', ' ');
+      toast('Draft saved. Return with this same link within 14 days.');
+    }, waitSave('Saving your draft'));
     return;
   }
 
@@ -6932,12 +7598,15 @@ document.addEventListener('submit', async e => {
     const which = e.target.dataset.which === 'survey2' ? 'survey2' : 'survey1';
     showWait(waitSave('Submitting your answers'));
     try {
-      await api('/api/apply/'+token, { method:'POST', body:{ which, answers, surveyVersion:state.apply.versions?.[which] } });
+      const received = await api('/api/apply/'+token, { method:'POST', body:{ which, answers, surveyVersion:state.apply.versions?.[which] } });
       state.dirty = false;
+      state.apply.receipts ||= {};
+      if (received.receipt) state.apply.receipts[which] = received.receipt;
+      if (state.apply.drafts) state.apply.drafts[which] = null;
       if (which === 'survey2') state.apply.submitted2 = true;
       else state.apply.submitted1 = true;
       render();
-      toast('Submitted.');
+      toast(received.duplicate ? 'Already received. Your answers are safe.' : 'Submitted.');
     } catch (err) { toast(err.message); }
     finally { hideWait(); }
   }
@@ -7011,6 +7680,10 @@ window.addEventListener('hashchange', async () => {
   state.dirty = false;
   await applyRoute(parseRoute(location.hash), { push:false });
 });
+
+// The wait dialog lives outside #app, which is inert while it is open, so its
+// Cancel button is wired directly rather than through the delegated handler.
+$('#lookup-cancel')?.addEventListener('click', () => { if (showWait._cancel) showWait._cancel(); });
 
 (async function boot(){
   await loadHealth();

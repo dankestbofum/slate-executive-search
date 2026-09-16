@@ -63,19 +63,29 @@ function estimateCost(model, usage) {
  * or a mistake cannot quietly run up a bill nobody authorised.
  * ------------------------------------------------------------------ */
 function limits(env = process.env) {
-  const number = (name, fallback) => {
+  // A configured value outside its range is clamped rather than honoured. A
+  // limit is a safety bound, and one typo in a platform variable should not be
+  // able to remove it — a timeout of 0, or of a day, is not a bound anybody
+  // meant to set.
+  const number = (name, fallback, min = 0, max = Infinity) => {
     const value = Number(env[name]);
-    return Number.isFinite(value) && value > 0 ? value : fallback;
+    if (!Number.isFinite(value) || value <= 0) return fallback;
+    return Math.max(min, Math.min(max, value));
   };
   return {
-    perSearchCalls: number('SLATE_AI_MAX_CALLS_PER_SEARCH', 200),
-    perDayCalls: number('SLATE_AI_MAX_CALLS_PER_DAY', 500),
-    perDayUsd: number('SLATE_AI_MAX_USD_PER_DAY', 25),
-    concurrent: number('SLATE_AI_MAX_CONCURRENT', 3),
+    perSearchCalls: number('SLATE_AI_MAX_CALLS_PER_SEARCH', 200, 1, 100000),
+    perDayCalls: number('SLATE_AI_MAX_CALLS_PER_DAY', 500, 1, 100000),
+    perDayUsd: number('SLATE_AI_MAX_USD_PER_DAY', 25, 0.01, 100000),
+    concurrent: number('SLATE_AI_MAX_CONCURRENT', 3, 1, 64),
     // Must fit inside the host's own request timeout, or the client sees a
-    // gateway error while the call keeps running and keeps billing.
-    timeoutMs: number('SLATE_AI_TIMEOUT_MS', 180000),
-    retries: Number.isFinite(Number(env.SLATE_AI_RETRIES)) ? Number(env.SLATE_AI_RETRIES) : 1
+    // gateway error while the call keeps running and keeps billing. Research
+    // reads this as a per-round ceiling (server/research-op.js) rather than as
+    // a bound on the whole operation, which is what one long request used to
+    // be mistaken for.
+    timeoutMs: number('SLATE_AI_TIMEOUT_MS', 180000, 1, 900000),
+    retries: Number.isFinite(Number(env.SLATE_AI_RETRIES))
+      ? Math.max(0, Math.min(5, Math.round(Number(env.SLATE_AI_RETRIES))))
+      : 1
   };
 }
 

@@ -84,7 +84,10 @@ function say(message) { process.stdout.write(message + '\n'); }
     });
     const BASE = 'http://127.0.0.1:' + ready.port;
     const signer = identity.signer(fixture.privateKey);
-    const auth = signer.headers('abe@slate.local');
+    const orgId = await identity.bootstrapWorkspace(BASE, {
+      owner: 'abe@slate.local', name: 'Print Sample Partners', privateKey: fixture.privateKey
+    });
+    const auth = signer.inOrg('abe@slate.local', orgId, 'org:admin');
 
     async function call(method, url, body, headers) {
       const res = await fetch(BASE + url, {
@@ -198,9 +201,10 @@ function say(message) { process.stdout.write(message + '\n'); }
 
     browser = await chromium.launch();
     const context = await browser.newContext({ baseURL: BASE });
-    const token = signer.token('abe@slate.local');
+    const token = signer.token('abe@slate.local', identity.orgClaims(orgId, 'org:admin'));
     await context.setExtraHTTPHeaders({ authorization: 'Bearer ' + token });
-    const { installClerk } = require('../tests/browser/clerk');
+    const { installClerk, useBase } = require('../tests/browser/clerk');
+    useBase(BASE);
     await installClerk(context, { email: 'abe@slate.local' });
     const page = await context.newPage();
 
@@ -288,19 +292,21 @@ function say(message) { process.stdout.write(message + '\n'); }
       '   profile changed. Review this copy against the current profile." is for the',
       '   consultant, not for the county reading the packet. Notices are now hidden',
       '   when printing a packet.',
+      '3. **Row action controls and advanced source JSON printed.** Controls such as',
+      '   Review, Invite, Add a candidate, and the raw JSON editor are now omitted',
+      '   from paper output.',
+      '4. **Editor values were clipped inside input boxes.** The recruitment plan now',
+      '   renders the same values as wrapping, read-only text for print.',
+      '5. **The brochure could repeat the First review label.** Already-labelled text',
+      '   is now preserved instead of being prefixed a second time.',
+      '6. **Candidate review controls obscured the paper record.** Print now keeps only',
+      '   each selected score and renders the note as wrapping text.',
       '',
       '## Judgement calls left for a person',
       '',
-      '- **Row action buttons still print** (Review, Invite, Add a candidate). They are',
-      '  controls, but hiding every button risked hiding things that read as content.',
-      '  Worth a view on whether a printed candidate list should carry them.',
-      '- **Editor fields print as input boxes and truncate.** On `03`, the plan table',
-      '  cells are text inputs, so "ICMA Job Center" prints as "ICMA Job". A printed',
-      '  table of half-words is not usable. Fixing it properly means rendering a',
-      '  read-only view for print, which is a design decision, not a CSS tweak.',
-      '- **The brochure footer prepends "First review:"** to whatever that field holds,',
-      '  so a value that already says "First review of applications…" reads twice. The',
-      '  sample uses such a value deliberately.',
+      '- Confirm that headings, long answers and table rows break at useful places.',
+      '- Confirm that type and contrast remain readable on the county\'s actual printer.',
+      '- Confirm that the selected-score-only treatment is clear without its screen controls.',
       '',
       '## Known limitation, not a defect to find',
       '',

@@ -11,6 +11,15 @@ const BLOCKED_HOSTS = new Set([
   'metadata.google.internal', 'metadata.internal'
 ]);
 
+// Per-page HTTP budget. The crawl deadline carried on the operation is the real
+// bound; this stops a single unresponsive page from consuming all of it.
+const PAGE_TIMEOUT_MS = 12000;
+// DNS is the one wait that is not inside the fetch, and an OS resolver lookup
+// is not cancellable. It gets its own deadline, and a result that arrives after
+// that deadline is discarded rather than used to open a socket.
+const DNS_TIMEOUT_MS = 5000;
+const MAX_BYTES = 1500000;
+
 function isPrivateIp(ip){
   if (!ip) return true;
   if (net.isIP(ip) === 4) {
@@ -36,6 +45,24 @@ function blockedUrlError(){
   const err = new Error('That website cannot be used.');
   err.code = 'BAD_URL';
   return err;
+}
+
+function dnsTimeoutError(host){
+  const err = new Error('Looking up ' + host + ' took too long.');
+  err.code = 'DNS_TIMEOUT';
+  return err;
+}
+
+/**
+ * Does this error mean the whole operation is over?
+ *
+ * The crawler catches broadly on purpose: one unreachable page is not a reason
+ * to abandon research. Cancellation and the shared deadline are the exceptions,
+ * and they must travel out through those catches rather than being swallowed
+ * into "that page did not load".
+ */
+function operationEnded(err){
+  return Boolean(err) && (err.code === 'RESEARCH_CANCELLED' || err.code === 'RESEARCH_TIMEOUT');
 }
 
 function publicUrl(raw){
@@ -68,7 +95,46 @@ function publicUrl(raw){
   return u;
 }
 
-async function assertPublicHost(u){
+/**
+ * Resolve a hostname under a deadline, and under the operation's abort signal.
+ *
+ * `dns.lookup` delegates to the OS resolver, which cannot be cancelled. This
+ * does not pretend otherwise: the lookup keeps running in the background, and
+ * what this guarantees is that its answer is thrown away once the caller has
+ * given up. That is the part that matters, because the alternative is a socket
+ * opening to an address nobody is waiting for any more.
+ */
+function resolvePublic(hostname, { timeoutMs = DNS_TIMEOUT_MS, signal = null } = {}){
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let timer = null;
+    const onAbort = () => finish(signal.reason || blockedUrlError());
+
+    function finish(error, addresses){
+      if (settled) return true;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      if (signal) signal.removeEventListener('abort', onAbort);
+      if (error) reject(error);
+      else resolve(addresses);
+      return false;
+    }
+
+    if (signal) {
+      if (signal.aborted) { finish(signal.reason || blockedUrlError()); return; }
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
+    timer = setTimeout(() => finish(dnsTimeoutError(hostname)), Math.max(1, timeoutMs));
+    if (timer.unref) timer.unref();
+
+    dns.lookup(hostname, { all: true }).then(
+      addresses => { finish(null, addresses); },
+      error => { finish(error); }
+    );
+  });
+}
+
+async function assertPublicHost(u, opts = {}){
   const host = u.hostname.replace(/^\[|\]$/g, '');
   if (net.isIP(host)) {
     if (isPrivateIp(host)) {
@@ -76,7 +142,7 @@ async function assertPublicHost(u){
     }
     return;
   }
-  const found = await dns.lookup(host, { all: true });
+  const found = await resolvePublic(host, opts);
   if (!found.length || found.some(row => isPrivateIp(row.address))) {
     throw blockedUrlError();
   }
@@ -86,6 +152,10 @@ async function assertPublicHost(u){
 // validated address — closing the gap where a hostname could resolve to a
 // public IP for assertPublicHost and a private/internal IP moments later
 // for fetch's own DNS lookup (DNS rebinding).
+//
+// The lookup carries its own deadline. Without one, a resolver that answers
+// after the operation has been abandoned would still reach connectTo and open
+// a socket on behalf of work nobody is waiting for.
 function safeConnect(opts, callback){
   const hostname = opts.hostname;
   if (net.isIP(hostname)) {
@@ -95,7 +165,7 @@ function safeConnect(opts, callback){
     }
     return connectTo(hostname, opts, callback);
   }
-  dns.lookup(hostname, { all: true }).then(addrs => {
+  resolvePublic(hostname, { timeoutMs: DNS_TIMEOUT_MS }).then(addrs => {
     if (!addrs.length || addrs.some(row => isPrivateIp(row.address))) {
       callback(blockedUrlError());
       return;
@@ -196,38 +266,118 @@ function extractLinks(html, base, jurisdictionType){
   return out;
 }
 
-async function fetchOnce(url, hops, jurisdictionType){
-  if (hops > 5) return null;
-  await assertPublicHost(url);
-  const res = await fetch(url.toString(), {
-    signal: AbortSignal.timeout(12000),
-    redirect: 'manual',
-    dispatcher: safeAgent,
-    headers: {
-      'user-agent': 'SlateSearch/1.0 (executive-search research)',
-      'accept': 'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.1'
+/**
+ * Read a response body without trusting its length.
+ *
+ * Content-Length is a claim, so the cap is applied while the bytes arrive
+ * rather than after. Going over stops reading and releases the socket instead
+ * of buffering megabytes that will be discarded anyway.
+ */
+async function readBounded(body, limit){
+  if (!body) return Buffer.alloc(0);
+  const reader = body.getReader();
+  const chunks = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > limit) {
+        await reader.cancel().catch(() => {});
+        return null;
+      }
+      chunks.push(Buffer.from(value));
     }
-  });
+  } catch (error) {
+    await reader.cancel().catch(() => {});
+    throw error;
+  }
+  return Buffer.concat(chunks);
+}
+
+async function discard(res){
+  if (res && res.body && !res.bodyUsed) {
+    await res.body.cancel().catch(() => {});
+  }
+}
+
+/**
+ * The signal one HTTP attempt runs under.
+ *
+ * Three bounds at once: the operation's own abort signal, the crawl deadline,
+ * and this page's share of it. A redirect chain reuses the same deadline rather
+ * than resetting the clock at every hop, which is how a chain of slow 302s used
+ * to outlast the timeout that was supposed to contain it.
+ */
+function attemptSignal(deadlineAt, signal){
+  const left = Math.max(1, deadlineAt - Date.now());
+  const perPage = AbortSignal.timeout(Math.min(PAGE_TIMEOUT_MS, left));
+  return signal ? AbortSignal.any([signal, perPage]) : perPage;
+}
+
+async function fetchOnce(url, hops, jurisdictionType, ctx){
+  if (hops > 5) return null;
+  if (Date.now() >= ctx.deadlineAt) return null;
+  if (ctx.signal && ctx.signal.aborted) throw ctx.signal.reason || blockedUrlError();
+
+  const dnsBudget = Math.min(DNS_TIMEOUT_MS, Math.max(1, ctx.deadlineAt - Date.now()));
+  await assertPublicHost(url, { timeoutMs: dnsBudget, signal: ctx.signal });
+
+  let res;
+  try {
+    res = await fetch(url.toString(), {
+      signal: attemptSignal(ctx.deadlineAt, ctx.signal),
+      redirect: 'manual',
+      dispatcher: safeAgent,
+      headers: {
+        'user-agent': 'SlateSearch/1.0 (executive-search research)',
+        'accept': 'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.1'
+      }
+    });
+  } catch (error) {
+    if (operationEnded(error)) throw error;
+    return null;
+  }
+
   if ([301, 302, 303, 307, 308].includes(res.status)) {
     const loc = res.headers.get('location');
+    await discard(res);
     if (!loc) return null;
-    return fetchOnce(new URL(loc, url), hops + 1, jurisdictionType);
+    let next;
+    // A redirect target is validated as a fresh URL, so a public page cannot
+    // redirect the crawler onto a private address or another scheme.
+    try { next = publicUrl(new URL(loc, url).toString()); } catch { return null; }
+    return fetchOnce(next, hops + 1, jurisdictionType, ctx);
   }
-  if (!res.ok) return null;
+  if (!res.ok) { await discard(res); return null; }
   const ct = (res.headers.get('content-type') || '').toLowerCase();
-  if (!ct.includes('html') && !ct.includes('text') && !ct.includes('xml')) return null;
-  const buf = Buffer.from(await res.arrayBuffer());
-  if (buf.length > 1_500_000) return null;
+  if (!ct.includes('html') && !ct.includes('text') && !ct.includes('xml')) {
+    await discard(res);
+    return null;
+  }
+
+  let buf;
+  try {
+    buf = await readBounded(res.body, MAX_BYTES);
+  } catch (error) {
+    if (operationEnded(error)) throw error;
+    return null;
+  }
+  if (!buf) return null;
   const html = buf.toString('utf8');
   const text = htmlToText(html).slice(0, 9000);
   if (!text) return null;
   return { url: url.toString(), text, links: extractLinks(html, url, jurisdictionType) };
 }
 
-async function fetchPage(raw, jurisdictionType){
+async function fetchPage(raw, jurisdictionType, ctx){
   try {
-    return await fetchOnce(publicUrl(raw), 0, jurisdictionType);
-  } catch {
+    return await fetchOnce(publicUrl(raw), 0, jurisdictionType, ctx);
+  } catch (error) {
+    // One page that cannot be read is ordinary. The operation ending is not,
+    // and must not be mistaken for it.
+    if (operationEnded(error)) throw error;
     return null;
   }
 }
@@ -260,22 +410,47 @@ function extraPaths(jurisdictionType){
 
 const PAGE_LIMIT = 6;
 const FETCH_CONCURRENCY = 4;
+// Successes used to be the only thing counted, so a site where most pages 404
+// could keep opening fresh batches. Attempts are bounded too.
+const ATTEMPT_LIMIT = 16;
 
-async function fetchCitySite(raw, jurisdictionType = 'municipality'){
+/**
+ * Read a jurisdiction's website inside a bounded budget.
+ *
+ * `op` is the research operation (server/research-op.js). Its crawl budget is a
+ * deadline for this whole function, not per page, and its abort signal reaches
+ * the DNS waits, the sockets, and the response bodies. When the budget runs out
+ * the pages already read are returned: partial source material is worth more
+ * than none, and the model is told what it did and did not get.
+ */
+async function fetchCitySite(raw, jurisdictionType = 'municipality', op = null){
   const home = publicUrl(raw);
-  await assertPublicHost(home);
+  const ctx = {
+    deadlineAt: Date.now() + (op ? op.crawlBudget() : PAGE_TIMEOUT_MS * 3),
+    signal: op ? op.signal : null
+  };
+  const dnsBudget = Math.min(DNS_TIMEOUT_MS, Math.max(1, ctx.deadlineAt - Date.now()));
+  await assertPublicHost(home, { timeoutMs: dnsBudget, signal: ctx.signal });
+
   const pages = [];
   const seen = new Set();
+  let attempts = 0;
+  let truncated = false;
   const markSeen = (u) => {
     const key = u.origin + u.pathname.replace(/\/$/, '');
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
   };
+  const budgetGone = () => {
+    if (Date.now() >= ctx.deadlineAt || attempts >= ATTEMPT_LIMIT) { truncated = true; return true; }
+    return false;
+  };
 
   const homeUrl = home.toString();
   markSeen(home);
-  const homePage = await fetchPage(homeUrl, jurisdictionType);
+  attempts += 1;
+  const homePage = await fetchPage(homeUrl, jurisdictionType, ctx);
   if (homePage) pages.push(homePage);
 
   const discovered = (homePage && homePage.links) || [];
@@ -287,18 +462,29 @@ async function fetchCitySite(raw, jurisdictionType = 'municipality'){
   }
 
   // Discovered links and boilerplate government/finance paths are independent
-  // fetches (each has its own DNS + TLS + HTTP round trip, up to a 12s
-  // timeout) — running a bounded batch concurrently instead of one at a time
-  // cuts the "Research this city" wall-clock time roughly in proportion to
-  // page count, while still honoring the page cap and priority order.
+  // fetches (each has its own DNS + TLS + HTTP round trip), so a bounded batch
+  // runs concurrently rather than one at a time. The page cap, the attempt cap
+  // and the crawl deadline all end it; whichever comes first, what has been
+  // read is kept.
+  let reached = 0;
   for (let i = 0; i < candidates.length && pages.length < PAGE_LIMIT; i += FETCH_CONCURRENCY) {
+    if (budgetGone()) break;
     const batch = candidates.slice(i, i + FETCH_CONCURRENCY);
-    const results = await Promise.all(batch.map(url => fetchPage(url, jurisdictionType)));
+    attempts += batch.length;
+    reached = i + batch.length;
+    const results = await Promise.all(batch.map(url => fetchPage(url, jurisdictionType, ctx)));
     for (const page of results) {
       if (page && pages.length < PAGE_LIMIT) pages.push(page);
     }
   }
-  return { canonical: homeUrl, pages };
+  // Truncated means candidates were left unread because a bound was hit, which
+  // is what the prompt needs to know: "this is what we got" rather than "this
+  // is what the site has".
+  return { canonical: homeUrl, pages, attempts, truncated: truncated && reached < candidates.length };
 }
 
-module.exports = { publicUrl, fetchCitySite, extractLinks, extraPaths, htmlToText };
+module.exports = {
+  publicUrl, fetchCitySite, extractLinks, extraPaths, htmlToText,
+  assertPublicHost, resolvePublic, operationEnded,
+  PAGE_LIMIT, ATTEMPT_LIMIT, PAGE_TIMEOUT_MS, DNS_TIMEOUT_MS, MAX_BYTES
+};

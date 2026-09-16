@@ -456,13 +456,64 @@ the configured models are actually available, via the Models API — metadata
 only, no tokens consumed. It deliberately does not generate anything: a real
 draft is a billed call and belongs in an authorised staging run.
 
+### Jurisdiction research is one bounded operation
+
+Research is not one call. It is a website crawl, several model rounds (server
+tools pause and resume the turn), and then a database write. Each of those used
+to carry its own timeout and none of them knew about the others, so a stalled
+attempt plus one automatic retry ran for about six minutes and a slow but
+succeeding sequence of rounds could have run for eighteen. See
+**[docs/design-audit/RESEARCH_RELIABILITY_IMPLEMENTATION_PLAN.md](docs/design-audit/RESEARCH_RELIABILITY_IMPLEMENTATION_PLAN.md)**
+for the diagnosis and
+**[RESEARCH_RELIABILITY_IMPLEMENTATION_STATUS.md](docs/design-audit/RESEARCH_RELIABILITY_IMPLEMENTATION_STATUS.md)**
+for what was built.
+
+- **One deadline for the whole operation**, started before the crawl and shared
+  by continuations and the page-only fallback: `SLATE_RESEARCH_TIMEOUT_MS`
+  (180 s), `SLATE_RESEARCH_CRAWL_TIMEOUT_MS` (25 s),
+  `SLATE_RESEARCH_MAX_ROUNDS` (4). `SLATE_AI_TIMEOUT_MS` keeps its meaning as
+  the per-call ceiling and caps one round. Values outside their documented
+  ranges are clamped: a limit one typo can remove is not a limit.
+- **Automatic provider retries are off for research.** The SDK retries
+  connection errors and timeouts, which is what turned one stalled attempt into
+  a six-minute failure.
+- **Provider calls are streamed**, and the operation timer runs to the last
+  event of the stream rather than to the arrival of response headers.
+- **Cancellation aborts real work** — DNS waits, sockets, response bodies and
+  the provider stream — rather than only stopping us waiting for it. Private
+  address checks, DNS pinning and redirect validation are unchanged.
+- **Failures are told apart**: `RESEARCH_TIMEOUT` (504),
+  `RESEARCH_CONNECTION_ERROR` (502), `AI_AUTH_ERROR` (503), `AI_RATE_LIMIT`
+  (429), `RESEARCH_INCOMPLETE` (422), each with an operation reference. The
+  provider's request id, SDK error class and underlying network code stay in
+  operator logs. Before this, all of them arrived as one generic connection
+  error, which is why the hosted failures could not be diagnosed.
+- **Research is a job, not a request.** `POST
+  /api/searches/:id/research-jobs` answers 202 with a job id; the status
+  endpoint reports the real stage and elapsed time; cancel is idempotent.
+  Refreshing or double-clicking finds the same operation (idempotency key), and
+  a restart marks work that was running `interrupted` rather than replaying a
+  request the provider may already have billed. `/api/ready` reports the queue
+  and the limits in force.
+- **Incomplete findings are reviewed, not discarded or forced.** A jurisdiction
+  that publishes no budget can be recorded as unknown; supported findings with
+  named gaps are offered for review, fill blanks rather than overwriting what a
+  consultant entered, and never silently replace the previous research.
+
+What that does **not** establish: that any particular jurisdiction completes
+inside three minutes. These are starting limits to validate against real sites,
+and the operation reference in the logs is what a decision to raise them should
+be based on.
+
 ## Browser and accessibility testing
 
 `npm run test:browser` (Playwright) starts its own server against a throwaway
-data directory and runs 162 checks — the same 54 in each of three projects:
+data directory and runs 234 checks — the same 78 in each of three projects:
 desktop Chromium, desktop WebKit, and an emulated Pixel 7. They cover the
-critical journeys, WCAG 2.1 AA scanning with axe-core, and whether the
-Content-Security-Policy is actually enforced by a browser.
+critical journeys, WCAG 2.1 AA scanning with axe-core, whether the
+Content-Security-Policy is actually enforced by a browser, and the research
+screen — which is the only place a request that never answers can be held open
+to prove it no longer traps the interface.
 
 WebKit is there because it is the engine behind every browser on iOS, which is
 what a committee member or a candidate is likely to be holding. It is a second
@@ -487,7 +538,7 @@ and is not verified.
 |---|---|
 | `checks` | Every first-party file parses (`npm run check`), the isolated suite passes on Node 24, and production dependencies have no advisory at moderate or above |
 | `browser` | The full Playwright suite in Chromium and WebKit, plus mobile emulation: critical journeys, axe-core scanning, and the CSP as a browser actually enforces it |
-| `container` | The image builds, refuses to start without storage, boots on an empty volume without PIN configuration, runs as non-root, answers `/api/health` with the built release, and survives a restart with its store intact |
+| `container` | The image builds, refuses to start without storage, boots on an empty volume without PIN configuration, runs as non-root, answers `/api/health` with the built release, and preserves representative search, candidate, score, history, and media records across a restart |
 
 A failing run means the commit is not eligible to be marked ready for release.
 

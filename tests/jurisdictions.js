@@ -83,7 +83,10 @@ async function request(url, method='GET', body) {
     withTip:h=>h, TIPS:{}, packageChoice:()=>'', packageLabel:k=>String(k||''),
     // Search facts now carries the outstanding-fact count through to
     // verification; the badge itself is page furniture like the rest.
-    pill:(k,label)=>String(label)
+    pill:(k,label)=>String(label),
+    // The research failure/review band. Page furniture here; its own behaviour
+    // is covered in tests/research.js.
+    researchNoticeBand:()=>''
   });
   vm.runInContext(source.slice(source.indexOf('function jurisdictionInfo('),source.indexOf('function nextHint(')),ui);
   vm.runInContext(source.slice(source.indexOf('function vFacts('),source.indexOf('function searchRolePill(')),ui);

@@ -213,6 +213,19 @@ function createAuth(store, config = configuration()) {
 
   return {
     config, middleware, directory, mayCreateWorkspace,
+
+    /**
+     * Resolve someone's current access outside a request.
+     *
+     * Long-running work (research jobs) has to ask the directory again before
+     * it commits: the access object its request arrived with describes a
+     * membership that may have been revoked in the minutes since. This is the
+     * same construction `requireUser` performs, without a request to hang it
+     * on.
+     */
+    accessFor(user, clerkUserId, orgId){
+      return buildAccess(store, directory, user, clerkUserId, orgId || null);
+    },
     publicConfig: {
       provider: 'clerk',
       configured: config.configured,

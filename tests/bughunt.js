@@ -79,6 +79,12 @@ async function run(){
     record('assembleBrochure copies community lede', built.lede==='A mountain town.');
     record('assembleBrochure keeps photos and theme', built.photos.cover==='/media/x/cover.jpg' && built.theme==='split');
     record('assembleBrochure keeps color scheme', built.scheme==='forest');
+    const labelled = assembleBrochure({
+      client:'Ridgeline', position:'Town Manager', firstReview:'First review of applications 14 September 2026',
+      criteria:[], artifacts:{ community:{}, brochure:{} }
+    });
+    record('assembleBrochure does not repeat an already-labelled first review',
+      (labelled.howToApply.match(/First review/gi) || []).length === 1, labelled.howToApply);
     record('assembleBrochure does not use em dashes', !/[—–]/.test(JSON.stringify(built)));
   } catch (err) {
     record('assembleBrochure copies community lede', false, err.message);
@@ -148,6 +154,9 @@ async function run(){
         && steps.COMPARE.filter(r => r.pkg==='basic').length >= 7
         && steps.includes('basic', { pkg:'basic' }) && !steps.includes('basic', { pkg:'enhanced' })
         && steps.includes('executive', { pkg:'enhanced' }));
+    record('Package copy keeps candidate decisions explicitly human',
+      !JSON.stringify(steps.PACKAGES).match(/AI candidate screening|automated (?:accept|reject|rank)/i)
+        && steps.PACKAGES.basic.services.includes('Candidate screening workspace (human decisions)'));
   } catch (err) { record('Package catalog helpers', false, err.message); }
 
   // --- auth ---

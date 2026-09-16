@@ -92,7 +92,8 @@ const sign = identity.signer();
 
     const saved = await fetch(BASE + '/api/apply/' + token + '/draft', {
       method: 'POST', headers: JSON_HEADERS,
-      body: JSON.stringify({ which: 'survey1', answers: { ['q' + first.n]: 'A long answer typed on a phone.' } })
+      body: JSON.stringify({ which: 'survey1', surveyVersion: view.versions.survey1,
+        answers: { ['q' + first.n]: 'A long answer typed on a phone.' } })
     });
     assert.strictEqual(saved.status, 200, 'draft save returned ' + saved.status);
 
@@ -123,6 +124,21 @@ const sign = identity.signer();
     assert.ok(candidates.saveDraft(person, 'survey1', { notAQuestion: 'x' }).error);
     assert.ok(candidates.saveDraft(person, 'survey1', { q1: 'x'.repeat(20001) }).error);
     assert.ok(candidates.saveDraft(person, 'survey1', 'not an object').error);
+  });
+
+  await check('the draft endpoint refuses a stale questionnaire or unknown question', async () => {
+    const view = await page();
+    const stale = await fetch(BASE + '/api/apply/' + token + '/draft', {
+      method: 'POST', headers: JSON_HEADERS,
+      body: JSON.stringify({ which: 'survey1', surveyVersion: 'old-version', answers: { q1: 'text' } })
+    });
+    assert.strictEqual(stale.status, 409, 'a stale questionnaire saved a draft');
+
+    const unknown = await fetch(BASE + '/api/apply/' + token + '/draft', {
+      method: 'POST', headers: JSON_HEADERS,
+      body: JSON.stringify({ which: 'survey1', surveyVersion: view.versions.survey1, answers: { q999: 'text' } })
+    });
+    assert.strictEqual(unknown.status, 400, 'an answer for a question not on the issued form was saved');
   });
 
   /* ---------------- The recovery case ---------------- */
