@@ -63,10 +63,17 @@ allowance, not a delivery promise; defect repair and county review can extend it
 | P3. Confirm authority and write the operating procedure | Search owner | P2; draft before P2 | Accepted action matrix and tested external-work procedure; engineer identifies enforcement gaps | 1–2 days plus review |
 | P4. Implement gaps and connected browser coverage | Engineer | P3 | B07–B09 journeys pass, permission regressions pass, changed workflows retested; exact candidate frozen | Estimate after P2 |
 
+P2 has a facilitation script at [TABLETOP-SCRIPT.md](pilot-runs/TABLETOP-SCRIPT.md)
+and a seeder, `npm run seed:tabletop`, which stands the synthetic environment up
+to the start of Step 13 and nothing beyond it. Seeding removes an hour of setup
+from the consultant's time and makes two sessions comparable; the manifest it
+prints records what was seeded and, deliberately, what was not. The session
+itself still needs the named people in P1.
+
 The P3 procedure is drafted at [search-operating-procedure.md](search-operating-procedure.md),
 with owners and systems left explicitly unassigned; the enforcement half of P4
 is built and recorded in [the P4 record](pilot-runs/2026-09-16-late-stage-p4.md).
-Neither closes its package. P3 closes when the search owner accepts the matrix
+None of them closes its package. P3 closes when the search owner accepts the matrix
 and a second person has walked the procedure without coaching; P4 closes on a
 frozen release candidate with the full regression run on the release runtime.
 | P5. Resolve organizational decisions | App owner coordinates named decision owners | Start at P1; resolve before onboarding | Every applicable register item decided with owner, date, rationale, and evidence; obligations implemented | Lead time set by owners |

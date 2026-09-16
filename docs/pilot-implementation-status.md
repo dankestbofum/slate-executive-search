@@ -54,6 +54,13 @@ release evidence. A checked implementation item is not a pilot approval.
   through the browser in two sessions.
 - The P3 operating procedure is drafted at `docs/search-operating-procedure.md`
   with owners and systems left explicitly unassigned.
+- The P2 tabletop has a facilitation script
+  (`docs/pilot-runs/TABLETOP-SCRIPT.md`) and a seeder (`npm run seed:tabletop`)
+  that stands a synthetic Executive county search up to the start of Step 13 —
+  committee, intake, adopted profile, artifacts, sourcing, three scored
+  semifinalists — and deliberately no further. It refuses to run without an
+  explicit staging acknowledgement and a run id, and names everything it creates
+  `[SYNTHETIC <run id>]`.
 
 ## Requires execution outside this repository
 

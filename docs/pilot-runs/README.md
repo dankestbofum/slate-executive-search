@@ -4,6 +4,11 @@ Create one Markdown record per release rehearsal from `TEMPLATE.md`. Name it
 with a UTC timestamp and short release id, for example
 `2026-09-16T1800Z-a1b2c3d.md`.
 
+`TABLETOP-SCRIPT.md` is the facilitation pack for the P2 session: copy it per
+run and fill in the capture boxes during the session, not afterwards. Seed its
+environment first with `npm run seed:tabletop`, and keep the manifest that
+prints with the completed record — it says what the room started from.
+
 Two records here are not release rehearsals and say so at the top:
 `2026-09-16-local-working-tree.md` and `2026-09-16-late-stage-p4.md` are
 implementation evidence from a dirty tree on an unsupported runtime. Neither
