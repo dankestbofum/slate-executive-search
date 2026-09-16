@@ -19,6 +19,7 @@ RUN npm ci --omit=dev && npm cache clean --force
 COPY server ./server
 COPY public ./public
 COPY scripts/backup.js ./scripts/backup.js
+COPY scripts/container-persistence.js ./scripts/container-persistence.js
 
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
