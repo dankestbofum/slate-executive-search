@@ -1,5 +1,9 @@
 # Late-stage tabletop pilot and live-readiness plan
 
+Follow-up: [implementation review fixes](pilot-runs/2026-09-16-late-stage-review-fixes.md)
+address export privacy, archive access, reassignment and connected browser
+coverage. These are local engineering results; the acceptance gates remain open.
+
 Prepared 2026-09-16. **Status: the engineering half of P4 is built ahead of the
 tabletop; every human, hosted and organizational package remains pending.**
 See [the P4 implementation record](pilot-runs/2026-09-16-late-stage-p4.md) for

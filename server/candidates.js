@@ -15,6 +15,7 @@
 //    delivered anything.
 
 const crypto = require('crypto');
+const { repositoryUrlError } = require('./repository-url');
 
 /* ------------------------------------------------------------------ *
  * Receipts
@@ -130,14 +131,8 @@ function validateDocument(body) {
   if (!label || label.length > 200) return 'Give the document a short label.';
 
   const url = String(body.url || '').trim();
-  if (url) {
-    let parsed;
-    try { parsed = new URL(url); } catch { return 'That is not a valid link.'; }
-    // http, file, data and everything else are refused. A record that points at
-    // a document must point at one the repository still controls.
-    if (!ALLOWED_SCHEMES.has(parsed.protocol)) return 'Use an https link to the approved document repository.';
-    if (url.length > 2000) return 'That link is too long.';
-  }
+  const urlError = repositoryUrlError(url);
+  if (urlError) return urlError;
   if (body.note !== undefined && (typeof body.note !== 'string' || body.note.length > 2000)) {
     return 'Keep the note under 2,000 characters.';
   }

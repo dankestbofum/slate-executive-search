@@ -43,6 +43,15 @@ async function prepare(page, client) {
     headers: await ifMatch(page, search.id),
     data: { body: { intro: 'Synthetic pilot.', questions: [{ n: 1, prompt: 'Describe your public budgeting work.', required: true, crit: ['S1'] }] } }
   });
+  for (const [key, body] of [
+    ['survey2', { questions: [{ n: 1, prompt: 'What would your first ninety days look like?', required: true }] }],
+    ['guide', { questions: [{ n: 1, stem: 'Describe a budget turnaround.' }] }]
+  ]) {
+    const saved = await page.request.put('/api/searches/' + search.id + '/artifact/' + key, {
+      headers: await ifMatch(page, search.id), data: { body }
+    });
+    expect(saved.ok(), await saved.text()).toBe(true);
+  }
 
   const people = {};
   for (const [key, name] of [['a', 'Ada Pilot-Hired'], ['b', 'Bo Pilot-Withdrew'], ['c', 'Cyd Pilot-NotSelected']]) {
@@ -54,6 +63,11 @@ async function prepare(page, client) {
   // All three reach semifinalist, which is ordinary screening. What happens
   // above that line is what these cases are about.
   for (const person of Object.values(people)) {
+    const initial = await (await page.request.get('/api/apply/' + person.invite)).json();
+    const submitted = await page.request.post('/api/apply/' + person.invite, {
+      data: { which: 'survey1', surveyVersion: initial.versions.survey1, answers: { q1: 'Synthetic initial answer for ' + person.name } }
+    });
+    expect(submitted.ok(), await submitted.text()).toBe(true);
     await page.request.patch('/api/searches/' + search.id + '/candidates/' + person.id, {
       headers: await ifMatch(page, search.id), data: { stage: 'semifinalist' }
     });
@@ -88,8 +102,19 @@ function unique(base, testInfo) {
   return base + ' ' + testInfo.project.name;
 }
 
+async function download(page, id, name = 'Download the data bundle') {
+  await open(page, '/#/s/' + id + '/closeout');
+  const [file] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name }).click()]);
+  const stream = await file.createReadStream();
+  let text = '';
+  for await (const chunk of stream) text += chunk;
+  // The export reloads the search after recording the download.
+  await expect(page.locator('#toast')).toContainText('Export downloaded');
+  return text;
+}
+
 test.describe('the late stage, connected', () => {
-  test('B07/B08: authority, consent, certification, three outcomes, closeout and reopening',
+  test('B07–B09: semifinalist responses through staff work, decisions, export and archive restoration',
     async ({ browser }, testInfo) => {
     test.skip(testInfo.project.name !== 'desktop-chrome', 'the connected rehearsal runs once; device coverage is separate');
     test.slow();
@@ -110,6 +135,76 @@ test.describe('the late stage, connected', () => {
       headers: { ...authHeaders('team@slate.local', orgId), 'if-match': await revision(consultant, search.id) }, data: {}
     });
 
+    // Step 13: the staff opens the survey; candidates submit in their own sessions.
+    await open(consultant, '/#/s/' + search.id + '/send2');
+    await consultant.getByRole('button', { name: 'Open for all semifinalists' }).click();
+    await expect(consultant.getByRole('button', { name: 'Open questionnaire', exact: true })).toHaveCount(0);
+    for (const person of Object.values(people)) {
+      const context = await browser.newContext();
+      const candidate = await context.newPage();
+      await candidate.goto('/apply/' + person.invite);
+      await candidate.getByLabel('What would your first ninety days look like?').fill('First ninety days for ' + person.name);
+      await candidate.getByRole('button', { name: 'Save draft' }).click();
+      await expect(candidate.locator('#apply-draft-status')).toContainText('Draft saved');
+      await candidate.reload();
+      await expect(candidate.getByLabel('What would your first ninety days look like?')).toHaveValue('First ninety days for ' + person.name);
+      await candidate.getByRole('button', { name: 'Submit questionnaire' }).click();
+      await expect(candidate.getByText('You can close this page.')).toBeVisible();
+      await context.close();
+    }
+
+    // Inventory and manual contact travel with this same record into B09.
+    await open(consultant, '/#/s/' + search.id + '/person/' + people.a.id);
+    await consultant.getByRole('tab', { name: 'Details' }).click();
+    await consultant.getByRole('button', { name: 'Record a document' }).click();
+    await consultant.locator('#docform [name="label"]').fill('Resume ADA-01');
+    await consultant.locator('#docform [name="url"]').fill('https://records.example.gov/doc?token=SHARING_SECRET');
+    await consultant.getByRole('button', { name: 'Record this document' }).click();
+    await expect(consultant.locator('#toast')).toContainText('permanent document URL');
+    await consultant.locator('#docform [name="url"]').fill('https://records.example.gov/doc/ADA-01');
+    await consultant.getByRole('button', { name: 'Record this document' }).click();
+    await expect(consultant.locator('#panel-person-details')).toContainText('Resume ADA-01');
+    await consultant.getByRole('button', { name: 'Log contact' }).click();
+    await consultant.locator('#commform [name="purpose"]').selectOption('scheduling');
+    await consultant.locator('#commform [name="summary"]').fill('Synthetic interview arranged externally for 10am Arizona time.');
+    await consultant.getByRole('button', { name: 'Record this contact' }).click();
+    await expect(consultant.locator('#panel-person-details')).toContainText('Synthetic interview arranged externally');
+
+    // B07 sourcing and Step 14: evidence and completion are browser actions.
+    for (const key of ['sourcing', 'video']) {
+      await open(consultant, '/#/s/' + search.id + '/' + key);
+      await consultant.getByRole('button', { name: 'Mark complete' }).click();
+      await expect(consultant.locator('#toast')).toContainText(/empty|log what was done/i);
+      if (key === 'video') await consultant.locator('#staff-cid').selectOption({ label: people.a.name });
+      await consultant.locator('#staff-text').fill('Synthetic ' + key + ' evidence');
+      await consultant.getByRole('button', { name: 'Add to the log' }).click();
+      await expect(consultant.getByText('Synthetic ' + key + ' evidence', { exact: true })).toBeVisible();
+      await consultant.getByRole('button', { name: 'Mark complete' }).click();
+      await expect(consultant.getByText(/^Completed /)).toBeVisible();
+    }
+
+    // Two independent reviewers; editing one sealed score creates private history.
+    for (const [page, value, note] of [[manager, 4, 'Manager panel note'], [consultant, 2, 'Private original panel note'], [consultant, 5, 'Private revised panel note']]) {
+      await open(page, '/#/s/' + search.id + '/person/' + people.a.id);
+      await page.locator('[data-score="S1"][data-val="' + value + '"]').click();
+      await page.locator('#cnote').fill(note);
+      await page.getByRole('button', { name: 'Save my scores' }).click();
+      await expect(page.locator('#toast')).toContainText(/on the file/i);
+    }
+    const sealed = JSON.parse(await download(manager, search.id));
+    expect(sealed.evaluation.sealed).toBe(true);
+    expect(JSON.stringify(sealed)).not.toMatch(/Private original panel note|Private revised panel note|Manager panel note/);
+    expect(sealed.history.some(entry => entry.scoresWithheld)).toBe(true);
+    await open(consultant, '/#/s/' + search.id + '/screen');
+    await expect(consultant.getByRole('button', { name: 'Release scores' })).toHaveCount(0);
+    await open(manager, '/#/s/' + search.id + '/screen');
+    await manager.getByRole('button', { name: 'Release scores' }).click();
+    await expect(manager.locator('#toast')).toContainText(/released/i);
+    const released = JSON.parse(await download(manager, search.id));
+    expect(Object.values(released.evaluation.scores).map(scores => scores[people.a.id].S1).sort()).toEqual([4, 5]);
+    expect(JSON.stringify(released.history)).toContain('Private original panel note');
+
+
     /* --- B08: advancing to finalist is the manager's decision -------------- */
 
     await open(consultant, '/#/s/' + search.id + '/finalists');
@@ -123,6 +218,25 @@ test.describe('the late stage, connected', () => {
     await expect(manager.locator('.spec', { hasText: 'Ada Pilot-Hired' }).getByRole('button', { name: 'Advance to finalist' })).toHaveCount(0);
     await manager.locator('.spec', { hasText: 'Cyd Pilot-NotSelected' }).getByRole('button', { name: 'Advance to finalist' }).click();
     await expect(manager.locator('.spec', { hasText: 'Cyd Pilot-NotSelected' }).getByRole('button', { name: 'Advance to finalist' })).toHaveCount(0);
+
+    // Steps 16, 18 and 19: manually prepare the artifacts without a provider call.
+    await open(manager, '/#/s/' + search.id + '/schedule');
+    await manager.locator('[data-path="note"]').fill('Same questions and Arizona time for both finalists.');
+    await manager.locator('[data-path="guide.panel"]').fill('Synthetic panel assessment');
+    await manager.getByRole('button', { name: 'Save edits' }).click();
+    await expect(manager.locator('.docbar')).toContainText('Saved draft');
+    await open(manager, '/#/s/' + search.id + '/contract');
+    await manager.getByRole('button', { name: 'Add a section' }).click();
+    await manager.locator('[data-path="sections.0.h"]').fill('Synthetic terms for counsel review');
+    await manager.locator('[data-path="sections.0.body"]').fill('Unreviewed draft; mock counsel review and signatures occur outside Slate.');
+    await manager.getByRole('button', { name: 'Save edits' }).click();
+    await expect(manager.locator('.docbar')).toContainText('Saved draft');
+    await open(manager, '/#/s/' + search.id + '/bar');
+    await manager.locator('[data-artadd="bar:actions"]').click();
+    await manager.locator('[data-path="actions.0.t"]').fill('Board chair owns first-year evaluation');
+    await manager.locator('[data-path="actions.0.due"]').fill('2027-09-16');
+    await manager.getByRole('button', { name: 'Save edits' }).click();
+    await expect(manager.locator('.docbar')).toContainText('Saved draft');
 
     /* --- B07: consent precedes reference work ----------------------------- */
 
@@ -172,6 +286,28 @@ test.describe('the late stage, connected', () => {
     expect(afterNotes.staff.references.doneAt, 'rewriting the notes left the certification standing').toBeNull();
     expect((afterNotes.activity || []).some(e => /reopened a completed step/.test(e.x || '')),
       'the withdrawal was not explained on the file').toBe(true);
+    await open(manager, '/#/s/' + search.id + '/references');
+    await manager.locator('#staff-notes').fill('Reference review complete; notes in the restricted repository.');
+    await manager.getByRole('button', { name: 'Save notes' }).click();
+    await expect(manager.locator('#toast')).toBeVisible();
+    await manager.getByRole('button', { name: 'Mark complete' }).click();
+    await expect(manager.getByText(/^Completed /)).toBeVisible();
+    await manager.locator('.feed__i', { hasText: 'former county manager' }).getByRole('button', { name: 'Remove', exact: true }).click();
+    await expect(manager.getByText(/^Completed /)).toHaveCount(0);
+    await manager.getByRole('button', { name: 'Mark complete' }).click();
+    await expect(manager.locator('#toast')).toContainText('every current finalist');
+    await manager.locator('#staff-cid').selectOption({ label: people.c.name });
+    await manager.locator('#staff-text').fill('Corrected reference contact for Cyd; external notes reviewed.');
+    await manager.getByRole('button', { name: 'Add to the log' }).click();
+    await expect(manager.getByText('Corrected reference contact for Cyd', { exact: false })).toBeVisible();
+    await manager.getByRole('button', { name: 'Mark complete' }).click();
+    await expect(manager.getByText(/^Completed /)).toBeVisible();
+    await manager.locator('tr', { hasText: people.c.name }).getByRole('button', { name: 'Withdraw', exact: true }).click();
+    await expect(manager.getByText(/^Completed /)).toHaveCount(0);
+    await manager.locator('tr', { hasText: people.c.name }).getByRole('button', { name: 'Record consent' }).click();
+    await expect(manager.locator('tr', { hasText: people.c.name })).toContainText('Consent on file');
+    await manager.getByRole('button', { name: 'Mark complete' }).click();
+    await expect(manager.getByText(/^Completed /)).toBeVisible();
 
     /* --- B07: the committee cannot read the firm's reference work ---------- */
 
@@ -232,7 +368,7 @@ test.describe('the late stage, connected', () => {
     const stale = await browser.newContext();
     const strangerPage = await stale.newPage();
     await strangerPage.goto('/apply/' + people.b.invite);
-    await expect(strangerPage.locator('body')).not.toContainText('Describe your public budgeting work.');
+    await expect(strangerPage.getByRole('heading', { name: 'This link is not valid' })).toBeVisible();
     await stale.close();
 
     /* --- B08: closeout, reopening, and links that stay revoked ------------- */
@@ -246,6 +382,44 @@ test.describe('the late stage, connected', () => {
     await manager.locator('#closeform [name="reason"]').fill('Appointment made; rehearsal closeout.');
     await manager.getByRole('button', { name: 'Close this search' }).click();
     await expect(manager.locator('#reopenform')).toBeVisible();
+
+    const closed = JSON.parse(await download(manager, search.id));
+    expect(closed.lifecycle.status).toBe('closed');
+    expect(closed.candidates).toHaveLength(3);
+    const ada = closed.candidates.find(c => c.id === people.a.id);
+    expect(ada.documents[0].location).toBe('https://records.example.gov/doc/ADA-01');
+    expect(ada.communications[0].summary).toContain('10am Arizona time');
+    expect(JSON.stringify(closed)).not.toContain('SHARING_SECRET');
+    for (const person of Object.values(people)) {
+      const record = closed.candidates.find(c => c.id === person.id);
+      expect(record.responses.survey2.questions[0].prompt).toBe('What would your first ninety days look like?');
+      expect(record.responses.survey2.answers.q1).toBe('First ninety days for ' + person.name);
+      expect(JSON.stringify(closed)).not.toContain(person.invite);
+    }
+    expect(closed.dispositions.find(c => c.candidateId === people.b.id).history).toHaveLength(2);
+    expect(closed.staffWork.references.completedAt).toBeTruthy();
+    expect(closed.artifacts.contract.body.sections[0].h).toContain('counsel review');
+    expect(closed.artifacts.bar.body.actions[0].t).toContain('Board chair');
+    expect(closed.artifacts.schedule.body.guide.panel).toBe('Synthetic panel assessment');
+    expect(closed.staffWork.sourcing.log[0].text).toBe('Synthetic sourcing evidence');
+    expect(closed.staffWork.video.log[0].text).toBe('Synthetic video evidence');
+    const report = await download(manager, search.id, 'Download the report');
+    expect(report).toContain('Appointment made; rehearsal closeout.');
+    expect(report).toContain('First ninety days for ' + people.a.name);
+
+    // Archive a CLOSED search through its ordinary UI, then restore it.
+    await open(manager, '/#/');
+    await manager.getByRole('button', { name: 'More', exact: true }).click();
+    await manager.locator('[data-act="delete-search"][data-id="' + search.id + '"]').click();
+    await expect(manager.locator('[data-open="' + search.id + '"]')).toHaveCount(0);
+    await open(manager, '/#/archives');
+    await manager.locator('[data-act="restore-search"][data-id="' + search.id + '"]').click();
+    await expect(manager.locator('#toast')).toContainText('Search restored');
+    await open(manager, '/#/s/' + search.id + '/closeout');
+    await expect(manager.locator('#reopenform')).toBeVisible();
+    const restored = await (await manager.request.get('/api/searches/' + search.id)).json();
+    expect(restored.lifecycle.status).toBe('closed');
+    expect(restored.candidates.every(c => !c.invite)).toBe(true);
 
     // A frozen file refuses further work, through the screens as well as the API.
     const frozenWrite = await manager.request.post('/api/searches/' + search.id + '/candidates', {
@@ -261,78 +435,75 @@ test.describe('the late stage, connected', () => {
     expect(reopened.lifecycle.status).toBe('active');
     expect((reopened.candidates || []).some(c => c.invite),
       'reopening put revoked candidate links back into circulation').toBe(false);
+    for (const person of Object.values(people)) {
+      expect((await manager.request.get('/api/apply/' + person.invite)).status()).toBe(404);
+    }
+    await open(manager, '/#/s/' + search.id + '/screen');
+    const adaRow = manager.locator('tr', { hasText: people.a.name });
+    await adaRow.getByRole('button', { name: 'Invite', exact: true }).click();
+    await expect(adaRow.getByRole('button', { name: 'Copy invite link' })).toHaveCount(0);
+    await expect(adaRow.getByRole('link', { name: 'Open questionnaire' })).toHaveCount(0);
+    await adaRow.getByRole('button', { name: 'Issue a new link' }).click();
+    await expect(manager.locator('#toast')).toContainText('Copy the new link');
+    const reissued = await (await manager.request.get('/api/searches/' + search.id)).json();
+    const liveInvite = reissued.candidates.find(c => c.id === people.a.id).invite;
+    expect(liveInvite).toBeTruthy();
+    expect(liveInvite).not.toBe(people.a.invite);
+    expect((await manager.request.get('/api/apply/' + liveInvite)).status()).toBe(200);
+    expect(reissued.candidates.filter(c => c.id !== people.a.id).every(c => !c.invite)).toBe(true);
 
     await Promise.all([managerContext.close(), consultantContext.close()]);
   });
 
-  test('B09: the export is downloadable from the browser and declares what it withholds',
-    async ({ page }, testInfo) => {
-    test.skip(testInfo.project.name !== 'desktop-chrome', 'the connected rehearsal runs once; device coverage is separate');
-    test.slow();
-    await installClerk(page, { email: 'abe@slate.local' });
-    acceptConfirmations(page);
-    const { search, people } = await prepare(page, unique('Export County', testInfo));
-
-    // One answered questionnaire and one score, so the export has a record to
-    // be compared against rather than an empty shape.
-    const candidateContext = await page.context().browser().newContext();
-    const candidatePage = await candidateContext.newPage();
-    await candidatePage.goto('/apply/' + people.a.invite);
-    await candidatePage.getByLabel('Describe your public budgeting work.')
-      .fill('Rebuilt a structurally unbalanced general fund over three cycles.');
-    await candidatePage.getByRole('button', { name: 'Submit questionnaire' }).click();
-    await expect(candidatePage.getByText('You can close this page.')).toBeVisible({ timeout: 10000 });
-    await candidateContext.close();
-
-    await open(page, '/#/s/' + search.id + '/person/' + people.a.id);
-    await page.locator('[data-score="S1"][data-val="4"]').click();
-    await page.getByRole('button', { name: 'Save my scores' }).click();
-    await expect(page.locator('#toast')).toContainText(/on the file/i);
-
-    const download = async name => {
-      await open(page, '/#/s/' + search.id + '/closeout');
-      const [file] = await Promise.all([
-        page.waitForEvent('download'),
-        page.getByRole('button', { name }).click()
-      ]);
-      const stream = await file.createReadStream();
-      let text = '';
-      for await (const chunk of stream) text += chunk;
-      return text;
-    };
-
-    /* --- sealed: the withholding is declared, not silent ------------------ */
-
-    const sealed = await download('Download the report');
-    expect(sealed).toContain('Rebuilt a structurally unbalanced general fund');
-    expect(sealed).toContain('Describe your public budgeting work.');
-    expect(sealed).toMatch(/sealed/i);
-    // Nothing that would let the reader become a candidate, or read another firm.
-    expect(sealed).not.toContain(people.a.invite);
-    expect(sealed).not.toMatch(/CLERK_SECRET_KEY|ANTHROPIC_API_KEY|Bearer /);
-
-    /* --- released: the same record, with the scores in it ------------------ */
-
-    await open(page, '/#/s/' + search.id + '/screen');
-    await page.getByRole('button', { name: 'Release scores' }).click();
-    await expect(page.locator('#toast')).toContainText(/released/i);
-
-    const released = await download('Download the data bundle');
-    const bundle = JSON.parse(released);
-    expect(bundle.evaluation.sealed, 'the export still declared the scores sealed after release').toBe(false);
-    expect(JSON.stringify(bundle)).not.toContain(people.a.invite);
-    expect(bundle.candidates.find(c => c.name === 'Ada Pilot-Hired')).toBeTruthy();
-
-    /* --- after closeout: still exportable, and it says the search closed --- */
-
-    await open(page, '/#/s/' + search.id + '/closeout');
-    await page.locator('#closeform [name="status"]').selectOption('closed');
-    await page.locator('#closeform [name="reason"]').fill('Rehearsal export check.');
-    await page.getByRole('button', { name: 'Close this search' }).click();
-    await expect(page.locator('#reopenform')).toBeVisible();
-
-    const closed = await download('Download the report');
-    expect(closed).toMatch(/closed/i);
-    expect(closed).toContain('Rehearsal export check.');
+  test('manager handover and administrator reassignment follow the authority shown in the UI', async ({ browser }, testInfo) => {
+    const contexts = await Promise.all([browser.newContext(), browser.newContext(), browser.newContext()]);
+    try {
+      const [manager, admin, consultant] = await Promise.all(contexts.map(context => context.newPage()));
+      await installClerk(manager, { email: 'mike@slate.local' });
+      await installClerk(admin, { email: 'abe@slate.local' });
+      const email = 'handover-' + testInfo.project.name + '@example.com';
+      await joinWorkspace(email, 'org:consultant');
+      await installClerk(consultant, { email });
+      const response = await manager.request.post('/api/searches', {
+        data: { client: unique('Handover County', testInfo), position: 'Administrator' }
+      });
+      expect(response.ok()).toBe(true);
+      const search = await response.json();
+      for (const page of [admin, consultant]) {
+        const joined = await page.request.post('/api/searches/' + search.id + '/members/self', {
+          headers: await ifMatch(page, search.id), data: {}
+        });
+        expect(joined.ok(), await joined.text()).toBe(true);
+      }
+      const path = '/#/s/' + search.id + '/team';
+      await open(consultant, path);
+      await expect(consultant.locator('[data-act="make-manager"]')).toHaveCount(0);
+      await open(admin, path);
+      const me = (await (await admin.request.get('/api/me')).json()).user;
+      const button = admin.locator('[data-act="make-manager"][data-uid="' + me.id + '"]');
+      await expect(button).toHaveText('Reassign the account');
+      admin.once('dialog', d => d.dismiss());
+      await button.click();
+      admin.once('dialog', d => d.accept('   '));
+      await button.click();
+      await expect(admin.locator('#toast')).toContainText('Enter a reason');
+      let current = await (await admin.request.get('/api/searches/' + search.id)).json();
+      expect(current.accountManager.userId).not.toBe(me.id);
+      admin.once('dialog', d => d.accept('Manager unavailable during the synthetic rehearsal.'));
+      await button.click();
+      await expect(admin.locator('#toast')).toContainText('You run this search now');
+      current = await (await admin.request.get('/api/searches/' + search.id)).json();
+      expect(current.accountManager.userId).toBe(me.id);
+      expect(JSON.stringify(current.activity)).toContain('Manager unavailable during the synthetic rehearsal.');
+      await open(manager, path);
+      await expect(manager.locator('[data-act="make-manager"]')).toHaveCount(0);
+      const previous = current.roster.find(row => row.email === 'mike@slate.local');
+      await admin.locator('[data-act="make-manager"][data-uid="' + previous.userId + '"]').click();
+      await expect(admin.locator('#toast')).toContainText('Account handed over');
+      await open(manager, path);
+      await expect(manager.getByRole('button', { name: 'Hand over the account' }).first()).toBeVisible();
+    } finally {
+      await Promise.all(contexts.map(context => context.close()));
+    }
   });
 });

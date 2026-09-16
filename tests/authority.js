@@ -189,8 +189,16 @@ async function refused(res, action) {
   /* ---------------- Staff work, consent, and certification ---------------- */
 
   await check('a consultant certifies their own sourcing work', async () => {
+    const before = await read(id, consultant);
+    const empty = await api('/api/searches/' + id + '/staff/sourcing/complete', {
+      auth: consultant, method: 'POST', body: { done: true }
+    });
+    assert.strictEqual(empty.status, 400);
+    const after = await read(id, consultant);
+    assert.strictEqual(after.revision, before.revision, 'a refused completion changed the revision');
+    assert.deepStrictEqual(after.staff, before.staff, 'a refused completion created staff evidence');
     assert.strictEqual((await api('/api/searches/' + id + '/staff/sourcing/log', {
-      auth: consultant, method: 'POST', body: { text: 'Called two sitting administrators along the corridor.' }
+      auth: consultant, method: 'POST', revision: before.revision, body: { text: 'Called two sitting administrators along the corridor.' }
     })).status, 200);
     assert.strictEqual((await api('/api/searches/' + id + '/staff/sourcing/complete', {
       auth: consultant, method: 'POST', body: { done: true }
@@ -372,6 +380,28 @@ async function refused(res, action) {
     // reserved before the search was filed away is still reserved.
     assert.strictEqual((await read(id, consultant)).you.may.closeSearch, false,
       'restoration widened what an ordinary consultant may do');
+  });
+
+  await check('single and bulk archiving preserve closed lifecycle and never reissue candidate access', async () => {
+    for (const bulk of [false, true]) {
+      const closed = await api('/api/searches/' + id + '/close', {
+        auth: manager, method: 'POST', body: { status: 'closed', reason: 'Archive lifecycle regression.' }
+      });
+      assert.strictEqual(closed.status, 200);
+      const archived = bulk
+        ? await api('/api/searches/bulk-delete', { auth: manager, method: 'POST', revision: null, body: { ids: [id] } })
+        : await api('/api/searches/' + id, { auth: manager, method: 'DELETE' });
+      assert.strictEqual(archived.status, 200, await archived.text());
+      const restored = await api('/api/archives/' + id + '/restore', { auth: manager, method: 'POST', revision: null });
+      assert.strictEqual(restored.status, 200);
+      const file = await restored.json();
+      assert.strictEqual(file.lifecycle.status, 'closed');
+      assert.ok(file.candidates.every(c => !c.invite));
+      assert.strictEqual((await api('/api/searches/' + id + '/reopen', {
+        auth: manager, method: 'POST', body: { reason: 'Archive regression verification.' }
+      })).status, 200);
+      assert.ok((await read(id, manager)).candidates.every(c => !c.invite));
+    }
   });
 
   console.log(passed + ' authority checks passed' + (failed ? ', ' + failed + ' failed' : '') + '.');

@@ -23,6 +23,7 @@ const path = require('path');
 const media = require('./media');
 const jurisdictions = require('./jurisdictions');
 const disposition = require('./disposition');
+const { exportLocation } = require('./repository-url');
 
 const FORMAT_VERSION = 1;
 
@@ -124,9 +125,8 @@ function candidateRecord(candidate, { includeContact, superseded = [] }) {
     // still describing them as future work and shipping neither.
     documents: (candidate.documents || []).map(doc => ({
       id: doc.id, kind: doc.kind, label: doc.label,
-      // Where it is, never a way in. A repository link is a location; if it
-      // carries a sharing credential it is scrubbed with everything else.
-      location: doc.url || null,
+      // Apply the same URL policy to legacy records as to new inventory input.
+      location: exportLocation(doc.url),
       note: doc.note || '', receivedAt: doc.receivedAt || null,
       restricted: Boolean(doc.restricted),
       recordedBy: doc.recordedByName || null, recordedAt: doc.recordedAt || null
@@ -246,7 +246,11 @@ function build(search, { viewer, users, dataDir, release }) {
         openedAt: search.intake?.openedAt || null,
         closedAt: search.intake?.closedAt || null,
         prompt: search.intake?.prompt || null,
-        submissions: search.intake?.submissions || {}
+        submissions: search.intake?.status === 'closed'
+          ? (search.intake?.submissions || {})
+          : (search.intake?.submissions?.[viewer?.id]
+            ? { [viewer.id]: search.intake.submissions[viewer.id] } : {}),
+        withheld: search.intake?.status !== 'closed'
       }
     },
 
@@ -302,8 +306,14 @@ function build(search, { viewer, users, dataDir, release }) {
       key: entry.key || null,
       actor: attribute(entry, lookupUser),
       body: entry.body ?? null,
-      priorScores: entry.scores ?? undefined,
-      priorNotes: entry.notesBy ?? undefined,
+      // A release of today's criteria does not release a sealed older revision.
+      // Resealing also withholds previously released history from new exports.
+      priorScores: !sealed && (entry.released || entry.revision === search.profileRevision)
+        ? entry.scores : undefined,
+      priorNotes: !sealed && (entry.released || entry.revision === search.profileRevision)
+        ? entry.notesBy : undefined,
+      scoresWithheld: Boolean((entry.scores || entry.notesBy) &&
+        (sealed || !(entry.released || entry.revision === search.profileRevision))),
       priorCriteria: entry.criteria ?? undefined,
       // Which profile the marks were given against, so a scoring entry that
       // does not carry its own copy of the criteria can still be read against
@@ -337,7 +347,7 @@ function build(search, { viewer, users, dataDir, release }) {
         // documents themselves without reading the whole bundle.
         references: (search.candidates || []).flatMap(c => (c.documents || []).map(doc => ({
           candidateId: c.id, candidateName: c.name,
-          kind: doc.kind, label: doc.label, location: doc.url || null,
+          kind: doc.kind, label: doc.label, location: exportLocation(doc.url),
           receivedAt: doc.receivedAt || null, restricted: Boolean(doc.restricted)
         })))
       }
@@ -354,6 +364,12 @@ function build(search, { viewer, users, dataDir, release }) {
       // the underlying activity.
       missing: [
         sealed ? 'Individual scores and their explanations (sealed).' : null,
+        (search.history || []).some(entry => (entry.scores || entry.notesBy) &&
+          (sealed || !(entry.released || entry.revision === search.profileRevision)))
+          ? 'Sealed historical scores and explanations (see history.scoresWithheld).' : null,
+        search.intake?.status !== 'closed' ? 'Other participants’ private intake responses while intake is not closed.' : null,
+        (search.candidates || []).some(c => (c.documents || []).some(d => d.url && exportLocation(d.url) !== d.url))
+          ? 'Unsafe legacy document URLs withheld; retrieve the documents by their identifiers.' : null,
         'External documents held outside Slate (see documents.external).',
         'The documents themselves. Slate records what exists and where it is held, never the file.',
         'Delivery confirmation for candidate contact. Every entry is staff-recorded; Slate sends nothing.'

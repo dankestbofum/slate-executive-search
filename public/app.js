@@ -3203,7 +3203,7 @@ function vOverview(){
          canEdit() ? `<button class="btn btn--ghost btn--sm" data-go="verify">County fact verification</button>` : '',
          `<button class="btn btn--ghost btn--sm" data-go="process">Process checklist</button>`,
          canEdit() ? `<button class="btn btn--ghost btn--sm" data-go="closeout">${isFrozen(s)?'Closeout and reopening':'Close this search'}</button>` : '',
-         canEdit() ? `<button class="btn btn--ghost btn--sm btn--danger" data-act="delete-search" data-id="${s.id}" data-name="${esc(s.client||s.no||'this search')}">Archive search</button>` : ''
+         may('archiveSearch') ? `<button class="btn btn--ghost btn--sm btn--danger" data-act="delete-search" data-id="${s.id}" data-name="${esc(s.client||s.no||'this search')}">Archive search</button>` : ''
        ])}`)}
     <div class="band"><div class="wrap stack">
       ${overviewInner(s)}
@@ -3651,8 +3651,7 @@ function memberRow(m, mgr){
     </div>
     <div class="rosterrow__tags">${searchRolePill(m.searchRole)}${answered?pill('ok','Answered'):''}</div>
     <div class="rosterrow__acts">
-      ${manage && m.searchRole==='consultant' ? `<button class="btn btn--ghost btn--sm" data-act="make-manager" data-uid="${m.userId}">Hand over the account</button>` : ''}
-      ${!manage && me && you().consultant ? `<button class="btn btn--secondary btn--sm" data-act="make-manager" data-uid="${m.userId}">Take the account</button>` : ''}
+      ${may('handoverManager') && m.searchRole==='consultant' ? `<button class="btn btn--ghost btn--sm" data-act="make-manager" data-uid="${m.userId}">${manage ? 'Hand over the account' : 'Reassign the account'}</button>` : ''}
       ${manage && m.userId !== mgr?.userId ? `<button class="btn btn--ghost btn--sm" data-act="remove-person" data-uid="${m.userId}" data-name="${esc(m.name)}">Remove</button>` : ''}
     </div>
   </div>`;
@@ -5288,9 +5287,9 @@ function candidateRow(c){
   // URL is never a column, and the controls that hand it out sit in a labelled
   // menu on the row rather than competing with Review.
   const invite = canEdit() ? menu('cand-'+c.id, 'Invite', [
-    withTip(`<button type="button" class="btn btn--ghost btn--sm" data-act="copy-invite" data-cid="${c.id}">Copy invite link</button>`, TIPS.copyInvite),
-    withTip(`<a class="btn btn--ghost btn--sm" href="/apply/${esc(c.invite)}" target="_blank" rel="noopener">Open questionnaire</a>`, TIPS.openQuestionnaire),
-    withTip(`<button type="button" class="btn btn--ghost btn--sm" data-act="replace-invite" data-cid="${c.id}">Replace candidate link</button>`, TIPS.replaceInvite)
+    c.invite ? withTip(`<button type="button" class="btn btn--ghost btn--sm" data-act="copy-invite" data-cid="${c.id}">Copy invite link</button>`, TIPS.copyInvite) : '',
+    c.invite ? withTip(`<a class="btn btn--ghost btn--sm" href="/apply/${esc(c.invite)}" target="_blank" rel="noopener">Open questionnaire</a>`, TIPS.openQuestionnaire) : '',
+    withTip(`<button type="button" class="btn btn--ghost btn--sm" data-act="replace-invite" data-cid="${c.id}">${c.invite ? 'Replace candidate link' : 'Issue a new link'}</button>`, TIPS.replaceInvite)
   ]) : '';
   return `<tr>
     <th scope="row"><button type="button" class="candlink" data-cand="${c.id}">${esc(c.name)}</button>
@@ -5402,7 +5401,7 @@ function vSend2(){
           ? withTip(`<button type="button" class="btn btn--primary btn--sm" data-act="send2-one" data-cid="${c.id}">Open questionnaire</button>`,
               'Make the semifinalist questionnaire available on this candidate’s existing invite link.')
           : ''}
-        ${canEdit() ? withTip(`<button type="button" class="btn btn--secondary btn--sm" data-act="copy-invite" data-cid="${c.id}">Copy invite</button>`, TIPS.copyInvite) : ''}
+        ${canEdit() && c.invite ? withTip(`<button type="button" class="btn btn--secondary btn--sm" data-act="copy-invite" data-cid="${c.id}">Copy invite</button>`, TIPS.copyInvite) : ''}
         ${withTip(`<button type="button" class="btn btn--ghost btn--sm" data-cand="${c.id}">Review</button>`, 'Open this candidate to read their responses and scores.')}
       </td>
     </tr>`).join('');
@@ -5494,7 +5493,7 @@ function documentsPanel(c){
           <div class="formgrid">
             ${field('Type','', `<select class="input" name="kind">${Object.entries(DOC_KIND).map(([k,v])=>`<option value="${esc(k)}">${esc(v.label)}</option>`).join('')}</select>`)}
             ${field('Label','What this document is, in a few words.', `<input class="input" name="label" placeholder="Resume, received 4 Sep" required>`, { req:true })}
-            ${field('Link','https only, to the approved repository. Leave blank if it is held offline.', `<input class="input" name="url" placeholder="https://">`, { span:true })}
+            ${field('Link','Permanent https URL requiring repository sign-in, without query parameters, fragments or sharing credentials. Otherwise leave blank and put the document identifier in its label.', `<input class="input" name="url" placeholder="https://">`, { span:true })}
             ${field('Note','', `<textarea class="input ed" name="note"></textarea>`, { span:true })}
           </div>
           <div class="row"><button type="button" class="btn btn--primary btn--sm" data-act="add-doc" data-cid="${esc(c.id)}">Record this document</button></div>
@@ -5914,7 +5913,7 @@ function vArchives(){
           <div class="hubrow__st"></div>
           <div class="hubrow__act">${s.mayRestore
             ? withTip(`<button type="button" class="btn btn--secondary btn--sm" data-act="restore-search" data-id="${esc(s.id)}">Restore search</button>`,
-              'Put this search back on the book. Candidate links are reissued, so the old ones stay dead.')
+              'Put this search back on the book. Candidate links stay revoked; reissue a link separately if needed.')
             : `<span class="t-small">${esc(s.managerName ? s.managerName + ' ran this search and restores it.' : 'Its search manager restores it.')}</span>`}</div>
         </div>
       </div></div>`).join('')
@@ -6747,7 +6746,7 @@ document.addEventListener('click', async e => {
     await withBusy(async () => {
       state.search = await api('/api/archives/'+t.dataset.id+'/restore', { method:'POST', body:{} });
       await loadSearches();
-      toast('Search restored. Copy and share the new candidate links from Screening.');
+      toast('Search restored. Candidate links remain revoked; reissue a link separately if needed.');
       await go('overview');
     });
     return;
@@ -6945,7 +6944,7 @@ document.addEventListener('click', async e => {
   }
   if (act==='copy-invite'){
     const c = (state.search?.candidates||[]).find(x => x.id === t.dataset.cid);
-    if (!c) return;
+    if (!c?.invite) { toast('This candidate has no live link. Issue a new link from their record if needed.'); return; }
     const link = location.origin + '/apply/' + c.invite;
     try {
       await navigator.clipboard.writeText(link);
@@ -7020,7 +7019,12 @@ document.addEventListener('click', async e => {
     if (!id) return;
     if (!confirm('Archive '+name+'? You can restore it from Archived searches.')) return;
     await withBusy(async () => {
-      await api('/api/searches/'+id, { method:'DELETE', body:{} });
+      // Home has no loaded search, but the archive still needs the revision
+      // that was shown to the user. Do not silently refresh past newer work.
+      const revision = state.search?.id === id ? state.search.revision
+        : (state.searches || []).find(s => s.id === id)?.revision;
+      if (revision === undefined) throw new Error('Reload the search list before archiving.');
+      await api('/api/searches/'+id, { method:'DELETE', body:{}, headers:{ 'if-match':String(revision) } });
       if (state.search && state.search.id===id) state.search = null;
       state.picked = (state.picked||[]).filter(x => x !== id);
       await loadSearches();
@@ -7053,15 +7057,23 @@ document.addEventListener('click', async e => {
     await withBusy(async () => {
       const out = await api('/api/searches/'+state.search.id+'/members/self', { method:'POST', body:{} });
       state.search = out.search;
-      toast('You are on this search. Take the account if you are running it.');
+      toast('You are on this search. The manager or a workspace administrator can hand the account over.');
     }, waitSave('Joining the search'));
     return;
   }
   if (act==='make-manager'){
     const uid = t.dataset.uid;
     const taking = uid === state.user.id;
+    if (!may('handoverManager')) return;
+    let reason;
+    if (!canManage()) {
+      reason = prompt('Why are you reassigning this account? The reason is recorded on the search.');
+      if (reason === null) return;
+      reason = reason.trim();
+      if (!reason) { toast('Enter a reason before reassigning the account.'); return; }
+    }
     await withBusy(async () => {
-      const out = await api('/api/searches/'+state.search.id+'/members/'+uid, { method:'PATCH', body:{ searchRole:'manager' } });
+      const out = await api('/api/searches/'+state.search.id+'/members/'+uid, { method:'PATCH', body:{ searchRole:'manager', ...(reason ? { reason } : {}) } });
       state.search = out.search;
       toast(taking ? 'You run this search now. The previous manager keeps a consultant role.' : 'Account handed over. You keep a consultant role.');
     }, waitSave(taking ? 'Taking the account' : 'Handing over the account'));

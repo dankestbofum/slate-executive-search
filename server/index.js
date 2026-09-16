@@ -419,7 +419,10 @@ function requireSearch(req, res, next){
   // A closed or cancelled search accepts no ordinary edits, so a concluded
   // record cannot drift afterwards. Reads continue, and reopening is the one
   // deliberate act that is allowed through.
-  if (!reads && !stopsWork && disposition.isFrozen(s) && !/\/reopen\/?$/.test(req.path)) {
+  // Filing a closed search preserves its lifecycle; it is not ordinary editing.
+  // Keep the single-search route consistent with bulk archiving.
+  const archiving = req.method === 'DELETE' && /^\/api\/searches\/[^/]+\/?$/.test(req.path);
+  if (!reads && !stopsWork && !archiving && disposition.isFrozen(s) && !/\/reopen\/?$/.test(req.path)) {
     return res.status(409).json({
       error: 'This search is ' + disposition.lifecycleOf(s) + '. Reopen it deliberately before making further changes.',
       code: 'SEARCH_CLOSED'
@@ -919,6 +922,7 @@ app.get('/api/searches', ...requireWorkspace, (req, res) => {
       // Home offers archiving across the book, so it needs the same answer the
       // archive route will give, per search rather than per person.
       mayArchive: authority.allows('archiveSearch', s, req.access),
+      revision: s.revision,
       // Drives the "you owe them an answer" prompt on Home. A member should not
       // have to open every search to find the one waiting on them.
       intakeOpen: intake.status === 'open',
@@ -1346,10 +1350,12 @@ app.post('/api/archives/:id/restore', ...requireWorkspace, (req, res) => {
   for (const u of s.archivedUsers || []) if (!db.findUserById(u.id)) db.db.users.push(u);
   delete s.archivedUsers;
   delete s.archivedAt;
-  for (const c of s.candidates || []) c.invite = crypto.randomBytes(24).toString('hex');
+  // Restoring the file never grants candidate access, including for archives
+  // written by older releases that still contain invitation tokens.
+  for (const c of s.candidates || []) c.invite = null;
   db.db.archivedSearches = db.db.archivedSearches.filter(x => x.id !== s.id);
   db.db.searches.push(s);
-  db.touch(s, req.user, 'restored the search; candidate invitation links replaced');
+  db.touch(s, req.user, 'restored the search; candidate invitation links remain revoked');
   db.persist();
   res.json(painted(req, s));
 });
@@ -2349,7 +2355,9 @@ function requireStaffStep(req, res, next){
   if (!db.STAFF_STEPS.has(key)) return res.status(400).json({ error:'That step is not staff work.' });
   if (!inPackage(req.search, key)) return res.status(400).json({ error: outsidePackage(req.search, key) });
   req.staffKey = key;
-  req.staff = db.staffRecord(req.search, key);
+  // Rejected completion/log requests must not create an empty record that a
+  // later identity refresh persists, invalidating the browser's revision.
+  req.staff = req.search.staff?.[key] || { notes: '', log: [], doneAt: null, doneBy: null, doneByName: '' };
   next();
 }
 
@@ -2420,6 +2428,8 @@ app.post('/api/searches/:id/staff/:key/log', ...requireWorkspace, requireSearch,
   uncertify(req.staff, req.search, req.user, 'new work was logged');
   const step = db.STEPS.find(s => s.key === req.staffKey);
   db.touch(req.search, req.user, 'logged ' + (step ? step.t.toLowerCase() : req.staffKey) + (who.candidate ? ' for ' + who.candidate.name : ''));
+  req.search.staff ||= {};
+  req.search.staff[req.staffKey] = req.staff;
   db.persist();
   res.json(painted(req, req.search));
 });
@@ -2433,6 +2443,8 @@ app.delete('/api/searches/:id/staff/:key/log/:lid', ...requireWorkspace, require
   // let a step be certified and then quietly emptied.
   uncertify(req.staff, req.search, req.user, 'an entry was removed');
   db.touch(req.search, req.user, 'removed a ' + req.staffKey + ' log entry');
+  req.search.staff ||= {};
+  req.search.staff[req.staffKey] = req.staff;
   db.persist();
   res.json(painted(req, req.search));
 });
@@ -2446,6 +2458,8 @@ app.put('/api/searches/:id/staff/:key', ...requireWorkspace, requireSearch, requ
   // change of record as rewriting the log.
   if (changed) uncertify(req.staff, req.search, req.user, 'the notes were rewritten');
   db.touch(req.search, req.user, 'updated ' + req.staffKey + ' notes');
+  req.search.staff ||= {};
+  req.search.staff[req.staffKey] = req.staff;
   db.persist();
   res.json(painted(req, req.search));
 });
@@ -2477,6 +2491,8 @@ app.post('/api/searches/:id/staff/:key/complete', ...requireWorkspace, requireSe
     req.staff.doneAt = null; req.staff.doneBy = null; req.staff.doneByName = '';
     db.touch(req.search, req.user, 'reopened ' + step.t.toLowerCase());
   }
+  req.search.staff ||= {};
+  req.search.staff[req.staffKey] = req.staff;
   db.persist();
   res.json(painted(req, req.search));
 });

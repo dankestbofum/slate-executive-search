@@ -998,7 +998,8 @@ must contact the candidate and share the link.
 
 **Archive** replaces permanent search deletion. Archived searches and their media
 can be restored from **Archived searches**. Their candidate links stop working
-while archived and are replaced on restoration. Committee accounts with no active
+while archived and remain revoked on restoration. Reissue a candidate link
+separately when access is appropriate. Committee accounts with no active
 places are retired; roster accounts are recovered on restoration.
 If an email was reassigned to a different account, restoration stops for that
 conflict to be resolved. No permanent purge is exposed in the app.

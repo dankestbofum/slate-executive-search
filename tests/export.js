@@ -125,6 +125,64 @@ const revisionOf = async (id, auth) =>
 
   /* ---------------- It is not a privacy bypass ---------------- */
 
+  await check('edited scores, resealing and older sealed revisions cannot leak through export history', async () => {
+    const created = await api('/api/searches', { auth: abe, method: 'POST',
+      body: { client: 'Private score export', position: 'Administrator' } });
+    const sid = (await created.json()).id;
+    const p = '/api/searches/' + sid;
+    const write = async (suffix, method, body, auth = abe) => {
+      const res = await api(p + suffix, { auth, method, body, revision: await revisionOf(sid, auth) });
+      assert.strictEqual(res.status, 200, await res.clone().text());
+      return res.json();
+    };
+    await write('/profile', 'PUT', { criteria: [{ id: 'S1', kind: 'skill', label: 'Budget', weight: 5 }] });
+    const c = (await write('/candidates', 'POST', { name: 'Private score fixture' })).candidates[0];
+    const reviewer = sign.headers('mike@slate.local');
+    await write('/scores/' + c.id, 'PUT', { scores: { S1: 2 }, note: 'SEALED_ORIGINAL_NOTE' }, reviewer);
+    await write('/scores/' + c.id, 'PUT', { scores: { S1: 4 }, note: 'SEALED_CURRENT_NOTE' }, reviewer);
+    const exportNow = async () => (await api(p + '/export', { auth: abe })).json();
+    const sealed = await exportNow();
+    assert.ok(sealed.history.some(h => h.scoresWithheld));
+    assert.doesNotMatch(JSON.stringify(sealed), /SEALED_ORIGINAL_NOTE|SEALED_CURRENT_NOTE/);
+    await write('', 'PATCH', { released: true });
+    const released = await exportNow();
+    assert.ok(Object.values(released.evaluation.scores).some(scores => scores[c.id]?.S1 === 4));
+    assert.match(JSON.stringify(released.history), /SEALED_ORIGINAL_NOTE/);
+    await write('', 'PATCH', { released: false });
+    assert.doesNotMatch(JSON.stringify(await exportNow()), /SEALED_ORIGINAL_NOTE|SEALED_CURRENT_NOTE/);
+    await write('/profile', 'PUT', { criteria: [{ id: 'S2', kind: 'skill', label: 'Leadership', weight: 5 }] });
+    await write('', 'PATCH', { released: true });
+    assert.doesNotMatch(JSON.stringify(await exportNow()), /SEALED_ORIGINAL_NOTE|SEALED_CURRENT_NOTE/);
+  });
+
+  await check('credential-bearing inventory URLs are refused and legacy URLs withheld in both export formats', async () => {
+    const candidateId = (await bundleOf()).candidates[0].id;
+    for (const url of ['https://records.example.gov/doc?token=PRIVATE_SHARE',
+      'https://records.example.gov/doc#PRIVATE_SHARE', 'https://user:PRIVATE_SHARE@records.example.gov/doc',
+      'https://records.example.gov/share/PRIVATE_SHARE', 'https://1drv.ms/PRIVATE_SHARE']) {
+      const res = await api('/api/searches/' + id + '/candidates/' + candidateId + '/documents', {
+        auth: abe, method: 'POST', revision: await revisionOf(id, abe),
+        body: { kind: 'resume', label: 'Credential regression', url }
+      });
+      assert.strictEqual(res.status, 400, 'unsafe URL accepted');
+    }
+    const live = await (await api('/api/searches/' + id, { auth: abe })).json();
+    live.candidates[0].documents = [{ kind: 'resume', label: 'Legacy identifier', url: 'https://records.example.gov/doc?token=PRIVATE_SHARE' }];
+    const bundle = exporter.build(live, { viewer: {}, users: [] });
+    assert.doesNotMatch(JSON.stringify(bundle), /PRIVATE_SHARE/);
+    assert.doesNotMatch(exporter.report(bundle), /PRIVATE_SHARE/);
+    assert.match(bundle.candidates[0].documents[0].location, /withheld/);
+    assert.ok(bundle.completeness.missing.some(gap => /legacy document URLs/.test(gap)));
+  });
+
+  await check('open intake remains private in exports', async () => {
+    const live = await (await api('/api/searches/' + id, { auth: abe })).json();
+    live.intake = { status: 'open', submissions: { mine: { context: 'MY_INPUT' }, other: { context: 'PRIVATE_OTHER_INPUT' } } };
+    const bundle = exporter.build(live, { viewer: { id: 'mine' }, users: [] });
+    assert.match(JSON.stringify(bundle), /MY_INPUT/);
+    assert.doesNotMatch(JSON.stringify(bundle), /PRIVATE_OTHER_INPUT/);
+  });
+
   await check('sealed scoring is withheld and said to be withheld', async () => {
     const bundle = await bundleOf();
     assert.strictEqual(bundle.evaluation.sealed, true, 'scores were not sealed in this fixture');

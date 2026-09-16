@@ -55,9 +55,13 @@ decision by the records custodian and county counsel, not a convenience.
 Two rules apply to all of them:
 
 - **A location, never a way in.** What goes into Slate is where a document is
-  and what it is, not a sharing link that carries its own credential. Slate
-  strips credential-shaped fields from exports, but the rule exists so the
-  record is a pointer rather than a key.
+  and what it is, not a sharing link that carries its own credential. Use a
+  permanent HTTPS URL requiring repository sign-in. Slate rejects userinfo,
+  query strings, fragments and common anonymous-sharing URL patterns; legacy
+  URLs failing this check are withheld from exports. If no suitable URL exists,
+  leave it blank and record the stable document identifier in the label. The
+  repository owner must still verify permissions: an opaque URL path can grant
+  access that a syntax check cannot detect.
 - **Restricted material stays restricted.** Reference notes and background
   material are readable by consultants, not by the committee. Slate enforces
   that on its own records; the repository must enforce it on the documents.
