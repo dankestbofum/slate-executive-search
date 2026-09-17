@@ -1,0 +1,38 @@
+{
+  "capturedAt": "2026-09-17T03:13:14.030Z",
+  "runtime": "v22.18.0",
+  "source": "public/app.js",
+  "sourceSha256": "5474e4315c2f61a5be5c70ff41065b7d66ffdbeca8b50d741ea57f2d9cbfae02",
+  "scope": "Isolated execution of actual source functions with synthetic state; not authenticated browser coverage.",
+  "results": [
+    {
+      "check": "Restore failed research on reopen",
+      "reproduced": true,
+      "actual": "Stored failure and reference are not restored to the failure panel."
+    },
+    {
+      "check": "Restore interrupted research on reopen",
+      "reproduced": true,
+      "actual": "Stored failure and reference are not restored to the failure panel."
+    },
+    {
+      "check": "Cancel with unacknowledged server request",
+      "reproduced": true,
+      "actual": "Research cancelled. Nothing was saved.",
+      "cancellationConfirmedByServer": false
+    },
+    {
+      "check": "Initial research start request stalls",
+      "reproduced": true,
+      "actual": "No automatic deadline is installed before the first response; only manual cancellation is available.",
+      "timersInstalled": 0,
+      "deadlineAt": null
+    },
+    {
+      "check": "Cancel before job acknowledgement then retry",
+      "reproduced": true,
+      "actual": "The original idempotency key is discarded and the next start receives a new key; no server cancellation was sent.",
+      "consequence": "If the original request reached the server, its outcome remains unknown. See server active-job deduplication before assessing duplicate-work risk."
+    }
+  ]
+}

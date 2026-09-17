@@ -14,8 +14,16 @@
 // never in a routine check or in the test suite.
 //
 // Exits non-zero if anything required is missing or unavailable.
+//
+// It reads configuration the way the application does, through server/env.js:
+// a local .env in development, the platform's own environment in production.
+// Before that it read bare process.env, so on a developer's machine it
+// reported no API key while `npm run dev` two terminals away had one — a
+// diagnostic that disagreed with the thing it was diagnosing (D10).
 
 const Anthropic = require('@anthropic-ai/sdk');
+const env = require('../server/env');
+const loaded = env.loadLocalEnv();
 const budget = require('../server/aibudget');
 
 const WANTED = {
@@ -33,6 +41,19 @@ function report(ok, label, detail) {
 
 (async () => {
   console.log('Slate AI preflight\n');
+
+  // Which configuration this run is reporting on. Without this line a FAIL
+  // below is ambiguous: it could be a missing key or a key the check never
+  // looked for.
+  console.log('Configuration source: ' + (loaded.loaded
+    ? loaded.path + ' (' + loaded.keys + ' variable(s)), over the process environment'
+    : loaded.reason === 'production'
+      ? 'the deployment environment (NODE_ENV=production; a local .env is ignored here, by design)'
+      : loaded.reason === 'test'
+        ? 'the process environment (NODE_ENV=test)'
+        : 'the process environment only — ' + loaded.path + ' was not read'
+          + (loaded.error ? ' (' + loaded.error + ')' : '')));
+  console.log('Node ' + process.versions.node + '; NODE_ENV=' + (process.env.NODE_ENV || 'unset') + '\n');
 
   const key = String(process.env.ANTHROPIC_API_KEY || '').trim();
   report(Boolean(key), 'ANTHROPIC_API_KEY is set',
@@ -83,6 +104,8 @@ function report(ok, label, detail) {
   console.log('  - Latency or real cost under load.');
   console.log('  - Tool and effort compatibility in practice.');
   console.log('  Those need an explicitly authorised staging run against synthetic records.');
+  console.log('\n  To check the deployment rather than a laptop, run this inside the running');
+  console.log('  service (the image carries it), so it reads the same environment the app does.');
 
   if (failed) console.log('\nPreflight failed. Fix the items marked FAIL before relying on AI features.');
   else console.log('\nPreflight passed.');

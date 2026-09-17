@@ -3,12 +3,9 @@
 // A local .env is a development convenience only. In production the platform's
 // environment is authoritative: a stray .env baked into an image must never
 // silently replace deployed configuration. Tests supply their own environment.
-if (process.env.NODE_ENV !== 'test' && process.env.NODE_ENV !== 'production') {
-  require('dotenv').config({
-    path: require('path').join(__dirname, '..', '.env'),
-    override: true
-  });
-}
+// The rule lives in server/env.js so the operator preflight reads exactly the
+// configuration the application would, instead of disagreeing with it (D10).
+require('./env').loadLocalEnv();
 
 const fs = require('fs');
 const path = require('path');
@@ -58,7 +55,23 @@ const HOST = process.env.HOST || '0.0.0.0';
 // Stamped into the image by CI (--build-arg SLATE_RELEASE). Lets an operator
 // confirm which commit a running container was built from, which is what makes
 // a rollback decision checkable rather than assumed.
-const RELEASE = String(process.env.SLATE_RELEASE || '').trim() || 'dev';
+//
+// Two independent answers, because either can be wrong and the difference is
+// what the audit found: the live service named a commit that did not contain
+// the code the live service was running (D08). The rule for reconciling them
+// lives in server/env.js, where it can be tested without a deploy.
+const RELEASE_ID = require('./env').release(process.env);
+const RELEASE = RELEASE_ID.id;
+const RELEASE_STAMPED = RELEASE_ID.stamped;
+
+/**
+ * Where the release identity came from, so a rollback decision is checkable
+ * rather than assumed. Resolved once at startup, because the environment a
+ * process was started with is the environment it runs under.
+ */
+function releaseIdentity(){
+  return RELEASE_ID;
+}
 // The supported Node major, read from the one place it is already declared
 // rather than repeated here where it could drift from package.json.
 const ENGINE_FLOOR = Number(String(require('../package.json').engines?.node || '').match(/\d+/)?.[0] || 0);
@@ -468,7 +481,16 @@ function requireManager(req, res, next){
 // Cheap liveness: is this process answering at all. No disk work, no AI call,
 // so a platform health check cannot be made expensive or flaky by either.
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, release: RELEASE, node: process.versions.node });
+  // Deliberately small and fast: this is the endpoint the platform polls to
+  // decide whether to keep sending traffic here, so it reports liveness and
+  // identity and asks nothing else. Everything diagnostic is on /api/ready.
+  res.json({
+    ok: true,
+    release: RELEASE,
+    releaseStamped: RELEASE_STAMPED,
+    releaseSource: releaseIdentity().source,
+    node: process.versions.node
+  });
 });
 
 // Readiness, including recovery health. Separate from liveness because the
@@ -494,12 +516,34 @@ app.get('/api/ready', (_req, res) => {
     ready,
     shuttingDown,
     release: RELEASE,
+    // Unstamped, or stamped inconsistently, means this container cannot be
+    // reliably traced back to a commit. That is a release-process fault rather
+    // than a runtime one, so it is reported rather than made into a failing
+    // readiness check that would pull traffic.
+    releaseStamped: RELEASE_STAMPED,
+    releaseIdentity: releaseIdentity(),
     schemaVersion: db.db.schemaVersion,
     storage,
     // Drafting is unavailable without a key, but nothing else is. This is
-    // reported separately so an Anthropic outage never reads as the
-    // application being down.
-    ai: { configured: aiConfigured(), degraded: !aiConfigured(), budget: aibudget.status() },
+    // reported separately, and it is deliberately not part of `ready` above:
+    // Render takes a failing health check as a reason to pull traffic and
+    // restart the container, and an Anthropic outage is not a reason to do
+    // either. See https://render.com/docs/health-checks.
+    //
+    // `configured` is configuration. `verified` is evidence. They were the
+    // same field, which is how this endpoint came to report "not degraded"
+    // beside one failed call and no successful ones (D07).
+    ai: {
+      configured: aiConfigured(),
+      // Now means "not known to be working": no key at all, or a run of
+      // research jobs that all failed. Never inferred from key presence alone.
+      degraded: !aiConfigured() || telemetry.researchHealth().failingSince >= AI_DEGRADED_FAILURES,
+      entitlement: entitlement(),
+      // Final research outcomes, so "the key is set" is never mistaken for
+      // "research works".
+      research: telemetry.researchHealth(),
+      budget: aibudget.status()
+    },
     // Research runs as a bounded job with a durable record, so an operator can
     // see what is waiting, what is running, and the limits in force without
     // reading the logs. Counts and limits only; never what is being researched.
@@ -521,6 +565,30 @@ app.get('/api/ready', (_req, res) => {
 
 function aiConfigured(){
   return Boolean(String(process.env.ANTHROPIC_API_KEY || '').trim());
+}
+
+// How many consecutive failed research jobs before AI is called degraded. One
+// failure is a bad afternoon at a provider; three in a row with nothing
+// succeeding between them is a condition.
+const AI_DEGRADED_FAILURES = 3;
+
+/**
+ * What is known about model entitlement, which is not knowable from here.
+ *
+ * A key being present does not mean this account may call the configured
+ * model. The check that answers that is the Models API call in
+ * scripts/preflight.js, run by an operator against this deployment's own
+ * environment — so this reports where the answer comes from rather than
+ * implying it already has one.
+ */
+function entitlement(){
+  return {
+    checkedHere: false,
+    command: 'npm run preflight',
+    model: String(process.env.CLAUDE_MODEL || 'claude-sonnet-5'),
+    premiumModel: String(process.env.CLAUDE_MODEL_PREMIUM || 'claude-opus-5'),
+    note: 'Entitlement is not checked by this endpoint. Run the preflight in this deployment, or read the research outcomes below.'
+  };
 }
 
 /**
@@ -2152,7 +2220,16 @@ const researchStatusLimit = http.limiter({
  * have been removed from the firm, had their role changed, or the search may
  * have been closed, deleted, or edited since.
  */
-async function authorizeJob(job){
+/**
+ * The half of the check that reads only this process's own store.
+ *
+ * Split out because it costs nothing and can therefore be run twice: once
+ * before the directory lookup, and again in the same synchronous turn as the
+ * write. The search can be edited, closed, moved, or deleted while the
+ * directory is answering, and the write has to see the store as it is at the
+ * moment it happens rather than as it was when the lookup started (D02).
+ */
+function jobStoreVerdict(job){
   const search = db.findSearch(job.searchId);
   if (!search) {
     return { ok: false, code: 'SEARCH_GONE', error: 'That search no longer exists, so the research was not saved.' };
@@ -2167,10 +2244,6 @@ async function authorizeJob(job){
   if (!user || !job.requestedByClerkId) {
     return { ok: false, code: 'RESEARCH_UNAUTHORIZED', error: 'The account that started this research is no longer available, so nothing was saved.' };
   }
-  const access = await auth.accessFor(user, job.requestedByClerkId, job.organizationId);
-  if (!access || !access.orgId || !access.role || !db.canEdit(search, access)) {
-    return { ok: false, code: 'RESEARCH_UNAUTHORIZED', error: 'Your access to this search changed while research was running, so nothing was saved.' };
-  }
   if (search.revision !== job.revisionAtStart) {
     return {
       ok: false,
@@ -2178,7 +2251,39 @@ async function authorizeJob(job){
       error: 'This search changed while research was running. The newer work was kept; review the research before applying it.'
     };
   }
-  return { ok: true, search, user, access };
+  return { ok: true, search, user };
+}
+
+async function authorizeJob(job){
+  const local = jobStoreVerdict(job);
+  if (!local.ok) return local;
+  const access = await auth.accessFor(local.user, job.requestedByClerkId, job.organizationId);
+  if (!access || !access.orgId || !access.role || !db.canEdit(local.search, access)) {
+    return { ok: false, code: 'RESEARCH_UNAUTHORIZED', error: 'Your access to this search changed while research was running, so nothing was saved.' };
+  }
+  return {
+    ok: true,
+    search: local.search,
+    user: local.user,
+    access,
+    /**
+     * Confirm, synchronously, immediately before the write.
+     *
+     * The directory lookup is not repeated: its answer is what this verdict
+     * carries, and asking again would only open another await. What is repeated
+     * is everything readable from the store, plus the permission that answer
+     * grants — so a role the directory reported is still checked against the
+     * search as it stands now.
+     */
+    recheck(){
+      const now = jobStoreVerdict(job);
+      if (!now.ok) return now;
+      if (!db.canEdit(now.search, access)) {
+        return { ok: false, code: 'RESEARCH_UNAUTHORIZED', error: 'Your access to this search changed while research was running, so nothing was saved.' };
+      }
+      return { ok: true, search: now.search, user: now.user, access };
+    }
+  };
 }
 
 app.post('/api/searches/:id/research-jobs', ...requireWorkspace, requireSearch, requireEditor, researchLimit, async (req, res) => {
@@ -2205,6 +2310,34 @@ app.post('/api/searches/:id/research-jobs', ...requireWorkspace, requireSearch, 
     job: jobs.publicJob(started.job),
     reused: Boolean(started.reused),
     status: '/api/searches/' + encodeURIComponent(req.search.id) + '/research-jobs/' + encodeURIComponent(started.job.id)
+  });
+});
+
+/**
+ * Reconcile an idempotency key, without starting anything.
+ *
+ * A browser whose start request was answered but whose answer was lost holds a
+ * key and no job id. It cannot poll, and it must not retry the start to find
+ * out what happened, because a start request is allowed to create work. This
+ * route only reads: it reports the operation that key names, the search's
+ * current operation, or that there is none (D03).
+ *
+ * Registered before the :jobId route so the fixed segment is never read as an
+ * id. It shares the status allowance, not the one that bounds paid work.
+ */
+app.get('/api/searches/:id/research-jobs', ...requireWorkspace, requireSearch, requireEditor, researchStatusLimit, (req, res) => {
+  const key = String(req.query.key || req.query.idempotencyKey || '').trim();
+  if (key.length > 120) return res.status(400).json({ error: 'That idempotency key is too long.' });
+  const byKey = key ? jobs.findByKey(req.search.id, req.user.id, key) : null;
+  // The search's own current or latest operation, which is what answers "is
+  // anything running on this search?" when the key names nothing.
+  const current = jobs.referenceFor(req.search.id);
+  res.json({
+    // null is a real answer here and means the operation was never recorded:
+    // nothing was started, and nothing was billed for this key.
+    job: byKey ? jobs.publicJob(byKey, { includeResult: Boolean(byKey.result && byKey.result.reviewable) }) : null,
+    matchedKey: Boolean(byKey),
+    current
   });
 });
 
@@ -2787,6 +2920,22 @@ app.use(http.errors());
 const server = app.listen(PORT, HOST, () => {
   console.log('Slate listening on http://'+HOST+':'+PORT);
   console.log('Release:', RELEASE, '| Node', process.versions.node, '| data', db.DATA_DIR);
+  // Said once, loudly, at the only moment somebody is reading the boot log.
+  const identity = releaseIdentity();
+  if (!RELEASE_STAMPED && process.env.NODE_ENV === 'production') {
+    console.warn('Slate: neither SLATE_RELEASE nor RENDER_GIT_COMMIT is set, so this container '
+      + 'reports its release as "dev". Build with --build-arg SLATE_RELEASE=$COMMIT_SHA; without it '
+      + 'a running service cannot be matched to the code it was built from.');
+  }
+  if (!identity.agrees) {
+    // This is the D08 condition: the image says one commit and the deploy says
+    // another. Exactly one of them describes the running code, and which one is
+    // not knowable from in here.
+    console.warn('Slate: release identity disagrees. The image was stamped ' + identity.build
+      + ' and the platform reports ' + identity.platform + '. One of them is stale — usually a '
+      + 'SLATE_RELEASE deployment variable set by hand. Clear it and let the build stamp the image.');
+    telemetry.log.warn('release-identity-mismatch', { build: identity.build, platform: identity.platform });
+  }
   // The Dockerfile and CI pin the supported major. A local runtime below it
   // still starts, because refusing to boot over it would help nobody, but it
   // is said out loud: a difference between what you are testing on and what

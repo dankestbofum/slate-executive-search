@@ -210,7 +210,12 @@ const state = {
   // previous workspace, or an attempt that was cancelled. `error` and `review`
   // outlive the dialog on purpose: a failure has to stay on the page long
   // enough to be read and acted on. See startResearch.
-  research:{ token:0, active:null, error:null, review:null, key:null },
+  // "dismissed" is keyed by job id: saying "fill the facts by hand" is a
+  // decision about one operation, not a standing preference, so re-opening a
+  // search restores a failure the consultant has not dealt with and stays quiet
+  // about one they have. "draft" holds the jurisdiction and website last typed
+  // into the lookup form, so a failed attempt does not take them with it.
+  research:{ token:0, active:null, error:null, review:null, key:null, dismissed:{}, draft:null },
   // The intake answers being edited, held here rather than read back off the
   // DOM so a re-render never drops what somebody typed. Cleared when the
   // search changes or the answers are saved.
@@ -721,6 +726,14 @@ const RESEARCH_POLL_TIMEOUT_MS = 10000;
 // rather than the browser inventing a verdict first.
 const RESEARCH_GRACE_MS = 20000;
 const RESEARCH_POLL_FAILURES = 10;
+// Deadlines for the requests that surround an operation, as distinct from the
+// operation's own deadline. These bound a network round trip; the research is
+// bounded by the server. Keeping them separate is what stops "the request did
+// not answer" from being reported as "the research did not happen" (D05).
+const RESEARCH_START_TIMEOUT_MS = 20000;
+const RESEARCH_SAVE_TIMEOUT_MS = 20000;
+const RESEARCH_CANCEL_TIMEOUT_MS = 10000;
+const RESEARCH_LOOKUP_TIMEOUT_MS = 10000;
 
 const RESEARCH_STAGE_TEXT = {
   queued: 'Waiting for a free slot',
@@ -781,7 +794,46 @@ function researchProblem(error){
     retry: !fatal.includes(error.code),
     // Only set when the outcome is genuinely unknown. Never claim nothing was
     // saved when we cannot tell.
-    reload: false
+    reload: false,
+    // Offers "Check what happened": an authorized read that reconciles the key
+    // this tab is holding. Set only where the outcome is genuinely unknown.
+    reconcile: false
+  };
+}
+
+/**
+ * The start request was never answered inside its bound.
+ *
+ * Deliberately offers reconciliation rather than Retry. The server may have
+ * recorded the operation and begun paying for it under an id this tab never
+ * learned, and a retry that looks like a fresh start is how the same research
+ * gets billed twice.
+ */
+function researchUnsureStart(){
+  return {
+    code: 'RESEARCH_UNSURE',
+    error: 'Slate did not hear back about starting this research, so whether it started is not known here. Check what happened before trying again.',
+    missing: [], retry: false, reload: false, reconcile: true
+  };
+}
+
+/** The facts save failed outright, so research was never started. */
+function factsSaveProblem(error){
+  return {
+    code: error.code || 'FACTS_SAVE_FAILED',
+    error: 'Slate could not save the facts on this form, so research was not started. ' + (error.message || ''),
+    missing: [], retry: true, reload: false, reconcile: false
+  };
+}
+
+/** The facts save was not answered, so whether it landed is unknown. */
+function factsSaveUnsure(){
+  return {
+    code: 'FACTS_SAVE_UNSURE',
+    // Scoped to the facts rather than to the research: the research definitely
+    // did not start, and the facts may well have been saved.
+    error: 'Slate did not hear back about saving these facts, so research was not started. Reload this search to see what was saved, then research again.',
+    missing: [], retry: false, reload: true, reconcile: false
   };
 }
 
@@ -823,37 +875,59 @@ async function startResearch({ city, website, premium, patch }){
   state.research.review = null;
   researchWait(active);
 
-  try {
-    if (patch) {
-      const saved = await api('/api/searches/' + s.id, { method: 'PATCH', body: patch, signal: active.controller.signal });
+  // Held so a failure does not take the consultant's typing with it: a
+  // re-render draws the lookup form from state, not from the DOM it replaced.
+  state.research.draft = { city, website };
+
+  // The facts save and the research are two writes, and they are reported
+  // separately. A message about research is not a message about whether the
+  // form was saved.
+  if (patch) {
+    try {
+      const saved = await api('/api/searches/' + s.id, {
+        method: 'PATCH', body: patch,
+        signal: active.controller.signal,
+        timeoutMs: RESEARCH_SAVE_TIMEOUT_MS
+      });
       if (researchStale(active)) return;
       state.search = saved;
-    }
-    let started;
-    try {
-      started = await api('/api/searches/' + active.searchId + '/research-jobs', {
-        method: 'POST',
-        signal: active.controller.signal,
-        headers: { 'idempotency-key': active.key },
-        body: { city, website, premium }
-      });
     } catch (error) {
-      // The job contract can be switched off for rollback. An already-open
-      // client falls back to holding the connection itself.
-      if (error.code === 'RESEARCH_JOBS_OFF') { await researchInline(active, { city, website, premium }); return; }
-      throw error;
+      if (error.aborted) return;
+      endResearch(active, { error: error.timedOut ? factsSaveUnsure() : factsSaveProblem(error) });
+      return;
     }
-    if (researchStale(active)) return;
-    active.jobId = started.job.id;
-    if (started.job.createdAt) active.startedAt = Date.parse(started.job.createdAt);
-    if (started.job.deadlineAt) active.deadlineAt = Date.parse(started.job.deadlineAt);
-    if (started.reused) setWaitStage(stageText(started.job.stage) + ' · already running');
-    if (researchStatus(active, started.job)) return;
+  }
+
+  let started;
+  try {
+    started = await api('/api/searches/' + active.searchId + '/research-jobs', {
+      method: 'POST',
+      signal: active.controller.signal,
+      // A bound on the acknowledgement, not on the research. The operation's
+      // deadline is the server's and is learned from this response, which is
+      // exactly why waiting for the response cannot itself be unbounded (D05).
+      timeoutMs: RESEARCH_START_TIMEOUT_MS,
+      headers: { 'idempotency-key': active.key },
+      body: { city, website, premium }
+    });
   } catch (error) {
     if (error.aborted) return;
+    // The job contract can be switched off for rollback. An already-open
+    // client falls back to holding the connection itself.
+    if (error.code === 'RESEARCH_JOBS_OFF') { await researchInline(active, { city, website, premium }); return; }
+    // No acknowledgement inside the bound. The operation may be running under
+    // an id this tab never learned, so the key is kept and the outcome is
+    // reconciled rather than guessed at.
+    if (error.timedOut || error.code === 'AUTH_TIMEOUT') { endResearch(active, { error: researchUnsureStart() }); return; }
     endResearch(active, { error: researchProblem(error) });
     return;
   }
+  if (researchStale(active)) return;
+  active.jobId = started.job.id;
+  if (started.job.createdAt) active.startedAt = Date.parse(started.job.createdAt);
+  if (started.job.deadlineAt) active.deadlineAt = Date.parse(started.job.deadlineAt);
+  if (started.reused) setWaitStage(stageText(started.job.stage) + ' · already running');
+  if (researchStatus(active, started.job)) return;
   pollResearch(active);
 }
 
@@ -957,21 +1031,21 @@ async function checkResearch(active){
   pollResearch(active);
 }
 
-/** Read one status. Returns true when the operation is over. */
-function researchStatus(active, job){
-  active.stage = job.stage || active.stage;
-  if (job.deadlineAt) active.deadlineAt = Date.parse(job.deadlineAt);
-  if (!RESEARCH_TERMINAL.has(job.state)) {
-    setWaitStage(stageText(job.stage));
-    return false;
-  }
-  if (job.state === 'succeeded') { endResearch(active, { saved: true, job }); return true; }
-  if (job.state === 'cancelled' && !job.reviewable) { endResearch(active, { cancelled: true, job }); return true; }
-
-  // Findings worth a decision, and separately the reason the job did not apply
-  // them itself. A stale-search conflict has both: the work is good and the
-  // file moved under it. A plain partial has only the first, and a cancelled
-  // job that still produced findings has no failure to report at all.
+/**
+ * What a finished job means, in one place.
+ *
+ * Polling and re-opening a search both need this answer and used to derive it
+ * separately: polling built a failure panel, and re-opening restored only
+ * reviewable findings, so a failure that happened while the tab was away
+ * disappeared on the way back (D04). One mapper, two callers.
+ *
+ * Findings worth a decision and the reason the job did not apply them itself
+ * are separate: a stale-search conflict has both, because the work is good and
+ * the file moved under it; a plain partial has only the first; and a cancelled
+ * job that still produced findings has no failure to report at all.
+ */
+function researchTerminal(job){
+  if (job.state === 'succeeded') return { saved: true, job };
   const review = job.reviewable ? job : null;
   const noFailureToReport = job.state === 'partial' || job.state === 'cancelled';
   const failure = job.failure
@@ -981,13 +1055,27 @@ function researchStatus(active, job){
       missing: job.failure.missing || job.missing || [],
       operation: job.id,
       retry: !['AI_AUTH_ERROR','NO_KEY','AUTH_ERROR','BAD_URL','MODEL_UNAVAILABLE'].includes(job.failure.code),
-      reload: false
+      reload: false,
+      reconcile: false
     }
     : (noFailureToReport ? null : {
       code: 'RESEARCH_FAILED',
-      error: 'Research did not finish.', missing: job.missing || [], operation: job.id, retry: true, reload: false
+      error: 'Research did not finish.', missing: job.missing || [], operation: job.id,
+      retry: true, reload: false, reconcile: false
     });
-  endResearch(active, { review, error: failure });
+  if (job.state === 'cancelled' && !review) return { cancelled: true, job };
+  return { review, error: failure, job };
+}
+
+/** Read one status. Returns true when the operation is over. */
+function researchStatus(active, job){
+  active.stage = job.stage || active.stage;
+  if (job.deadlineAt) active.deadlineAt = Date.parse(job.deadlineAt);
+  if (!RESEARCH_TERMINAL.has(job.state)) {
+    setWaitStage(stageText(job.stage));
+    return false;
+  }
+  endResearch(active, researchTerminal(job));
   return true;
 }
 
@@ -1008,10 +1096,18 @@ function endResearch(active, outcome = {}){
   if (!mine) return;
   if (state.search?.id !== active.searchId || (state.org?.id || null) !== active.orgId) return;
 
+  if (outcome.requested) {
+    // Control is back and nothing is claimed. The server has not answered yet,
+    // so "nothing was saved" would be a guess about a client's file (D03).
+    toast('Cancellation requested. Waiting for the server to confirm.');
+    render();
+    return;
+  }
   if (outcome.saved) {
     state.research.key = null;
     state.research.error = null;
     state.research.review = null;
+    state.research.draft = null;
     const held = outcome.held || [];
     toast(held.length
       ? 'Filled from public sources. Kept what you had already entered for: ' + held.join(', ') + '.'
@@ -1037,8 +1133,101 @@ function endResearch(active, outcome = {}){
   // recorded the operation: the retry must carry the same key so it finds the
   // one operation rather than paying for a second. Once a job id is known the
   // operation is identified and finished, and a retry is a new one.
-  if (outcome.error && active.jobId) state.research.key = null;
+  // ...and while the outcome is unknown, whether or not an id is known: a
+  // cancellation that was never acknowledged has to be reconciled before a
+  // retry, for the same reason.
+  if (outcome.error && active.jobId && !outcome.error.reconcile) state.research.key = null;
   render();
+}
+
+/* --- reconciliation ------------------------------------------------------- *
+ *
+ * The one question this tab cannot answer on its own: an operation was started,
+ * or possibly started, and no answer arrived. Retrying the start would find out
+ * by risking a second paid run, so that is not how it is asked. The key is
+ * looked up through a read-only route that never creates work.
+ * ------------------------------------------------------------------------- */
+
+/**
+ * Ask the server what became of the key this tab is holding.
+ *
+ * The cancelling flag is set when the consultant asked to stop: an operation
+ * found still running is then told to stop, because that is what they asked
+ * for and this is the first moment it could be delivered.
+ */
+async function reconcileResearch({ searchId, key, cancelling = false } = {}){
+  const id = searchId || state.search?.id;
+  if (!id) return;
+  if (!key) {
+    if (cancelling) toast('Research cancelled. Nothing was started, so nothing was saved.');
+    return;
+  }
+  let out;
+  try {
+    out = await api('/api/searches/' + id + '/research-jobs?key=' + encodeURIComponent(key),
+      { timeoutMs: RESEARCH_LOOKUP_TIMEOUT_MS });
+  } catch (error) {
+    if (error.aborted) return;
+    if (state.search?.id !== id) return;
+    // Still unknown. The panel keeps the key and the offer to check again,
+    // rather than resolving into a claim in either direction.
+    state.research.error = {
+      code: 'RESEARCH_UNSURE',
+      error: 'Slate still could not reach the server to check on this research, so nothing about its outcome is known here. Try checking again in a moment.',
+      missing: [], retry: false, reload: true, reconcile: true
+    };
+    render();
+    return;
+  }
+  if (state.search?.id !== id) return;
+
+  const job = out.job || null;
+  if (!job) {
+    // The key names no operation, which is a real answer: nothing was recorded
+    // under it, so nothing was started and nothing was billed for it.
+    state.research.key = null;
+    state.research.error = null;
+    toast(cancelling
+      ? 'Research cancelled. It had not started, so nothing was saved.'
+      : 'That research was never started. Nothing was saved and nothing was billed.');
+    render();
+    return;
+  }
+
+  state.research.key = null;
+  if (!RESEARCH_TERMINAL.has(job.state)) {
+    if (cancelling) {
+      // Now there is an id to cancel with. This is the deferred half of the
+      // Cancel that could not be delivered when it was pressed.
+      await requestCancel(id, job.id);
+      return;
+    }
+    // Still running: reconnect to it rather than starting anything.
+    state.research.error = null;
+    state.search = { ...state.search, researchJob: job };
+    adoptResearchJob();
+    return;
+  }
+  applyTerminalResearch(job);
+  render();
+}
+
+/**
+ * Put a finished job's outcome on the page.
+ *
+ * Shared by reconciliation and by re-opening a search, so one job produces one
+ * explanation however it was arrived at.
+ */
+function applyTerminalResearch(job){
+  const outcome = researchTerminal(job);
+  if (outcome.saved) {
+    toast('That research had already finished and been saved.');
+    void refreshAfterResearch(job.searchId || state.search?.id, 'community');
+    return;
+  }
+  if (outcome.cancelled) { toast('That research was cancelled. Nothing was saved.'); return; }
+  if (outcome.review) state.research.review = outcome.review;
+  if (outcome.error) state.research.error = outcome.error;
 }
 
 async function refreshAfterResearch(searchId, view){
@@ -1062,25 +1251,63 @@ async function cancelResearch(active){
   active.cancelling = true;
   const button = $('#lookup-cancel');
   if (button) { button.disabled = true; button.textContent = 'Cancelling…'; }
-  const { jobId, searchId } = active;
+  const { jobId, searchId, key } = active;
   clearTimeout(active.pollTimer);
   active.controller.abort();
-  endResearch(active, { cancelled: true });
-  if (!jobId) return;
+  // The page comes back straight away and says what is actually known: that
+  // cancellation was requested. It does not say nothing was saved, because at
+  // this instant nobody here knows whether the save had already happened (D03).
+  endResearch(active, { requested: true });
+  // No id means the start was never acknowledged. The key is the only handle on
+  // the operation, so it is reconciled rather than abandoned, because
+  // abandoning it is what let a retry pay for the same work twice.
+  if (!jobId) { await reconcileResearch({ searchId, key, cancelling: true }); return; }
+  await requestCancel(searchId, jobId);
+}
+
+/**
+ * Deliver a cancellation and report what the server said.
+ *
+ * Separate from cancelResearch because reconciliation reaches this point too,
+ * with an id it has only just learned.
+ */
+async function requestCancel(searchId, jobId){
+  let out;
   try {
-    const out = await api('/api/searches/' + searchId + '/research-jobs/' + jobId + '/cancel', { method: 'POST', body: {} });
-    if (out.alreadyCompleted) {
-      toast('That research had already finished and been saved.');
-      if (state.search?.id === searchId) void refreshAfterResearch(searchId, 'community');
-    } else if (out.job && out.job.reviewable && state.search?.id === searchId) {
-      state.research.review = out.job;
-      render();
-    }
+    out = await api('/api/searches/' + searchId + '/research-jobs/' + jobId + '/cancel',
+      { method: 'POST', body: {}, timeoutMs: RESEARCH_CANCEL_TIMEOUT_MS });
   } catch (error) {
-    // The work is bounded by its own deadline on the server, so a cancel that
-    // could not be delivered is worth saying plainly rather than hiding.
-    if (!error.aborted) toast('Slate could not tell the server to stop; it will stop on its own deadline.');
+    if (error.aborted) return;
+    if (state.search?.id !== searchId) return;
+    // The request was not delivered, or its answer was lost. The operation is
+    // bounded by its own deadline on the server either way, so the honest
+    // report is that the outcome is not known here yet.
+    state.research.error = {
+      code: 'RESEARCH_CANCEL_UNSURE',
+      error: 'Slate could not confirm the cancellation. The research stops on its own deadline, but whether it saved first is not known here. Reload this search to see.',
+      missing: [], operation: jobId, retry: false, reload: true, reconcile: false
+    };
+    render();
+    return;
   }
+  if (state.search?.id !== searchId) return;
+  state.research.key = null;
+  if (out.alreadyCompleted) {
+    toast('That research had already finished and been saved.');
+    void refreshAfterResearch(searchId, 'community');
+    return;
+  }
+  if (out.job && out.job.reviewable) {
+    // Cancelled after the provider had already answered. The findings were paid
+    // for, so they are offered rather than thrown away, and nothing was written
+    // to the file.
+    state.research.review = out.job;
+    toast('Research cancelled. Nothing was saved, but it had already found something. Review it below.');
+    render();
+    return;
+  }
+  toast('Research cancelled. Nothing was saved.');
+  render();
 }
 
 /**
@@ -1094,9 +1321,7 @@ function adoptResearchJob(){
   const job = state.search && state.search.researchJob;
   if (!job || state.research.active) return;
   if (RESEARCH_TERMINAL.has(job.state)) {
-    // Findings still waiting for a decision are surfaced. A failure that has
-    // already been reported once is not re-announced on every visit.
-    if (job.reviewable && !state.research.review) state.research.review = job;
+    restoreResearchOutcome(job);
     return;
   }
   const active = {
@@ -1121,6 +1346,37 @@ function adoptResearchJob(){
   if (!researchStatus(active, job)) pollResearch(active);
 }
 
+/**
+ * Put a finished operation's explanation back on the page.
+ *
+ * A consultant who left while research was running, or whose tab was in the
+ * background when it failed, comes back to the reason and the recovery action
+ * rather than to a page that looks like nothing ever happened (D04). What they
+ * have already dealt with stays dealt with: dismissal is recorded per job.
+ */
+function restoreResearchOutcome(job){
+  if (state.research.dismissed[job.id]) return;
+  const outcome = researchTerminal(job);
+  // Saved work needs no notice: it is on the file, which is where it is read.
+  if (outcome.saved || outcome.cancelled) return;
+  if (outcome.review && !state.research.review) state.research.review = outcome.review;
+  if (outcome.error && !state.research.error) state.research.error = outcome.error;
+}
+
+/**
+ * "I will fill this in by hand", recorded against the operation it was said
+ * about. This was a bare flag, so a reload could not tell a failure that had
+ * been read from one that had not.
+ */
+function dismissResearchNotice(){
+  for (const id of [state.research.review?.id, state.research.error?.operation]) {
+    if (id) state.research.dismissed[id] = true;
+  }
+  state.research.error = null;
+  state.research.review = null;
+  state.research.draft = null;
+}
+
 /** Nothing from a previous workspace, search, or session may keep running. */
 function stopResearch(){
   const active = state.research.active;
@@ -1129,6 +1385,10 @@ function stopResearch(){
   state.research.error = null;
   state.research.review = null;
   state.research.key = null;
+  // Both are scoped to one search in one workspace, and neither may follow the
+  // consultant to the next one.
+  state.research.dismissed = {};
+  state.research.draft = null;
   if (!active) return;
   clearTimeout(active.pollTimer);
   active.controller.abort();
@@ -1235,37 +1495,104 @@ function abortedError(){
   return error;
 }
 
+/**
+ * A request that ran out of time, which is neither a request that was
+ * abandoned nor one that failed.
+ *
+ * Callers have to tell all three apart: "you stopped it", "the server said
+ * no", and "we never found out". The third must never be reported as though
+ * nothing happened on the server.
+ */
+function timedOutError(ms){
+  const error = new Error('The server did not answer within ' + Math.round(ms / 1000) + ' seconds.');
+  error.code = 'REQUEST_TIMEOUT';
+  error.timedOut = true;
+  return error;
+}
+
+// A session token is a network call in front of every other network call, so
+// an authentication service that stopped answering used to leave a request
+// that had not started and a page with nothing to time out (D05).
+const TOKEN_TIMEOUT_MS = 15000;
+
+function authToken(){
+  let timer = null;
+  const bounded = new Promise((_resolve, reject) => {
+    timer = setTimeout(() => {
+      const error = new Error('Slate could not confirm your sign-in in time. Check your connection and try again.');
+      error.code = 'AUTH_TIMEOUT';
+      reject(error);
+    }, TOKEN_TIMEOUT_MS);
+  });
+  return Promise.race([window.SlateAuth.token(), bounded])
+    .finally(() => clearTimeout(timer));
+}
+
+/**
+ * One signal for a request, out of the caller's signal and an optional
+ * deadline, which also remembers which of them fired.
+ *
+ * AbortSignal.any would combine them but not tell them apart afterwards, and
+ * telling them apart is the whole point.
+ */
+function requestDeadline(signal, timeoutMs){
+  if (!timeoutMs) return { signal, timedOut: () => false, release(){} };
+  const own = new AbortController();
+  let fired = false;
+  const timer = setTimeout(() => { fired = true; own.abort(); }, timeoutMs);
+  const relay = () => own.abort();
+  if (signal) {
+    if (signal.aborted) own.abort();
+    else signal.addEventListener('abort', relay, { once: true });
+  }
+  return {
+    signal: own.signal,
+    timedOut: () => fired,
+    release(){
+      clearTimeout(timer);
+      if (signal) signal.removeEventListener('abort', relay);
+    }
+  };
+}
+
 async function api(path, opts={}){
-  const token = path.startsWith('/api/apply/') ? null : await window.SlateAuth.token();
-  // Acquiring the token is itself a wait. A cancelled operation must not start
-  // a request just because the token promise happened to settle afterwards.
-  if (opts.signal && opts.signal.aborted) throw abortedError();
-  const writesSearch = opts.method && opts.method !== 'GET' && state.search && path.startsWith('/api/searches/'+state.search.id);
-  let res;
+  const { timeoutMs = 0, signal: given = null, ...rest } = opts;
+  const deadline = requestDeadline(given, timeoutMs);
   try {
-    res = await fetch(path, {
-      credentials:'include',
-      ...opts,
-      headers:{ 'content-type':'application/json', ...(token ? { authorization:'Bearer ' + token } : {}), ...(writesSearch ? { 'if-match':String(state.search.revision) } : {}), ...(opts.headers||{}) },
-      body: opts.body ? JSON.stringify(opts.body) : undefined
-    });
-  } catch (error) {
-    // An abort is a decision, not a network fault, and callers have to be able
-    // to tell them apart: one means "you stopped it", the other means "we do
-    // not know what happened".
-    if ((opts.signal && opts.signal.aborted) || error.name === 'AbortError' || error.name === 'TimeoutError') throw abortedError();
-    throw error;
+    const token = path.startsWith('/api/apply/') ? null : await authToken();
+    // Acquiring the token is itself a wait. A cancelled operation must not start
+    // a request just because the token promise happened to settle afterwards.
+    if (given && given.aborted) throw abortedError();
+    if (deadline.timedOut()) throw timedOutError(timeoutMs);
+    const writesSearch = rest.method && rest.method !== 'GET' && state.search && path.startsWith('/api/searches/'+state.search.id);
+    let res;
+    try {
+      res = await fetch(path, {
+        credentials:'include',
+        ...rest,
+        signal: deadline.signal,
+        headers:{ 'content-type':'application/json', ...(token ? { authorization:'Bearer ' + token } : {}), ...(writesSearch ? { 'if-match':String(state.search.revision) } : {}), ...(rest.headers||{}) },
+        body: rest.body ? JSON.stringify(rest.body) : undefined
+      });
+    } catch (error) {
+      // An abort is a decision, not a network fault. A deadline is neither.
+      if (deadline.timedOut()) throw timedOutError(timeoutMs);
+      if ((given && given.aborted) || error.name === 'AbortError' || error.name === 'TimeoutError') throw abortedError();
+      throw error;
+    }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const error = new Error(data.error || res.statusText);
+      error.code = data.code;
+      error.status = res.status;
+      error.detail = data;
+      throw error;
+    }
+    if (writesSearch && data.revision) state.search.revision = data.revision;
+    return data;
+  } finally {
+    deadline.release();
   }
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    const error = new Error(data.error || res.statusText);
-    error.code = data.code;
-    error.status = res.status;
-    error.detail = data;
-    throw error;
-  }
-  if (writesSearch && data.revision) state.search.revision = data.revision;
-  return data;
 }
 
 // True when `view` names a process step that this search's package leaves off
@@ -3447,7 +3774,7 @@ function vFacts(){
       </div>` : ''}
       ${actionBar(
         `<button class="btn btn--primary" data-act="save-facts">Save facts</button>`,
-        withTip(`<button type="button" class="btn btn--secondary" data-act="research">Research this ${esc(jurisdictionInfo().noun)}</button>`, TIPS.research)
+        researchAction('Research this ' + jurisdictionInfo().noun)
         + ` <button type="button" class="btn btn--ghost" data-go="verify">County fact verification${factGap(s)}</button>`
         + ` <button type="button" class="btn btn--ghost" data-go="profile">Candidate profile</button>`)}
     </form></div></div>`);
@@ -4899,6 +5226,65 @@ function communityEmptyNotice(s){
   return `<div class="notice notice--info"><div><div class="notice__t">The community profile is not written yet</div><div class="notice__b">${body}</div></div></div>`;
 }
 
+/* ===========================================================================
+ * Whether research can run, decided once
+ *
+ * Search facts offered an always-enabled button and sent people to the profile
+ * only after they had pressed it; Community disabled the same action and
+ * explained why. Two screens, two answers, one operation (D06). This is the
+ * answer, and both screens render it.
+ * ========================================================================= */
+
+function researchEligibility(){
+  const s = state.search;
+  if (!s) return { ok: false, why: 'Open a search first.' };
+  // Research writes to the search file, which is the firm's work.
+  if (isCommittee()) return { ok: false, why: 'Only the search team can run research on this file.' };
+  if (isFrozen(s)) {
+    return { ok: false, why: 'This search is ' + lifecycleOf(s) + ', so nothing new is written to it. Reopen it to research again.' };
+  }
+  if (state.research.active) {
+    return { ok: false, why: 'Research is already running on this search. Cancel it if you want to start again.' };
+  }
+  const profileDone = (s.steps || []).find(st => st.key === 'profile')?.status === 'done';
+  if (!profileDone) {
+    return {
+      ok: false,
+      // The same sentence on both screens, and it names the step rather than
+      // waiting for a click to redirect there.
+      why: 'Research runs once the candidate profile is adopted (Step ' + stepNo('profile') + ').',
+      go: 'profile'
+    };
+  }
+  if (!state.health?.hasKey) {
+    return { ok: false, why: 'No API key is configured, so research is unavailable. You can fill these facts by hand.' };
+  }
+  return { ok: true };
+}
+
+/**
+ * The research action, with its availability and its explanation attached.
+ *
+ * Rendered from researchEligibility so the button state and the sentence beside
+ * it can never disagree, and so neither can differ between screens.
+ */
+function researchAction(label){
+  const verdict = researchEligibility();
+  const button = '<button type="button" class="btn btn--secondary" data-act="research"'
+    + (verdict.ok ? '' : ' disabled') + '>' + esc(label) + '</button>';
+  return withTip(button, TIPS.research)
+    + (verdict.ok ? '' : ' <span class="t-small">' + esc(verdict.why) + '</span>');
+}
+
+/**
+ * What the lookup form should show: what was last typed, if a failed attempt
+ * left it behind, and otherwise the file.
+ */
+function researchDraftValue(field, fallback){
+  const held = state.research.draft && String(state.research.draft[field] || '').trim();
+  return held || fallback || '';
+}
+
 /**
  * Why the last research attempt did not land, and what to do about it.
  *
@@ -4918,6 +5304,7 @@ function researchFailurePanel(){
       ${missing}
       <div class="row u-mt-3">
         ${e.retry ? `<button type="button" class="btn btn--secondary btn--sm" data-act="research">Try research again</button>` : ''}
+        ${e.reconcile ? `<button type="button" class="btn btn--primary btn--sm" data-act="research-reconcile">Check what happened</button>` : ''}
         ${e.reload ? `<button type="button" class="btn btn--secondary btn--sm" data-act="reload-search">Reload this search</button>` : ''}
         <button type="button" class="btn btn--ghost btn--sm" data-act="research-dismiss">Fill the facts by hand</button>
       </div>
@@ -4969,7 +5356,9 @@ function vCommunity(){
   const s = state.search, meta = DRAFTS.community, has = Boolean(s.artifacts?.community);
   const profileDone = (s.steps||[]).find(st=>st.key==='profile')?.status==='done';
   const mode = docMode('community');
-  const aiReady = Boolean(state.health?.hasKey);
+  // Whether research is available, and why not, is researchEligibility's
+  // answer now (D06). This screen only decides whether to lead with the
+  // profile prerequisite as a notice rather than as a sentence on a button.
   return shell(`
     ${head('Step '+stepNo('community'), meta.title, meta.lede)}
     <div class="band"><div class="wrap stack">
@@ -4983,8 +5372,8 @@ function vCommunity(){
       ${mode==='edit' ? `
         ${sectionHead('Look this jurisdiction up')}
         <form id="citylookup" class="formgrid">
-          ${field(jurisdictionInfo().key==='county'?'County':'Jurisdiction','', `<input class="input" name="city" value="${esc(s.client||'')}" placeholder="${esc(jurisdictionInfo().clientPlaceholder)}">`)}
-          ${field('Official website','http or https', `<input class="input" name="website" value="${esc(s.website||'')}" placeholder="https://www.fcgov.com">`)}
+          ${field(jurisdictionInfo().key==='county'?'County':'Jurisdiction','', `<input class="input" name="city" value="${esc(researchDraftValue('city', s.client))}" placeholder="${esc(jurisdictionInfo().clientPlaceholder)}">`)}
+          ${field('Official website','http or https', `<input class="input" name="website" value="${esc(researchDraftValue('website', s.website))}" placeholder="https://www.fcgov.com">`)}
         </form>
         <p class="t-small">A research agent reads the official site, Census, and budget documents, then fills the facts on this search. It will not invent numbers. Check the file before you use it in recruiting.</p>
         ${modelToggle()}
@@ -5002,9 +5391,7 @@ function vCommunity(){
              : emptyState('Nothing to preview yet','Switch to Edit and research the jurisdiction, or write the profile by hand.'))}
       ${actionBar(
         `<button type="button" class="btn btn--primary" data-act="save-art" data-kind="community">Save edits</button>`,
-        `${withTip(`<button type="button" class="btn btn--secondary" data-act="research" ${profileDone && aiReady ?'':'disabled'}>Research this ${esc(jurisdictionInfo().noun)}</button>`, TIPS.research)}
-         ${!profileDone ? '<span class="t-small">Research runs once the candidate profile is adopted.</span>'
-           : !aiReady ? '<span class="t-small">No API key is configured, so research is unavailable. You can write this profile by hand.</span>' : ''}
+        `${researchAction('Research this ' + jurisdictionInfo().noun)}
          <button type="button" class="btn btn--secondary" data-act="next-step" data-from="community">Next · Initial survey</button>`,
         'Saved edits stay on the file.',
         'Unsaved edits')}
@@ -7152,10 +7539,13 @@ document.addEventListener('click', async e => {
     return;
   }
   if (act==='research'){
-    const profileDone = (state.search.steps||[]).find(st=>st.key==='profile')?.status==='done';
-    if (!profileDone){
-      toast('Adopt the candidate profile first (Step '+stepNo('profile')+').');
-      go('profile');
+    // The same decision the buttons were drawn from, checked again here: a
+    // keyboard activation, a stale render, or a search that changed underneath
+    // must not get past it (D06).
+    const verdict = researchEligibility();
+    if (!verdict.ok){
+      toast(verdict.why);
+      if (verdict.go) go(verdict.go);
       return;
     }
     const form = $('#citylookup') || $('#facts');
@@ -7176,9 +7566,17 @@ document.addEventListener('click', async e => {
     return;
   }
   if (act==='research-dismiss'){
-    state.research.error = null;
-    state.research.review = null;
+    dismissResearchNotice();
     render();
+    return;
+  }
+  if (act==='research-reconcile'){
+    // A read, never a start. The key is the only handle this tab has on an
+    // operation whose acknowledgement was lost.
+    const key = state.research.key;
+    await withBusy(
+      () => reconcileResearch({ searchId: state.search.id, key }),
+      waitSave('Checking what happened to this research'));
     return;
   }
   if (act==='reload-search'){
@@ -7196,6 +7594,7 @@ document.addEventListener('click', async e => {
       state.search = out.search;
       state.research.review = null;
       state.research.error = null;
+      state.research.draft = null;
       const held = out.held || [];
       toast(held.length
         ? 'Applied what research found. Kept what you had already entered for: '+held.join(', ')+'.'

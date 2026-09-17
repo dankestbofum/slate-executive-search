@@ -8,6 +8,7 @@
 
 const assert = require('assert');
 const telemetry = require('../server/telemetry');
+const env = require('../server/env');
 const identity = require('./identity');
 
 const BASE = process.env.SLATE_URL || 'http://127.0.0.1:4173';
@@ -55,6 +56,58 @@ async function check(name, fn) {
     assert.strictEqual(body.ai.configured, false, 'the test server should have no API key');
     assert.strictEqual(body.ai.degraded, true);
     assert.strictEqual(body.ready, true, 'an AI outage was reported as the app being unready');
+  });
+
+  await check('a placeholder release is not mistaken for a stamp', () => {
+    // The Dockerfile defaults the build argument to "unknown" so the image
+    // builds without CI, and Render's blueprint builds pass no build argument,
+    // so the deployed image carries that literal string. Reading it as a real
+    // stamp would report "unknown" as the running commit and ignore the commit
+    // the host is telling us it deployed.
+    const blueprint = env.release({ SLATE_RELEASE: 'unknown', RENDER_GIT_COMMIT: 'abc123' });
+    assert.strictEqual(blueprint.id, 'abc123',
+      'a placeholder build argument was reported as the running release: ' + blueprint.id);
+    assert.strictEqual(blueprint.source, 'platform');
+    assert.strictEqual(blueprint.build, null);
+    assert.strictEqual(blueprint.agrees, true, 'a placeholder was treated as a second opinion');
+
+    // CI stamps a real commit, and that is what describes the code.
+    const built = env.release({ SLATE_RELEASE: 'abc123', RENDER_GIT_COMMIT: 'abc123' });
+    assert.strictEqual(built.source, 'build');
+    assert.strictEqual(built.id, 'abc123');
+
+    // Two real commits that differ: the condition the audit found. Neither is
+    // trusted silently.
+    const stale = env.release({ SLATE_RELEASE: '16df657', RENDER_GIT_COMMIT: '060a0d8' });
+    assert.strictEqual(stale.agrees, false,
+      'an image and a deploy naming different commits was reported as consistent');
+    assert.strictEqual(stale.build, '16df657');
+    assert.strictEqual(stale.platform, '060a0d8');
+
+    // Nothing at all is said plainly rather than guessed at.
+    const nothing = env.release({});
+    assert.strictEqual(nothing.id, 'dev');
+    assert.strictEqual(nothing.source, 'unstamped');
+    assert.strictEqual(nothing.stamped, false);
+  });
+
+  await check('the release identity says where it came from', async () => {
+    // The audit found a running service naming a commit that did not contain
+    // the code it was running (D08). Whatever the answer is, it has to say
+    // which source it came from, or it cannot be checked against anything.
+    const live = await (await fetch(BASE + '/api/health')).json();
+    assert.ok(['build', 'platform', 'unstamped'].includes(live.releaseSource),
+      'liveness does not say where the release identity came from: ' + live.releaseSource);
+    assert.strictEqual(live.releaseStamped, live.releaseSource !== 'unstamped');
+
+    const ready = await (await fetch(BASE + '/api/ready')).json();
+    const identity = ready.releaseIdentity;
+    assert.ok(identity, 'readiness does not report a release identity');
+    assert.strictEqual(identity.id, ready.release);
+    // Two sources that disagree is the condition worth reporting; with one or
+    // neither there is nothing to disagree about.
+    assert.strictEqual(identity.agrees, !(identity.build && identity.platform)
+      || identity.build === identity.platform);
   });
 
   await check('core work stays usable without AI', async () => {

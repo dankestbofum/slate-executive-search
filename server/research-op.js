@@ -256,6 +256,42 @@ function begin({ id, onStage = null, limits: given = null, clock = Date.now, sea
       return true;
     },
 
+    /**
+     * Await something with the operation's own bound on it.
+     *
+     * The save phase is not a provider call, so nothing in it carries the abort
+     * signal: a directory lookup that hangs used to hold the operation open
+     * past its deadline, and the deadline check on the far side of that await
+     * was the last check before the write. Whatever finishes first wins —
+     * either the work, or this operation being over — and an operation that is
+     * already over never even starts it.
+     *
+     * The underlying promise is not cancelled by this, because it cannot be:
+     * the point is that the job stops waiting for it and stops acting on it.
+     */
+    async guard(work, label = 'phase'){
+      op.throwIfDone();
+      const left = op.remaining();
+      let timer = null;
+      const bound = new Promise((_resolve, reject) => {
+        timer = setTimeout(
+          () => reject(fail('RESEARCH_TIMEOUT', 'Research ran past its time limit during ' + label + '.')),
+          Math.max(1, left)
+        );
+        if (timer.unref) timer.unref();
+      });
+      const stopped = new Promise((_resolve, reject) => {
+        if (controller.signal.aborted) { reject(op.terminal() || controller.signal.reason); return; }
+        controller.signal.addEventListener('abort',
+          () => reject(op.terminal() || controller.signal.reason), { once: true });
+      });
+      try {
+        return await Promise.race([Promise.resolve(work), bound, stopped]);
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    },
+
     /** Release the deadline timer. Safe to call more than once. */
     end(){
       state.finished = true;

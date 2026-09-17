@@ -179,6 +179,43 @@ function op(overrides = {}) {
     o.end();
   });
 
+  await check('an await in the save phase is bounded by the operation', async () => {
+    // The save phase is not a provider call: nothing in it carries the abort
+    // signal, so before op.guard existed a directory that never answered held
+    // the operation open past its own deadline (D02).
+    const slow = op({ totalMs: 300 });
+    const started = Date.now();
+    let code = null;
+    try { await slow.guard(new Promise(() => {}), 'the access check'); }
+    catch (error) { code = error.code; }
+    const ms = Date.now() - started;
+    slow.end();
+    assert.strictEqual(code, 'RESEARCH_TIMEOUT', 'an unbounded await reported ' + code);
+    assert.ok(ms < 1500, 'the guard waited ' + ms + 'ms on an operation with 300ms left');
+
+    // Cancellation reaches the waiter at once, and is reported as itself.
+    const stopped = op({ totalMs: 60000 });
+    setTimeout(() => stopped.cancel('user'), 20);
+    let cancelled = null;
+    try { await stopped.guard(new Promise(() => {})); }
+    catch (error) { cancelled = error.code; }
+    stopped.end();
+    assert.strictEqual(cancelled, 'RESEARCH_CANCELLED',
+      'a cancelled wait reported ' + cancelled + '; the consultant would be told the provider was slow');
+
+    // An operation that is already over does not wait at all.
+    const over = op({ totalMs: 60000 });
+    over.cancel('user');
+    await assert.rejects(() => over.guard(Promise.resolve('ignored')),
+      'an operation that was already cancelled still waited on the save phase');
+    over.end();
+
+    // And work that finishes inside the bound is simply returned.
+    const fine = op({ totalMs: 60000 });
+    assert.strictEqual(await fine.guard(Promise.resolve('ok')), 'ok');
+    fine.end();
+  });
+
   /* ---------------- The deadline actually ends things ---------------- */
 
   await check('a provider that never answers is stopped by the shared deadline', async () => {
@@ -471,7 +508,7 @@ function op(overrides = {}) {
    * conflict paths can be exercised without a server.
    * ------------------------------------------------------------------ */
 
-  function harness({ research, concurrent = 1 } = {}) {
+  function harness({ research, concurrent = 1, limits = null } = {}) {
     const store = { researchJobs: [] };
     const persists = { n: 0, fail: false };
     const applied = [];
@@ -493,7 +530,7 @@ function op(overrides = {}) {
       apply: (search, user, payload) => { applied.push(payload); return { held: [] }; },
       authorize: job => authorize(job),
       research: research || (async () => ({ model: 'claude-sonnet-5', json: FULL_FILE, sources: [], usage: { input_tokens: 1, output_tokens: 1 }, partial: false, warnings: [] })),
-      limits: { totalMs: 5000, crawlMs: 300, roundMs: 400, maxRounds: 3, synthesisReserveMs: 100, retries: 0 }
+      limits: { totalMs: 5000, crawlMs: 300, roundMs: 400, maxRounds: 3, synthesisReserveMs: 100, retries: 0, ...(limits || {}) }
     });
     return {
       manager, store, applied, persists,
@@ -589,6 +626,118 @@ function op(overrides = {}) {
     assert.strictEqual(h.manager.find(out.job.id).state, 'cancelled');
     // The findings are still there to review rather than silently dropped.
     assert.ok(h.manager.find(out.job.id).result, 'paid findings were discarded with no record');
+  });
+
+  await check('cancelling during the access check writes nothing', async () => {
+    // The reproduction in docs/audits/2026-09-16-website-audit: the job checked
+    // cancellation, then awaited the access check, and the write on the far
+    // side of that await was never checked again. The real manager acknowledged
+    // "cancelled" and then recorded "succeeded" over it.
+    let release = null;
+    const h = harness();
+    h.setAuthorize(() => new Promise(resolve => {
+      release = () => resolve({ ok: true, search: h.search(), user: h.user });
+    }));
+    const out = h.manager.start({ search: h.search(), access: h.access, user: h.user, input: { city: 'Example', website: 'https://example.gov' } });
+    await settle();
+    const job = h.manager.find(out.job.id);
+    assert.strictEqual(job.stage, 'saving', 'the job never reached the access check (stage ' + job.stage + ')');
+    const acknowledged = h.manager.cancel(job, h.user).job.state;
+    assert.strictEqual(acknowledged, 'cancelled');
+    if (release) release();
+    await settle();
+    assert.strictEqual(h.applied.length, 0, 'a cancelled job wrote to the search file from the far side of the access check');
+    assert.strictEqual(h.manager.find(out.job.id).state, 'cancelled',
+      'the acknowledged cancellation was overwritten by the run that followed it');
+    // The findings are still there to review: they were paid for either way.
+    assert.ok(h.manager.find(out.job.id).result, 'paid findings were discarded with no record');
+  });
+
+  await check('an operation that expires during the access check writes nothing', async () => {
+    const h = harness({ limits: { totalMs: 1400 } });
+    // Slower than the whole operation, on purpose.
+    h.setAuthorize(() => new Promise(resolve => {
+      setTimeout(() => resolve({ ok: true, search: h.search(), user: h.user }), 4000);
+    }));
+    const started = Date.now();
+    const out = h.manager.start({ search: h.search(), access: h.access, user: h.user, input: { city: 'Example', website: 'https://example.gov' } });
+    for (let i = 0; i < 60 && !researchJobs.TERMINAL.has(h.manager.find(out.job.id).state); i += 1) {
+      await new Promise(r => setTimeout(r, 50));
+    }
+    const ms = Date.now() - started;
+    const job = h.manager.find(out.job.id);
+    assert.ok(researchJobs.TERMINAL.has(job.state), 'the job never ended: ' + job.state);
+    assert.ok(ms < 3500, 'the job ran ' + ms + 'ms, past a 1400ms deadline, waiting on the access check');
+    assert.strictEqual(h.applied.length, 0, 'an expired job wrote to the search file');
+    assert.strictEqual(job.state, 'failed');
+    assert.strictEqual(job.failure.code, 'RESEARCH_TIMEOUT');
+    assert.ok(job.result, 'the paid findings were discarded');
+    h.manager.stop();
+  });
+
+  await check('a search edited while the access check was in flight is not overwritten', async () => {
+    // The revision moves during the await. The verdict was read before the
+    // edit; the check that decides the write is re-run after it.
+    const h = harness();
+    let revision = 3;
+    h.setAuthorize(async () => {
+      const search = h.search('sr-1', revision);
+      revision = 4;
+      return {
+        ok: true, search, user: h.user,
+        recheck: () => revision === 3
+          ? { ok: true, search, user: h.user }
+          : { ok: false, code: 'STALE_SEARCH', error: 'This search changed while research was running.' }
+      };
+    });
+    const out = h.manager.start({ search: h.search(), access: h.access, user: h.user, input: { city: 'Example', website: 'https://example.gov' } });
+    await settle();
+    const job = h.manager.find(out.job.id);
+    assert.strictEqual(h.applied.length, 0, 'the write landed on a search that had moved under it');
+    assert.strictEqual(job.state, 'failed');
+    assert.strictEqual(job.failure.code, 'STALE_SEARCH');
+    assert.ok(h.manager.publicJob(job).reviewable, 'the paid findings were thrown away');
+  });
+
+  await check('a state recorded from outside the run is not overwritten by it', async () => {
+    // A restart sweep marks a running job interrupted. The run then concludes
+    // whatever it was going to conclude, and must not rewrite the record.
+    let release = null;
+    const h = harness({ research: () => new Promise(resolve => { release = resolve; }) });
+    const out = h.manager.start({ search: h.search(), access: h.access, user: h.user, input: { city: 'Example', website: 'https://example.gov' } });
+    await settle();
+    h.manager.recover();
+    const job = h.manager.find(out.job.id);
+    assert.strictEqual(job.state, 'interrupted');
+    release({ model: 'claude-sonnet-5', json: FULL_FILE, sources: [], usage: { input_tokens: 1, output_tokens: 1 }, partial: false, warnings: [] });
+    await settle();
+    const after = h.manager.find(out.job.id);
+    assert.strictEqual(after.state, 'interrupted', 'the run overwrote a terminal state with ' + after.state);
+    assert.strictEqual(after.failure.code, 'RESEARCH_INTERRUPTED');
+    assert.strictEqual(h.applied.length, 0, 'an interrupted job wrote to the search file');
+    // The findings still arrived, and are kept for review rather than lost.
+    assert.ok(after.result, 'findings that arrived after the sweep were discarded');
+    h.manager.stop();
+  });
+
+  await check('an idempotency key can be reconciled without starting anything', async () => {
+    // What a browser holding a key and no job id needs: a read. Retrying the
+    // start to find out would risk paying for the work twice (D03).
+    const h = harness({ research: () => new Promise(() => {}) });
+    assert.strictEqual(h.manager.findByKey('sr-1', 'u1', 'rk-9'), null);
+    assert.strictEqual(h.store.researchJobs.length, 0, 'a lookup created an operation');
+    const out = h.manager.start({
+      search: h.search(), access: h.access, user: h.user,
+      input: { city: 'Example', website: 'https://example.gov' }, idempotencyKey: 'rk-9'
+    });
+    await settle();
+    assert.strictEqual(h.manager.findByKey('sr-1', 'u1', 'rk-9').id, out.job.id);
+    // A key is scoped to one person and one search, like the operation it names.
+    assert.strictEqual(h.manager.findByKey('sr-1', 'u-other', 'rk-9'), null);
+    assert.strictEqual(h.manager.findByKey('sr-other', 'u1', 'rk-9'), null);
+    assert.strictEqual(h.manager.findByKey('sr-1', 'u1', ''), null);
+    assert.strictEqual(h.store.researchJobs.length, 1, 'reconciliation created a second operation');
+    h.manager.stop();
   });
 
   await check('cancelling something already saved reports the completed outcome', async () => {
@@ -813,6 +962,48 @@ function op(overrides = {}) {
       const body = await res.json();
       assert.strictEqual(body.code, 'AI_AUTH_ERROR',
         'a key problem was reported as ' + body.code + '; that is the ambiguity the audit found');
+    });
+
+    await check('a key can be reconciled over HTTP without starting work', async () => {
+      const before = (await (await fetch(BASE + '/api/ready')).json()).research.total;
+      // A key that names nothing: null is the answer, and no operation appears.
+      const miss = await (await call('/api/searches/' + search.id + '/research-jobs?key=never-used')).json();
+      assert.strictEqual(miss.job, null, 'a key that named nothing returned an operation');
+      assert.strictEqual(miss.matchedKey, false);
+      const after = (await (await fetch(BASE + '/api/ready')).json()).research.total;
+      assert.strictEqual(after, before, 'a read-only lookup created ' + (after - before) + ' operation(s)');
+
+      // A key that does name one finds it, and only for the search it is on.
+      const started = await (await call('/api/searches/' + search.id + '/research-jobs', {
+        method: 'POST', revision: await revisionOf(),
+        headers: { 'idempotency-key': 'http-reconcile' },
+        body: { city: 'Research City', website: 'https://example.gov' }
+      })).json();
+      const hit = await (await call('/api/searches/' + search.id + '/research-jobs?key=http-reconcile')).json();
+      assert.strictEqual(hit.job.id, started.job.id, 'the key did not find the operation it created');
+      assert.strictEqual(hit.matchedKey, true);
+      const other = await (await call('/api/searches', { method: 'POST', body: { client: 'Elsewhere City', position: 'Manager' } })).json();
+      const elsewhere = await (await call('/api/searches/' + other.id + '/research-jobs?key=http-reconcile')).json();
+      assert.strictEqual(elsewhere.job, null, 'a key leaked across searches');
+    });
+
+    await check('readiness separates a configured key from research that works', async () => {
+      const body = await (await fetch(BASE + '/api/ready')).json();
+      // The test server runs with no key, and jobs above have failed. Both
+      // facts have to be readable, separately (D07).
+      assert.strictEqual(body.ai.configured, false);
+      assert.ok(body.ai.research, 'readiness reports no research outcomes at all');
+      assert.strictEqual(body.ai.research.verified, false,
+        'readiness claims research is verified with no successful job on record');
+      assert.ok(['not yet verified', 'only failures so far'].includes(body.ai.research.observed),
+        'readiness described research as ' + body.ai.research.observed);
+      assert.ok(body.ai.entitlement, 'readiness does not say where an entitlement answer comes from');
+      assert.strictEqual(body.ai.entitlement.checkedHere, false,
+        'readiness claims to have checked model entitlement, which it cannot do');
+      // Outcomes are counts and codes. Never a jurisdiction, never findings.
+      assert.doesNotMatch(JSON.stringify(body.ai.research), /Research City|example\.gov/,
+        'record contents leaked into research outcome telemetry');
+      assert.ok('releaseStamped' in body, 'readiness does not say whether the release is traceable to a build');
     });
 
     await check('the limits in force and the queue are visible to an operator', async () => {

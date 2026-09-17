@@ -20,6 +20,10 @@ COPY server ./server
 COPY public ./public
 COPY scripts/backup.js ./scripts/backup.js
 COPY scripts/container-persistence.js ./scripts/container-persistence.js
+# The operator preflight. It is the documented way to check model entitlement,
+# and the check that matters is the one run in the environment the app runs in,
+# so it ships with the image rather than living only on a developer's machine.
+COPY scripts/preflight.js ./scripts/preflight.js
 
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
