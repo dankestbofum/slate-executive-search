@@ -53,8 +53,12 @@ async function suite(file, suiteEnv) {
     const dispo = await suite('disposition.js', suiteEnv);
     const aichecks = await suite('aireliability.js', suiteEnv);
     const researchChecks = await suite('research.js', suiteEnv);
+    // The interface around research, run against the real public/app.js in an
+    // isolated context. Needs no server, so it stays beside the suite that
+    // covers the server half of the same operation.
+    const researchUi = await suite('research-ui.js', suiteEnv);
     const regression = await suite('integrity.js', suiteEnv);
-    process.exitCode = organizationsSuite || auth || clerkAuth || baseline || counties || regression || security || roles || authority || storage || recover || monitoring || exports_ || cands || dispo || aichecks || researchChecks;
+    process.exitCode = organizationsSuite || auth || clerkAuth || baseline || counties || regression || security || roles || authority || storage || recover || monitoring || exports_ || cands || dispo || aichecks || researchChecks || researchUi;
     console.log('Isolated test data: ' + directory);
   } catch (error) { console.error(error); process.exitCode = 1; }
   finally { server.kill(); }

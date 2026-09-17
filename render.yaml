@@ -28,6 +28,16 @@ services:
       sizeGB: 1
 
     envVars:
+      # Release identity is deliberately NOT set here.
+      #
+      # Render builds the image itself and does not pass --build-arg, so the
+      # image's SLATE_RELEASE is "unknown" on a blueprint deploy; the app then
+      # falls back to RENDER_GIT_COMMIT, which Render supplies at runtime and
+      # which describes the deploy that is actually running. Setting
+      # SLATE_RELEASE by hand here would override that with a value nobody
+      # updates, which is how a running service came to report a commit that
+      # did not contain the code it was running. /api/ready reports both and
+      # flags a disagreement.
       - key: NODE_ENV
         value: production
       - key: DATA_DIR

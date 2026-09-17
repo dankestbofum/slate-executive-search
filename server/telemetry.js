@@ -29,8 +29,23 @@ const counters = {
   aiFailures: 0,
   aiLatencyMsTotal: 0,
   aiInputTokens: 0,
-  aiOutputTokens: 0
+  aiOutputTokens: 0,
+  // Final research outcomes, which are not the same measurement as provider
+  // calls. A provider call that succeeded and then failed to save is one
+  // successful call and one failed research job, and an operator who is shown
+  // only the first number is being told research works when it does not (D07).
+  researchJobs: 0,
+  researchSucceeded: 0,
+  researchPartial: 0,
+  researchFailed: 0,
+  researchCancelled: 0
 };
+
+// The last few research outcomes, so readiness can say whether research has
+// been seen to work recently instead of only whether a key is present. Codes
+// and timings; never a jurisdiction, never what was found.
+const RESEARCH_HISTORY = 10;
+const researchHistory = [];
 
 const SLOW_MS = 1000; // the plan's proposed p95 for ordinary reads and saves
 
@@ -122,6 +137,71 @@ function recordAi({ ok, ms, usage, kind, code }){
   log[ok ? 'info' : 'warn']('ai', { kind, ok, ms: Math.round(ms || 0), code: code || undefined });
 }
 
+/**
+ * Record how a research job ended.
+ *
+ * Separate from recordAi on purpose. recordAi answers "did the provider
+ * answer?"; this answers "did the consultant get their research?", and those
+ * diverge exactly where it matters — a cancelled job, a conflict that held the
+ * findings back, a provider success that could not be written.
+ */
+function recordResearchOutcome({ state, code = null, ms = null, rounds = null } = {}){
+  counters.researchJobs += 1;
+  if (state === 'succeeded') counters.researchSucceeded += 1;
+  else if (state === 'partial') counters.researchPartial += 1;
+  else if (state === 'cancelled') counters.researchCancelled += 1;
+  else counters.researchFailed += 1;
+  researchHistory.push({
+    at: new Date().toISOString(),
+    state,
+    code: code || null,
+    ms: Number.isFinite(ms) ? Math.round(ms) : null,
+    rounds: Number.isFinite(rounds) ? rounds : null
+  });
+  while (researchHistory.length > RESEARCH_HISTORY) researchHistory.shift();
+}
+
+/**
+ * What the recent record says about research, for the readiness endpoint.
+ *
+ * "No evidence either way" is reported as exactly that. It is the honest answer
+ * on a process that has just started, and it is the answer that was previously
+ * dressed up as "not degraded".
+ */
+function researchHealth(){
+  const last = researchHistory.length ? researchHistory[researchHistory.length - 1] : null;
+  const succeeded = counters.researchSucceeded + counters.researchPartial;
+  return {
+    // A job either completed with findings on the file or available to review,
+    // or it did not. Cancellations are counted but never held against it.
+    verified: succeeded > 0,
+    observed: counters.researchJobs > 0
+      ? (succeeded > 0 ? 'succeeded' : 'only failures so far')
+      : 'not yet verified',
+    jobs: counters.researchJobs,
+    succeeded: counters.researchSucceeded,
+    partial: counters.researchPartial,
+    failed: counters.researchFailed,
+    cancelled: counters.researchCancelled,
+    last,
+    // Consecutive failures at the end of the window, which is what an operator
+    // is actually deciding on.
+    failingSince: failingStreak(),
+    recent: researchHistory.slice()
+  };
+}
+
+function failingStreak(){
+  let streak = 0;
+  for (let i = researchHistory.length - 1; i >= 0; i -= 1) {
+    const entry = researchHistory[i];
+    if (entry.state === 'succeeded' || entry.state === 'partial') break;
+    if (entry.state === 'cancelled') continue;
+    streak += 1;
+  }
+  return streak;
+}
+
 /* ------------------------------------------------------------------ *
  * Event-loop delay
  *
@@ -198,6 +278,18 @@ function metrics({ dataDir, storeSize, searches, archived } = {}){
       averageLatencyMs: counters.aiCalls ? Math.round(counters.aiLatencyMsTotal / counters.aiCalls) : 0,
       inputTokens: counters.aiInputTokens,
       outputTokens: counters.aiOutputTokens
+    },
+    // Final research outcomes, beside the provider-call counts rather than
+    // folded into them.
+    research: {
+      jobs: counters.researchJobs,
+      succeeded: counters.researchSucceeded,
+      partial: counters.researchPartial,
+      failed: counters.researchFailed,
+      cancelled: counters.researchCancelled,
+      failureRate: counters.researchJobs
+        ? Number((counters.researchFailed / counters.researchJobs).toFixed(4))
+        : 0
     }
   };
 }
@@ -295,6 +387,7 @@ function reset(){
     if (typeof counters[key] === 'number') counters[key] = 0;
   }
   counters.byStatusClass = { '2xx': 0, '3xx': 0, '4xx': 0, '5xx': 0 };
+  researchHistory.length = 0;
   alertState.active.clear();
   alertState.sent = 0;
   alertState.lastError = null;
@@ -303,6 +396,7 @@ function reset(){
 function stop(){ if (loopTimer) clearInterval(loopTimer); loopTimer = null; }
 
 module.exports = {
-  log, requests, routeName, recordAi, metrics, watchEventLoop,
+  log, requests, routeName, recordAi, recordResearchOutcome, researchHealth,
+  metrics, watchEventLoop,
   alert, alerts, alertConfig, alertState, counters, reset, stop, SLOW_MS
 };

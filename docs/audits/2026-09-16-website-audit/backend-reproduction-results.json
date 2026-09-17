@@ -1,0 +1,35 @@
+{
+  "capturedAtUtc": "2026-09-17T03:13:55.097Z",
+  "runtime": "v22.18.0",
+  "method": "real research job manager with in-memory dependency stubs",
+  "productionWrites": false,
+  "paidProviderCalls": false,
+  "results": [
+    {
+      "scenario": "cancel",
+      "stageWhenPaused": "saving",
+      "cancellationAcknowledgement": "cancelled",
+      "finalState": "succeeded",
+      "writes": [
+        {
+          "afterCancellation": true,
+          "afterDeadline": false
+        }
+      ],
+      "violationReproduced": true
+    },
+    {
+      "scenario": "deadline",
+      "stageWhenPaused": "saving",
+      "cancellationAcknowledgement": null,
+      "finalState": "succeeded",
+      "writes": [
+        {
+          "afterCancellation": false,
+          "afterDeadline": true
+        }
+      ],
+      "violationReproduced": true
+    }
+  ]
+}

@@ -1,0 +1,162 @@
+{
+  "capturedAtUtc": "2026-09-17T03:12:12.9163094Z",
+  "baseUrl": "https://slate-executive-search.onrender.com",
+  "method": "GET",
+  "productionWrites": false,
+  "paidProviderCalls": false,
+  "observations": [
+    {
+      "path": "/api/health",
+      "capturedAtUtc": "2026-09-17T03:12:13.2962073Z",
+      "status": 200,
+      "requestId": [
+        "0244aaba336de57f"
+      ],
+      "body": {
+        "ok": true,
+        "release": "16df65715938811ea650e0a82b0236ea2b694903",
+        "node": "24.20.0"
+      }
+    },
+    {
+      "path": "/api/ready",
+      "capturedAtUtc": "2026-09-17T03:12:13.5806847Z",
+      "status": 200,
+      "requestId": [
+        "ee993e0f04834b22"
+      ],
+      "body": {
+        "ready": true,
+        "shuttingDown": false,
+        "release": "16df65715938811ea650e0a82b0236ea2b694903",
+        "schemaVersion": 6,
+        "storage": {
+          "writable": true
+        },
+        "ai": {
+          "configured": true,
+          "degraded": false,
+          "budget": {
+            "day": "2026-09-17",
+            "calls": 1,
+            "failures": 1,
+            "attemptsWithUnknownUsage": 1,
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "estimatedUsd": 0,
+            "estimateBasis": "Published per-token rates as of 2026-06-24. An estimate, not a bill; the provider’s usage reporting is authoritative.",
+            "inFlight": 0,
+            "limits": {
+              "perSearchCalls": 200,
+              "perDayCalls": 500,
+              "perDayUsd": 25,
+              "concurrent": 3,
+              "timeoutMs": 180000,
+              "retries": 1
+            },
+            "searchesTouched": 1
+          }
+        },
+        "research": {
+          "jobs": true,
+          "limits": {
+            "totalMs": 180000,
+            "crawlMs": 25000,
+            "roundMs": 60000,
+            "maxRounds": 4,
+            "synthesisReserveMs": 30000,
+            "retries": 0
+          },
+          "queued": 0,
+          "running": 0,
+          "total": 1
+        },
+        "recovery": {
+          "startedAt": "2026-09-16T20:59:00.846Z",
+          "intervalMinutes": 60,
+          "lastSnapshotAt": "2026-09-17T02:59:00.862Z",
+          "snapshotAgeMinutes": 13,
+          "lastSnapshotError": null,
+          "snapshotCount": 7,
+          "mirrorConfigured": false,
+          "lastMirrorAt": null,
+          "mirrorAgeMinutes": null,
+          "lastMirrorError": null,
+          "mirrorCount": 0,
+          "overdue": false,
+          "offVolumeCopy": "NOT CONFIGURED"
+        },
+        "alerts": {
+          "destination": "NOT CONFIGURED",
+          "firing": [],
+          "sent": 0,
+          "lastError": null
+        },
+        "metrics": {
+          "uptimeSeconds": 22393,
+          "release": "16df65715938811ea650e0a82b0236ea2b694903",
+          "requests": 5437,
+          "byStatusClass": {
+            "2xx": 5348,
+            "3xx": 72,
+            "4xx": 17,
+            "5xx": 0
+          },
+          "serverErrors": 0,
+          "clientErrors": 17,
+          "errorRate": 0,
+          "slowRequests": 0,
+          "slowThresholdMs": 1000,
+          "eventLoopDelayMs": 1,
+          "memoryRssMb": 95,
+          "heapUsedMb": 21,
+          "loadAverage1m": 1.35,
+          "dataDirBytes": 884039,
+          "dataDirFiles": 214,
+          "storeBytes": 21148,
+          "searches": 3,
+          "archivedSearches": 0,
+          "ai": {
+            "calls": 1,
+            "failures": 1,
+            "failureRate": 1,
+            "averageLatencyMs": 62211,
+            "inputTokens": 0,
+            "outputTokens": 0
+          }
+        }
+      }
+    },
+    {
+      "path": "/api/config",
+      "capturedAtUtc": "2026-09-17T03:12:13.7713438Z",
+      "status": 200,
+      "requestId": [
+        "ab689fcf8471b554"
+      ],
+      "body": {
+        "auth": {
+          "provider": "clerk",
+          "configured": true,
+          "keyClass": "development"
+        },
+        "jurisdictionTypeKeys": [
+          "municipality",
+          "county"
+        ]
+      }
+    },
+    {
+      "path": "/api/searches",
+      "capturedAtUtc": "2026-09-17T03:12:14.0189379Z",
+      "status": 401,
+      "body": "\r\n{\r\n  \"error\": \"Sign in to open the workspace.\"\r\n}"
+    },
+    {
+      "path": "/api/me",
+      "capturedAtUtc": "2026-09-17T03:12:14.1949226Z",
+      "status": 401,
+      "body": "\r\n{\r\n  \"error\": \"Sign in to open the workspace.\"\r\n}"
+    }
+  ]
+}
