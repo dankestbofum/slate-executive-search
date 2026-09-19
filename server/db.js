@@ -875,6 +875,16 @@ function decorate(search, access){
   // second path to a profile the viewer is not being shown.
   delete out.adoptions;
   delete out.publication;
+  // The posting record, for the same reason as the three above. Everything in
+  // it is the firm's own working material: the draft advertisement and its
+  // compensation line before a client has approved them, and a log naming who
+  // published or paused it and when. server/index.js assigns a small, explicit
+  // summary in its place for a viewer who may edit the search; stripping it
+  // here is what stops the raw record riding along on the spread for everybody
+  // else. Found by the security review of the portal work: the committee
+  // member's payload carried the unapproved salary, invisibly, because the
+  // client never rendered it.
+  delete out.posting;
   if (access) {
     const uid = access.userId;
     const searchRole = memberOf(search, uid);

@@ -570,7 +570,13 @@ function requireSearch(req, res, next){
   // Filing a closed search preserves its lifecycle; it is not ordinary editing.
   // Keep the single-search route consistent with bulk archiving.
   const archiving = req.method === 'DELETE' && /^\/api\/searches\/[^/]+\/?$/.test(req.path);
-  if (!reads && !stopsWork && !archiving && disposition.isFrozen(s) && !/\/reopen\/?$/.test(req.path)) {
+  // Anchored on the search itself. The bare `/reopen$/ it used to be also
+  // matched the application-correction route added with the portal, which let
+  // a consultant reopen somebody's application on a search that had already
+  // concluded. Reopening the search is the one deliberate act a frozen search
+  // allows; nothing else that happens to end in the same word is.
+  const reopening = /^\/api\/searches\/[^/]+\/reopen\/?$/.test(req.path);
+  if (!reads && !stopsWork && !archiving && disposition.isFrozen(s) && !reopening) {
     return res.status(409).json({
       error: 'This search is ' + disposition.lifecycleOf(s) + '. Reopen it deliberately before making further changes.',
       code: 'SEARCH_CLOSED'
@@ -1885,6 +1891,10 @@ app.post('/api/archives/:id/restore', ...requireWorkspace, (req, res) => {
   // Restoring the file never grants candidate access, including for archives
   // written by older releases that still contain invitation tokens.
   for (const c of s.candidates || []) c.invite = null;
+  // And no posting either, for the same reason: an archived search's
+  // advertisement must not return to the public internet because somebody took
+  // the file back off the shelf.
+  postings.suspendForLifecycle(s, req.user, 'the search was restored from the archive');
   db.db.archivedSearches = db.db.archivedSearches.filter(x => x.id !== s.id);
   db.db.searches.push(s);
   db.touch(s, req.user, 'restored the search; candidate invitation links remain revoked');
@@ -1977,11 +1987,17 @@ app.post('/api/searches/:id/reopen', ...requireWorkspace, requireSearch, require
   if (!reason) return res.status(400).json({ error: 'Record why the search is being reopened.' });
 
   disposition.reopen(req.search, { reason }, req.user);
-  db.touch(req.search, req.user, 'reopened the search');
+  // A posting that was live when the search closed does not come back with it.
+  // Closing hid it by making the search frozen; reopening would have undone
+  // that and put the withdrawn advertisement back in front of the public,
+  // accepting applications, with nobody having decided to publish it.
+  const wasAdvertising = postings.suspendForLifecycle(req.search, req.user, 'the search was reopened');
+  db.touch(req.search, req.user, 'reopened the search'
+    + (wasAdvertising ? '; the public posting stays closed to new applications' : ''));
   db.persist();
   // Links revoked at closeout stay revoked. Reissuing one is a separate act,
   // so reopening never puts an old bearer URL back into circulation.
-  res.json({ search: painted(req, req.search), linksRestored: false });
+  res.json({ search: painted(req, req.search), linksRestored: false, postingRepublished: false });
 });
 
 /** How the search concluded. */

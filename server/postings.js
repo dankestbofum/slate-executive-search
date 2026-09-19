@@ -364,6 +364,33 @@ function setState(search, next, actor) {
 }
 
 /**
+ * Take a posting out of intake because the search's lifecycle moved.
+ *
+ * Visibility is derived — `isLive` asks whether the search is frozen or
+ * archived — which is right while it stays that way and wrong the moment it
+ * stops. A closed search hides its posting; reopening the search would have
+ * handed the withdrawn advertisement straight back to the public and started
+ * accepting applications again, with nobody having decided to publish
+ * anything. The same was true of restoring an archive.
+ *
+ * So the state is written down rather than inferred. The posting drops to
+ * `closed`: the page a candidate has a link to still answers and says it is
+ * closed to new applications, rather than becoming a 404 that implies the job
+ * never existed, and returning it to `published` is the search manager's
+ * deliberate act under the `publishPosting` authority. This is the same
+ * reasoning that revokes candidate links at closeout and refuses to reissue
+ * them on restore.
+ */
+function suspendForLifecycle(search, actor, reason) {
+  const posting = search?.posting;
+  if (!posting?.published) return false;
+  if (posting.state === 'closed') return false;
+  posting.state = 'closed';
+  record(posting, 'closed', actor, { reason });
+  return true;
+}
+
+/**
  * Whether the posting is reachable by the public at all.
  *
  * Search lifecycle wins over posting state, in both directions that matter: a
@@ -516,6 +543,6 @@ module.exports = {
   STATES, STATE_PUBLIC, DEADLINE_KINDS, LIMITS, REQUIRED,
   blank, ensure, of, slugify, firmSlug,
   validateDraft, applyDraft, readinessOf,
-  publish, setState, isLive, acceptsApplications, pastDeadline,
+  publish, setState, suspendForLifecycle, isLive, acceptsApplications, pastDeadline,
   publicSummary, publicView, staffView
 };

@@ -221,6 +221,43 @@ function pdf(size = 2048) {
     assert.strictEqual(postings.pastDeadline(posting, new Date('2026-12-01T00:00:01Z')), true);
   });
 
+  await check('a committee member is never handed the posting record', async () => {
+    // The unapproved advertisement, its compensation line, and the log naming
+    // who published what and when are the firm's own working material. They
+    // used to ride along on the search payload for every viewer, invisibly,
+    // because the client never rendered them.
+    // Same order the committee suite uses: the place is held on the search
+    // first, then the workspace invitation, then their own first request,
+    // which is what turns the held place into a roster seat.
+    const rose = 'rose-portal@example.test';
+    const added = await json('/api/searches/' + id + '/members', {
+      method: 'POST', revision: await revisionOf(id),
+      body: { name: 'Rose Committee', email: rose, searchRole: 'committee' }
+    });
+    assert.strictEqual(added.status, 200, JSON.stringify(added.body));
+    if (!added.body.added) {
+      await call('/api/organization/invitations', { method: 'POST', body: { email: rose, role: 'org:committee' } });
+      const joined = await fetch(BASE + '/api/me', { headers: { ...JSON_HEADERS, ...sign.headers(rose) } });
+      assert.strictEqual(joined.status, 200, 'the committee member never joined the workspace');
+    }
+
+    const seen = await json('/api/searches/' + id, { headers: { ...JSON_HEADERS, ...sign.headers(rose) } });
+    assert.strictEqual(seen.status, 200, 'the committee member cannot open the search at all');
+    assert.strictEqual(seen.body.posting, undefined,
+      'a committee member was handed the raw posting record');
+    assert.ok(!JSON.stringify(seen.body).includes('$180,000'),
+      'the unapproved compensation line reached a committee member');
+    assert.strictEqual(seen.body.applications, undefined,
+      'a committee member was told how many people have applied');
+
+    // And staff still get the small summary they draw the screen from.
+    const mine = await json('/api/searches/' + id);
+    assert.ok(mine.body.posting, 'staff lost the posting summary');
+    assert.strictEqual(typeof mine.body.posting.state, 'string');
+    assert.strictEqual(mine.body.posting.draft, undefined,
+      'the staff summary carries the whole draft rather than a summary');
+  });
+
   /* ================= Applicant identity ================= */
 
   const jar = new Map();
@@ -744,18 +781,63 @@ function pdf(size = 2048) {
     assert.strictEqual(started.status, 404, 'a closed search accepted a new application');
   });
 
-  await check('reopening the search does not republish the posting on its own', async () => {
+  await check('a concluded search refuses an application correction, not just a search edit', async () => {
+    // The frozen-search exemption matched any path ending in "reopen", which
+    // the application-correction route added by the portal also does. Only
+    // reopening the search itself is the deliberate act a frozen search allows.
+    const refused = await json('/api/searches/' + id + '/applications/' + applicationId + '/reopen',
+      { method: 'POST', revision: await revisionOf(id), body: { reason: 'Slipped through the freeze.' } });
+    assert.strictEqual(refused.status, 409,
+      'an application was reopened on a search that had already concluded');
+    assert.strictEqual(refused.body.code, 'SEARCH_CLOSED');
+  });
+
+  await check('reopening the search does not put the withdrawn advertisement back on the internet', async () => {
     const reopened = await json('/api/searches/' + id + '/reopen',
       { method: 'POST', revision: await revisionOf(id), body: { reason: 'The appointment fell through.' } });
     assert.strictEqual(reopened.status, 200, JSON.stringify(reopened.body));
     assert.strictEqual(reopened.body.linksRestored, false,
       'reopening put revoked candidate links back into circulation');
+    assert.strictEqual(reopened.body.postingRepublished, false);
+
+    // The search is working again; the posting is not. Visibility used to be
+    // derived purely from the search's lifecycle, so unfreezing the search
+    // handed the advertisement straight back to the public and started
+    // accepting applications with nobody having decided to publish anything.
     const view = await json('/api/searches/' + id + '/posting');
-    assert.strictEqual(view.body.frozenBySearch, false);
-    // It comes back because the posting state itself was never changed — but
-    // that is the posting's own recorded state, not a side effect of
-    // reopening, and the state it comes back into is the one it was left in.
-    assert.strictEqual(view.body.state, 'published');
+    assert.strictEqual(view.body.frozenBySearch, false, 'the search did not reopen');
+    assert.strictEqual(view.body.state, 'closed',
+      'a withdrawn posting returned to its published state when the search reopened');
+    assert.strictEqual(view.body.accepting, false);
+    assert.ok(view.body.log.some(entry => /reopened/.test(entry.reason || '')),
+      'the posting record does not say why it was closed');
+
+    const page = await (await fetch(BASE + '/api/public/postings/' + firmSlug + '/' + postingSlug)).json();
+    assert.strictEqual(page.posting.accepting, false,
+      'a reopened search resumed collecting applications from the public');
+    assert.strictEqual(page.apply.available, false);
+
+    const started = await portal('b', '/api/applications/' + firmSlug + '/' + postingSlug + '/start', { method: 'POST' });
+    assert.strictEqual(started.status, 409, 'an application was accepted against a withdrawn posting');
+  });
+
+  await check('a restored archive does not put its advertisement back either', async () => {
+    const shelved = await (await call('/api/searches', {
+      method: 'POST', body: { client: 'Shelf City', position: 'Clerk', jurisdictionType: 'municipality' }
+    })).json();
+    await json('/api/searches/' + shelved.id + '/posting', {
+      method: 'PUT', revision: await revisionOf(shelved.id), body: { ...READY_DRAFT, title: 'Shelf Clerk' }
+    });
+    await json('/api/searches/' + shelved.id + '/posting/publish',
+      { method: 'POST', revision: await revisionOf(shelved.id) });
+    await call('/api/searches/' + shelved.id, { method: 'DELETE', revision: await revisionOf(shelved.id) });
+
+    const restored = await json('/api/archives/' + shelved.id + '/restore', { method: 'POST' });
+    assert.strictEqual(restored.status, 200, JSON.stringify(restored.body));
+    const view = await json('/api/searches/' + shelved.id + '/posting');
+    assert.strictEqual(view.body.state, 'closed',
+      'restoring a search from the archive republished its posting');
+    assert.strictEqual(view.body.accepting, false);
   });
 
   await check('archiving the search takes the posting off the public listings', async () => {

@@ -34,7 +34,7 @@ public/help.js, help.css        the guide in the browser: drawer, screen, print
 public/careers.{html,js,css}    the public portal
 public/robots.txt               job pages allowed; nothing else
 tests/help.js                   16 checks
-tests/portal.js                 60 checks
+tests/portal.js                 63 checks
 tests/browser/help.spec.js      8 browser checks
 tests/browser/careers.spec.js   7 browser checks
 tests/browser/accessibility.spec.js  two scans added: the portal in both themes, and the guide
@@ -173,14 +173,14 @@ day west of Greenwich.
 
 `npm run check` — 97 files parsed, 0 failed.
 
-`npm test` — **744 passed, 0 failed**, including the two new suites:
+`npm test` — **752 passed, 0 failed**, including the two new suites:
 
 - `tests/help.js` — 16 checks. Catalog validity against the process catalog and
   against the client's own `knownView()`; every article reachable; the ten
   articles the plan names present; the public projection carries candidate
   content only and links nowhere the reader cannot follow; `/api/public/help`
   needs no session and `/api/help` does.
-- `tests/portal.js` — 60 checks, following the plan's verification table:
+- `tests/portal.js` — 63 checks, following the plan's verification table:
   publication and authority, the public/private boundary, ownership across two
   applicants, submission integrity (retry, duplicate, incomplete, closed
   mid-application, changed form), materials (wrong type, oversize, guessed id,
@@ -245,6 +245,58 @@ verified, so a sweep can never drop the last good copy before its replacement
 exists. Only dated directories are considered; `pre-migration-*` safety copies
 are never touched. `/api/ready` reports the live material bytes and the
 snapshot bytes, so the disk filling is visible before it does.
+
+## Security review
+
+An adversarial review of the new public surface — the hand-rolled applicant
+identity, the uploads, the public serializers, and the two new client files —
+found two real defects. Both were mine, both are fixed, and both now have
+tests that fail against the old code.
+
+**A committee member was handed the raw posting record.** `decorate()` builds
+the search payload with a spread and then strips the staff-only fields
+(`history`, `adoptions`, `publication`); I added `posting` to the record and
+did not add it to that list. `painted()` assigns a small, deliberate summary
+in its place — but only inside `if (db.canEdit(...))`, so for anybody who
+cannot edit the search the raw record survived from the spread: the *draft*
+advertisement including a compensation line the client has not approved, and
+the log naming who published or paused it and when. Invisible in the interface,
+because the client never renders those fields, and therefore invisible to every
+browser test. Reproduced directly against `decorate()` before fixing. One line:
+`delete out.posting`, beside the three that were already there.
+
+**A withdrawn advertisement came back on its own.** Posting visibility was
+derived rather than stored: `isLive()` returns false while the search is frozen
+or archived, so closing a search correctly took its posting off the internet.
+Reopening the search — or restoring it from the archive — made `isLive()` true
+again, and with `state` still `published` the posting was immediately live and
+accepting applications from the public, with nobody having decided to publish
+anything. The same two routes are careful to revoke candidate bearer links on
+exactly this reasoning; the posting was missed.
+
+Worse, the interface and the guide both promised the opposite — "Reopening the
+search does not republish the posting; that is a separate, deliberate act" —
+and my own test asserted the broken behaviour under a comment rationalising it.
+The code, the test and the copy disagreed, and the copy was right.
+`postings.suspendForLifecycle()` now writes the state down: the posting drops
+to `closed` on reopen and on restore, so a followed link still answers and says
+it is closed rather than 404-ing, and returning it to `published` is the search
+manager's act under the `publishPosting` authority.
+
+A third, smaller thing the review flagged and declined to call a vulnerability,
+fixed anyway: the frozen-search exemption `//reopen/?$/` also matched the
+application-correction route the portal added, so an application could be
+reopened on a search that had already concluded. The pattern is now anchored on
+the search's own reopen route.
+
+Checked and cleared by the same review, with reasoning recorded there: path
+traversal in the file store (both id and key patterns are fully anchored and
+server-generated); XSS across `careers.js`, `help.js` and the `app.js` diff
+(every interpolation escaped, no single-quoted attribute or URL-scheme context,
+`rich()` and `paras()` both escape before inserting markup); the
+Content-Disposition header; upload type validation; applicant authorization and
+route ordering; the OTP and session construction; CSRF coverage of the new
+cookie-authenticated writes; the public projections; and the backup changes.
 
 ## The three external dependencies, answered
 
