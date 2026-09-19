@@ -72,11 +72,11 @@ async function researchableSearch(page, client) {
 
 async function openCommunity(page, id) {
   await page.goto('/#/s/' + id + '/community');
-  await expect(page.getByRole('button', { name: /research this/i })).toBeVisible({ timeout: 10000 });
+  await expect(page.getByRole('button', { name: /^research this/i })).toBeVisible({ timeout: 10000 });
 }
 
 const dialog = page => page.locator('#lookup');
-const startButton = page => page.getByRole('button', { name: /research this/i });
+const startButton = page => page.getByRole('button', { name: /^research this/i });
 
 test('a request that never answers cannot trap the interface', async ({ page }) => {
   await workspace(page);

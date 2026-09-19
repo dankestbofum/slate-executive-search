@@ -119,6 +119,11 @@ const VIEW_DEST = {
   overview:'overview',
   screen:'candidates', people:'candidates', person:'candidates',
   send2:'candidates', finalists:'candidates', sourcing:'candidates', references:'candidates',
+  // Incoming applications are the front of the candidate pipeline, so the
+  // breadcrumb and the rail put them with the candidates rather than in a
+  // section of their own. The posting that produced them is the firm's own
+  // publishing work and sits outside the destinations, beside Search facts.
+  applications:'candidates',
   interviews:'interviews', video:'interviews', guide:'interviews', schedule:'interviews',
   committee:'committee', team:'committee', intake:'committee', 'intake-mine':'committee', profile:'committee',
   documents:'documents', community:'documents', survey1:'documents', survey2:'documents',
@@ -205,6 +210,13 @@ const state = {
   // than by the browser (see photoSource). Revoked when the workspace changes.
   media:{},
   sel:null, busy:false, premium:false, apply:null,
+  // The user guide screen. The role here changes which explanations are shown
+  // and nothing else; permissions come from `caps` and the server, and this is
+  // deliberately not consulted for either.
+  helpRole:null, helpQuery:'', helpArticle:null, helpError:null,
+  // The public posting and the application inbox for the open search, loaded
+  // when their screens are opened.
+  posting:null, postingDraft:null, applicationList:null, application:null,
   // The research operation this tab is driving, and what a finished one left
   // behind. `token` invalidates late responses from a previous search, a
   // previous workspace, or an attempt that was cancelled. `error` and `review`
@@ -220,6 +232,11 @@ const state = {
   // DOM so a re-render never drops what somebody typed. Cleared when the
   // search changes or the answers are saved.
   intake:null,
+  // A save that collided with the same member's other tab: the version the
+  // server holds, shown beside the local one so neither is thrown away.
+  intakeConflict:null,
+  // A proposed profile the manager is reviewing before it is applied.
+  adoptPlan:null,
   // The people being typed into the add-people form, held here rather than
   // read back off the DOM only at submit, so a re-render never drops a row.
   newPeople:null,
@@ -496,7 +513,7 @@ function demoSearch(pkg){
       { id:'C1', kind:'chall', label:'Structural deficit', weight:5 },
       { id:'O1', kind:'opp', label:'Downtown redevelopment', weight:3 }
     ],
-    intake: { status:'closed', submissions:{ u1:{submitted:true}, u2:{submitted:true}, u3:{submitted:true} } },
+    intake: { status:'closed', answered:{ u1:true, u2:true, u3:true }, responses:{} },
     consensus: { submitted:3, pending:[] },
     candidates: people,
     released: pkg === 'executive',
@@ -1633,10 +1650,16 @@ function availableDests(){
 // Every view this build can render. A deep link to anything else lands on the
 // search overview rather than silently painting Home under a stale address.
 function knownView(view){
-  if (['home','new','archives','packages','overview','facts','verify','closeout','history','person','people','intake-mine','team-access'].includes(view)) return true;
+  if (['home','new','archives','packages','overview','facts','verify','closeout','history','person','people','intake-mine','team-access','help'].includes(view)) return true;
+  if (['posting','applications'].includes(view)) return true;
   if (HUB_VIEWS.includes(view)) return true;
   return STEP_FLOW.includes(view);
 }
+
+// Screens that belong to a workspace rather than to one search. Listed once,
+// because routing, the navigation guard, and the address builder all have to
+// agree about which ones can be opened with no search loaded.
+const WORKSPACE_VIEWS = ['home','new','archives','packages','team-access','help'];
 
 /* ===========================================================================
  * Routing
@@ -1668,7 +1691,7 @@ function routeFor(view = state.view, opts = {}){
   const sel = opts.sel !== undefined ? opts.sel : state.sel;
   const at = orgPrefix(opts.orgId);
   if (view === 'packages') return at + '/packages/' + encodeURIComponent(opts.pkg || state.showcasePkg || '');
-  if (['new','archives','home','team-access'].includes(view)) return at + '/' + view;
+  if (WORKSPACE_VIEWS.includes(view) && view !== 'packages') return at + '/' + view;
   const id = opts.searchId || state.search?.id;
   if (!id) return at + '/home';
   if (view === 'overview') return at + '/s/' + encodeURIComponent(id);
@@ -1696,7 +1719,7 @@ function parseRoute(hash){
     return { view, orgId, searchId:parts[1], sel: view === 'person' ? (parts[3] || null) : null };
   }
   if (parts[0] === 'packages') return { view:'packages', orgId, pkg: parts[1] || null };
-  if (['home','new','archives','team-access'].includes(parts[0])) return { view:parts[0], orgId };
+  if (WORKSPACE_VIEWS.includes(parts[0]) && parts[0] !== 'packages') return { view:parts[0], orgId };
   return { view:'home', orgId };
 }
 
@@ -1724,7 +1747,7 @@ function pushRoute(replace){
 function backFallback(){
   const v = state.view;
   if (v === 'person') return { view:'screen', label:'Back to candidates' };
-  if (v === 'home' || v === 'new' || v === 'archives' || v === 'packages') return { view:'home', label:'Back to Home' };
+  if (v === 'home' || v === 'new' || v === 'archives' || v === 'packages' || v === 'help') return { view:'home', label:'Back to Home' };
   if (v === 'overview') return { view:'home', label:'Back to Home' };
   if (state.search) return { view:'overview', label:'Back to '+(state.search.client || 'this search') };
   return { view:'home', label:'Back to Home' };
@@ -1784,7 +1807,7 @@ async function applyRoute(route, { push=false }={}){
     }
     if (ticket !== navSeq) return;
   }
-  if (!route.searchId && !['home','new','archives','packages','team-access'].includes(route.view)) route = { view:'home' };
+  if (!route.searchId && !WORKSPACE_VIEWS.includes(route.view)) route = { view:'home' };
   if (route.pkg) state.showcasePkg = route.pkg;
   const extra = route.sel ? { sel:route.sel } : {};
   await go(route.view, extra, { push, replace:!push, fromHistory:true, ticket });
@@ -1811,6 +1834,9 @@ async function go(view, extra={}, opts={}){
   state.dirty = false;
   if (!opts.fromHistory) rememberScroll();
   state.navOpen = false;
+  // Help is about the screen it was opened from. Carrying it to the next one
+  // would leave somebody reading instructions for a page they have left.
+  window.SlateHelp?.closeDrawer?.();
   if (view === 'home') { state.search = null; state.sel = null; }
   if (offPackage(view)) {
     const st = (state.health?.steps || []).find(x => x.key === view);
@@ -1851,12 +1877,21 @@ async function go(view, extra={}, opts={}){
   }
   // Every other screen belongs to an open search. A link to one without a
   // loaded file lands on Home rather than rendering an empty workspace.
-  if (!state.search && !['home','new','archives','packages','team-access'].includes(view)) view = 'home';
+  if (!state.search && !WORKSPACE_VIEWS.includes(view)) view = 'home';
+  // The public posting and the application inbox are the firm's side of the
+  // portal. A committee member who follows a link to either lands on the
+  // search, like every other consultant-only screen.
+  if (state.search && ['posting','applications'].includes(view) && !canEdit()) view = 'overview';
   try {
     if (view === 'home') await refreshSearches();
     if (view === 'archives') state.archives = await api('/api/archives');
     if (view === 'history') state.history = await api('/api/searches/'+state.search.id+'/history');
     if (view === 'team-access') await loadTeam();
+    // Loaded before the screen paints, so the guide never renders as an empty
+    // page that fills in a moment later.
+    if (view === 'help') await loadHelp();
+    if (view === 'posting') state.posting = await api('/api/searches/'+state.search.id+'/posting');
+    if (view === 'applications') state.applicationList = await api('/api/searches/'+state.search.id+'/applications');
   } catch (error) {
     if (superseded()) return;
     toast(error.message); return;
@@ -2000,20 +2035,51 @@ function pill(k, label){ return `<span class="pill pill--${k}">${esc(label)}</sp
 let tipSeq = 0;
 
 /**
+ * The name the help trigger announces.
+ *
+ * Every trigger used to be called "Explain this control", so a screen-reader
+ * user listing the controls on the candidate screen heard it eleven times and
+ * could not tell which one belonged to Replace candidate link. The name is
+ * taken from the control's own visible text — "Explain Replace candidate link"
+ * — which keeps the two in step for free when a label is reworded.
+ */
+function tipName(markup, given){
+  if (given) return given;
+  const label = /\saria-label="([^"]+)"/.exec(markup)?.[1];
+  const visible = String(markup)
+    .replace(/<svg[\s\S]*?<\/svg>/gi, ' ')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&[a-z]+;/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const name = (label || visible).slice(0, 60).trim();
+  return name ? 'Explain ' + name : 'Explain this control';
+}
+
+/**
  * Wrap a control with a tooltip.
  *
- * `html` must start with the control's own opening tag; the id is written into
- * that tag as aria-describedby. Tooltips hold no interactive content, so they
+ * `html` must start with the control's own opening tag; the id is added to
+ * that tag's aria-describedby. Tooltips hold no interactive content, so they
  * are safe to leave in the accessibility tree as description text.
+ *
+ * A control that already has a description keeps it. Writing a second
+ * aria-describedby attribute is not additive — the browser takes the first and
+ * discards the rest — so a field hint would have been silently replaced by its
+ * own tooltip. The ids are merged into one attribute instead, and the hint is
+ * read first because it is the one that is also visible on the page.
  */
-function withTip(html, text){
+function withTip(html, text, opts={}){
   if (!text) return html;
   const markup = String(html).trim();
   const id = 'tip-' + (++tipSeq);
   const m = /^<(button|a|span|select|input|summary|label)\b/.exec(markup);
   if (!m) return markup;
-  const described = markup.replace(/^<([a-z]+)\b/, '<$1 aria-describedby="'+id+'"');
-  return `<span class="tipwrap">${described}<button type="button" class="tiphelp" data-act="tip-help" aria-expanded="false" aria-controls="${id}" aria-label="Explain this control">?</button><span class="tip" role="tooltip" id="${id}" hidden>${esc(text)}</span></span>`;
+  const existing = /^<[a-z]+\b[^>]*\saria-describedby="([^"]*)"/.exec(markup)?.[1];
+  const described = existing
+    ? markup.replace(/(^<[a-z]+\b[^>]*\saria-describedby=")([^"]*)"/, '$1$2 ' + id + '"')
+    : markup.replace(/^<([a-z]+)\b/, '<$1 aria-describedby="' + id + '"');
+  return `<span class="tipwrap">${described}<button type="button" class="tiphelp" data-act="tip-help" aria-expanded="false" aria-controls="${id}" aria-label="${esc(tipName(markup, opts.name))}">?</button><span class="tip" role="tooltip" id="${id}" hidden>${esc(text)}</span></span>`;
 }
 
 // Explanations reused across screens, so the same control says the same thing
@@ -2037,7 +2103,24 @@ const TIPS = {
   weight:'How much this criterion counts, from 1 (least) to 5 (most).',
   score:'Rate this candidate against this criterion, from 1 (weakest) to 5 (strongest).',
   printPack:'Open the browser print dialog with only the printable packet on the page.',
-  backTip:'Return to the screen you came from.'
+  backTip:'Return to the screen you came from.',
+  // Wording reviewed against the behaviour it describes, rather than against
+  // what the control is called. Each of these sits beside a visible sentence
+  // that says the same thing: a tooltip supplements an instruction, it is
+  // never the only place an instruction appears.
+  saveIntake:'Save your work without changing the answers you last submitted.',
+  submitIntake:'Staff can read submitted answers while input is open. After it closes, members on this search can read them.',
+  adoptPreview:'Review which committee priorities will become the candidate profile before saving.',
+  openQuestionnaireAccess:'This opens the questionnaire. It does not send an email. Copy the link and contact the candidate.',
+  publishPosting:'Publishes this approved job page so anyone with its address can view it.',
+  republishPosting:'Replaces the live job page with what you have saved here. Until you do, the public sees the previous version.',
+  pausePosting:'Stops new applications. The page stays readable and says it is not accepting applications.',
+  closePosting:'Closes the posting to new applications. The search stays open and you keep working the applicants you have.',
+  previewPosting:'Open the public job page exactly as an applicant sees it.',
+  acceptApplication:'Add this applicant to the candidate list. From there they are an ordinary candidate.',
+  reopenApplication:'Let this applicant correct their application. The submission they already made is kept.',
+  applicationFile:'Download this material. Only a file a scanner has cleared can be opened.',
+  helpPage:'Open the user guide for this screen. Nothing you have typed is lost.'
 };
 /* ===========================================================================
  * Shared layout primitives
@@ -2119,6 +2202,20 @@ function markUnsaved(){
   el.classList.add('actionbar__state--dirty');
 }
 
+/**
+ * What this action will do, said before it is taken.
+ *
+ * A tooltip is supplementary: it is behind a hover, a focus, or a tap, and it
+ * is the wrong place for the one fact somebody needs in order to decide. Who
+ * will be able to read this, whether anything is sent, and whether a link stops
+ * working are all decisions rather than details, so they are visible next to
+ * the control and stay visible.
+ */
+function beforeYouAct(text){
+  if (!text) return '';
+  return `<p class="foreword">${text}</p>`;
+}
+
 function emptyState(title, body, actions=''){
   return `<div class="emptystate">
     <div class="emptystate__t">${esc(title)}</div>
@@ -2169,7 +2266,26 @@ function packageChoice(selected){
  * kept for the wordmark and for generated documents, which is why the title
  * here is a workspace type class rather than `.t-display`.
  */
+/**
+ * Help for the screen the user is on.
+ *
+ * Drawn only where the guide actually has an article, so the control is never
+ * an invitation to a dead end. It opens a drawer rather than navigating, which
+ * is what lets somebody read the instructions without losing the half-written
+ * answer they are reading them about — the control says so, because that is
+ * the reservation people have about clicking Help mid-form.
+ */
+function helpControl(view = state.view){
+  const key = view === 'intake-mine' ? 'intake' : view === 'people' ? 'screen' : view;
+  const article = window.SlateHelp?.catalog ? window.SlateHelp.forScreen(key) : null;
+  if (!article) return '';
+  return withTip(
+    `<button type="button" class="btn btn--ghost btn--sm" data-act="help-page" data-screen="${esc(key)}">Help with this page</button>`,
+    TIPS.helpPage, { name: 'Explain Help with this page' });
+}
+
 function head(eyebrow, title, lede, actions=''){
+  const guide = helpControl();
   return `<div class="pagehead"><div class="wrap">
     ${backControl()}
     <div class="pagehead__row">
@@ -2177,7 +2293,7 @@ function head(eyebrow, title, lede, actions=''){
         <div class="eyebrow">${esc(eyebrow)}</div>
         <h1 class="pagehead__title">${esc(title)}</h1>
       </div>
-      ${actions?`<div class="pagehead__act">${actions}</div>`:''}
+      ${actions||guide?`<div class="pagehead__act">${actions}${guide}</div>`:''}
     </div>
     ${lede?`<p class="lede">${lede}</p>`:''}
   </div></div>`;
@@ -2265,7 +2381,8 @@ function clearWorkspaceState(){
   state.media = {};
   state.search = null; state.searches = []; state.users = [];
   state.sel = null; state.picked = []; state.archives = null; state.history = null;
-  state.followUps = null; state.intake = null; state.newPin = null; state.newPeople = null;
+  state.followUps = null; state.intake = null; state.intakeConflict = null; state.adoptPlan = null;
+  state.newPin = null; state.newPeople = null;
   state.filters = {}; state.open = {}; state.mode = {}; state.tab = {};
   state.scrollMem = {}; state.homeQ = ''; state.searchesError = null;
   state.team = null; state.teamError = null; state.inviteDraft = null;
@@ -2359,7 +2476,10 @@ async function loadSearch(id){
   // changes so answers cannot bleed from one committee into another. Research
   // is the same: an operation on the previous search must not keep reporting
   // into this one.
-  if (state.search?.id !== id) { state.intake = null; state.newPin = null; state.newPeople = null; stopResearch(); }
+  if (state.search?.id !== id) {
+    state.intake = null; state.intakeConflict = null; state.adoptPlan = null;
+    state.newPin = null; state.newPeople = null; stopResearch();
+  }
   state.search = await api('/api/searches/'+id);
   // Research that is already running reconnects here rather than being lost
   // because the page was reloaded or revisited.
@@ -2514,6 +2634,7 @@ function shell(body){
         ${state.caps?.createSearch ? '<button class="rail__link" data-go="new" '+(state.view==='new'?'aria-current="page"':'')+'>New search</button>' : ''}
         ${state.caps?.viewArchives ? '<button class="rail__link" data-go="archives" '+(state.view==='archives'?'aria-current="page"':'')+'>Archived searches</button>' : ''}
         ${isStaff() && packages().length ? `<button class="rail__link" data-go="packages" ${state.view==='packages'?'aria-current="page"':''}>Packages</button>` : ''}
+        <button class="rail__link" data-go="help" ${state.view==='help'?'aria-current="page"':''}>Help &amp; user guide</button>
       </div>
       ${s?`<div class="rail__group rail__group--dests">
         <div class="rail__here" title="${esc(s.client||'Search')}">
@@ -2521,6 +2642,16 @@ function shell(body){
           <span class="rail__here-sub">${esc(s.position||'')}</span>
         </div>
         ${availableDests().map(railDest).join('')}
+        ${canEdit() ? `<button class="rail__link rail__link--dest" data-go="posting" ${state.view==='posting'?'aria-current="page"':''}>
+          <span class="rail__ico">${ico('docs', 15)}</span>
+          <span class="rail__label rail__label--dest">Public posting</span>
+          <span class="rail__tail">${s.posting?.live ? (s.posting.accepting ? 'Live' : 'Paused') : ''}</span>
+        </button>` : ''}
+        ${canEdit() && s.posting?.published ? `<button class="rail__link rail__link--dest" data-go="applications" ${state.view==='applications'?'aria-current="page"':''}>
+          <span class="rail__ico">${ico('people', 15)}</span>
+          <span class="rail__label rail__label--dest">New applications</span>
+          <span class="rail__tail">${s.applications?.awaiting ? s.applications.awaiting : ''}</span>
+        </button>` : ''}
         <button class="rail__link rail__link--dest" data-go="process" ${state.view==='process'?'aria-current="page"':''}>
           <span class="rail__ico">${ico('list', 15)}</span>
           <span class="rail__label rail__label--dest">Process checklist</span>
@@ -2534,7 +2665,10 @@ function shell(body){
           <button class="rail__link rail__link--sub" data-go="facts" ${state.view==='facts'?'aria-current="page"':''}>Search facts</button>
           <button class="rail__link rail__link--sub" data-go="history" ${state.view==='history'?'aria-current="page"':''}>History and recovery</button>
           <button class="rail__link rail__link--sub" data-act="reload-search">Reload search</button>
-        </div>` : ''}
+        </div>` : `<button class="rail__link rail__link--dest" data-act="reload-search">
+          <span class="rail__ico">${ico('more', 15)}</span>
+          <span class="rail__label rail__label--dest">Reload search</span>
+        </button>`}
       </div>`:''}
       <div class="rail__foot">
         ${railAccount(u, s)}
@@ -2562,6 +2696,9 @@ function viewLabel(){
   const v = state.view;
   if (v === 'packages') return 'Packages · '+packageLabel(showcasePkg());
   if (v === 'home') return 'Home';
+  if (v === 'help') return 'Help & user guide';
+  if (v === 'posting') return 'Public posting';
+  if (v === 'applications') return 'New applications';
   if (v === 'new') return 'New search';
   if (v === 'archives') return 'Archived searches';
   if (v === 'history') return 'History and recovery';
@@ -3254,14 +3391,16 @@ function activityPanel(s){
 const DASH = {
   committee(s){
     const team = stepState('team'), intake = stepState('intake'), profile = stepState('profile');
-    const answered = s.consensus ? s.consensus.submitted : Object.values(s.intake?.submissions||{}).filter(x => x && x.submitted).length;
+    const answered = s.consensus ? s.consensus.submitted : Object.values(s.intake?.answered||{}).filter(Boolean).length;
     return `<div class="spec"><div class="spec__bar">Committee and profile</div>
       <div class="spec__body stack">
         <div class="rosterline">${(s.roster||[]).map(m =>
           `<span class="rosterchip${m.searchRole==='manager'?' rosterchip--mgr':''}" title="${esc(SEARCH_ROLE[m.searchRole]?.label||m.searchRole)}"><span class="rosterchip__i">${esc(m.init)}</span>${esc(m.name)}${intakeDoneBy(m.userId)?' '+ico('check'):''}</span>`).join('') || '<span class="t-small">Nobody added yet.</span>'}
         </div>
         ${kv('Roster', statusPill(team))}
-        ${kv('Intake', statusPill(intake)+(s.intake?.status==='open'?' <span class="t-small">'+answered+' of '+(s.roster||[]).length+' answered</span>':''))}
+        ${kv('Intake', statusPill(intake)+(s.intake?.status==='open'
+          ? ' <span class="t-small">'+answered+' of '+(s.roster||[]).length+' answered</span>'
+          : s.intake?.completedEmpty ? ' <span class="t-small">Completed without committee input</span>' : ''))}
         ${kv('Profile', statusPill(profile)+' <span class="t-small">'+(s.criteria||[]).filter(c=>c.label).length+' criteria</span>')}
         <div class="row">${openBtn('team','Roster')}${openBtn('intake','Intake')}${openBtn('profile','Profile')}</div>
       </div></div>`;
@@ -3456,6 +3595,133 @@ function candidatePanel(s){
     </div></div>`;
 }
 
+/* --- getting started ------------------------------------------------------
+ *
+ * A short checklist of what this person, on this search, has not done yet.
+ *
+ * Every line is derived from the search as the server decorated it, so it
+ * cannot claim something is outstanding that is already done, or offer a step
+ * the package leaves off the file or the viewer may not open. It is dismissed
+ * per search, per person, in this browser, and Help reopens it: a checklist
+ * that cannot be got rid of becomes noise, and one that cannot be got back is
+ * a feature somebody loses by accident.
+ * ------------------------------------------------------------------------ */
+
+function checklistKey(){
+  return 'slate.checklist.' + (state.search?.id || '') + '.' + (state.user?.id || '');
+}
+
+function checklistDismissed(){
+  try { return localStorage.getItem(checklistKey()) === 'off'; }
+  catch { return false; }
+}
+
+function setChecklistDismissed(off){
+  try { localStorage.setItem(checklistKey(), off ? 'off' : 'on'); }
+  catch { /* private browsing; the checklist simply comes back */ }
+}
+
+/**
+ * What is actually outstanding, in the order it has to happen.
+ *
+ * `done` lines are kept and shown struck through rather than removed, so the
+ * list reads as progress instead of shrinking mysteriously.
+ */
+function checklistItems(s){
+  const step = key => (s.steps || []).find(x => x.key === key) || null;
+  const has = key => step(key)?.status === 'done';
+  const onFile = key => Boolean(step(key));
+  const items = [];
+
+  if (isCommittee()){
+    const mine = s.you?.intake;
+    const open = s.intake?.status === 'open';
+    items.push({
+      done: Boolean(mine?.submitted),
+      label: 'Submit what you are looking for in this hire',
+      note: open
+        ? 'The input window is open. Save a private draft as often as you like; submit when you are ready.'
+        : (mine?.submitted ? 'Counted in the tally.' : 'The input window is not open. The search manager opens it.'),
+      go: open && canOpenStep('intake') ? 'intake-mine' : null,
+      goLabel: 'Open your questionnaire'
+    });
+    items.push({
+      done: Boolean(s.candidates?.length && Object.keys(s.scores?.[state.user?.id] || {}).length),
+      label: 'Score the candidates',
+      note: s.candidates?.length
+        ? 'Each person scores privately. The search manager decides when the panel sees each other.'
+        : 'Nothing to score yet. Candidates appear here once the search team adds them.',
+      go: s.candidates?.length && canOpenStep('screen') ? 'screen' : null,
+      goLabel: 'Open candidates'
+    });
+    return items;
+  }
+
+  items.push({
+    done: Boolean(s.team?.confirmedAt),
+    label: 'Add the committee and confirm the roster',
+    note: 'The intake window cannot open until the roster is set.',
+    go: canOpenStep('team') ? 'team' : null, goLabel: 'Open the roster'
+  });
+  items.push({
+    done: s.intake?.status === 'closed',
+    label: 'Collect committee input and close the window',
+    note: s.intake?.status === 'open'
+      ? 'Open now. Closing it publishes submitted answers to everyone on the search.'
+      : s.intake?.status === 'closed' ? 'Closed.' : 'Not opened yet.',
+    go: canOpenStep('intake') ? 'intake' : null, goLabel: 'Open committee input'
+  });
+  items.push({
+    done: has('profile'),
+    label: 'Adopt the candidate profile',
+    note: 'This is what every candidate is scored against.',
+    go: canOpenStep('profile') ? 'profile' : null, goLabel: 'Open the profile'
+  });
+  if (onFile('community')) items.push({
+    done: has('community'),
+    label: 'Research the community and check the facts',
+    note: 'Nothing research returns is authoritative until a person has read it against a source.',
+    go: canOpenStep('community') ? 'community' : null, goLabel: 'Open the community profile'
+  });
+  if (canEdit()) items.push({
+    done: Boolean(s.posting?.published),
+    label: 'Publish the public job posting',
+    note: s.posting?.published
+      ? (s.posting.accepting ? 'Live and accepting applications.' : 'Live, not accepting applications.')
+      : 'Optional. Nothing is public until the search manager publishes it.',
+    go: 'posting', goLabel: 'Open Public posting'
+  });
+  items.push({
+    done: Boolean((s.candidates || []).length),
+    label: 'Bring candidates onto the file',
+    note: 'Add them by hand, or accept applications from the public posting.',
+    go: canOpenStep('screen') ? 'screen' : null, goLabel: 'Open candidates'
+  });
+  return items;
+}
+
+function checklistPanel(s){
+  if (state.preview || !state.user) return '';
+  const items = checklistItems(s);
+  const left = items.filter(i => !i.done).length;
+  if (!left) return '';
+  if (checklistDismissed()) return '';
+  return `<div class="spec startlist">
+    <div class="spec__bar">Getting started · ${left} left
+      <span class="spec__bar-act"><button type="button" class="btn btn--ghost btn--sm" data-act="dismiss-checklist">Hide this</button></span>
+    </div>
+    <div class="spec__body">
+      <p class="t-small">Where this search stands, for you. Reopen this from <b>Help &amp; user guide</b> if you hide it.</p>
+      <ol class="startlist__l">${items.map(i => `<li class="startlist__i${i.done?' startlist__i--done':''}">
+        <span class="startlist__mark" aria-hidden="true">${i.done?ico('check',13):''}</span>
+        <span class="startlist__t"><b>${esc(i.label)}</b><span class="sr-only">${i.done?' — done':''}</span>
+          <span class="t-small">${esc(i.note)}</span></span>
+        ${!i.done && i.go ? `<button type="button" class="btn btn--ghost btn--sm" data-go="${esc(i.go)}">${esc(i.goLabel)}</button>` : ''}
+      </li>`).join('')}</ol>
+    </div>
+  </div>`;
+}
+
 function overviewInner(s, { preview=false }={}){
   const next = preview ? (s.progress && s.progress.next) : nextForViewer(s);
   const view = overviewView(s);
@@ -3492,6 +3758,7 @@ function overviewInner(s, { preview=false }={}){
         <div class="notice__b">The search team is working the file. You will be asked to score candidates once screening opens.</div>
       </div></div>` : '';
   return `${idle}
+      ${checklistPanel(s)}
       ${outstandingPanel(s)}
       ${candidatePanel(s)}
       ${panels}
@@ -3598,7 +3865,7 @@ function vCommittee(){
   const intake = stepState('intake');
   const agg = s.consensus;
   const roster = s.roster || [];
-  const answered = agg ? agg.submitted : Object.values(s.intake?.submissions||{}).filter(x => x && x.submitted).length;
+  const answered = agg ? agg.submitted : Object.values(s.intake?.answered||{}).filter(Boolean).length;
   const onSearch = Boolean(you().searchRole);
   const open = s.intake?.status === 'open';
   const mine = mySubmission();
@@ -3607,20 +3874,28 @@ function vCommittee(){
   return shell(`
     ${head('This search','Committee',
       'Who is on the committee, what they were asked, and the profile their answers produced.',
-      onSearch && open && !(mine && mine.submitted) && canOpenStep('intake')
+      onSearch && open && !mine && canOpenStep('intake')
         ? `<button class="btn btn--primary" data-go="intake-mine">Answer your questionnaire</button>` : '')}
     <div class="band"><div class="wrap stack">
       ${rosterPanel(s)}
       <div class="spec"><div class="spec__bar">Committee input</div>
         <div class="spec__body stack stack--tight">
           ${hubRow('Intake window',
-            open ? `Open${due?' · due '+esc(due):''}. ${answered} of ${roster.length} answered.`
-                 : s.intake?.status === 'closed' ? 'Closed. Answers are visible to the search team.' : 'Not opened yet.',
+            open ? `Open${due?' · due '+esc(due):''}. ${answered} of ${roster.length} answered. Saved drafts stay private to whoever wrote them.`
+                 : s.intake?.completedEmpty
+                   ? 'Completed without committee input. No responses were collected; the reason is on the record.'
+                   : s.intake?.status === 'closed'
+                     ? 'Closed. Everyone on the search can read the submitted answers; unsent drafts stay private.'
+                     : 'Not opened yet.',
             statusPill(intake),
             openBtn('intake', you().consultant ? 'Manage intake' : 'Open the questionnaire', open && !you().consultant))}
           ${onSearch ? hubRow('Your answers',
-            mine && mine.submitted ? 'On file. You can revise them while the window is open.' : open ? 'Not submitted yet.' : 'The window is not open.',
-            mine && mine.submitted ? pill('ok','Submitted') : pill('idle','Not submitted'),
+            mine
+              ? (intakeHasUnsubmitted()
+                ? 'Submitted and counted. You have saved edits that are not submitted yet.'
+                : 'On file. You can revise them while the window is open.')
+              : open ? 'Not submitted yet.' : 'The window is not open.',
+            mine ? pill(intakeHasUnsubmitted() ? 'wait' : 'ok', intakeHasUnsubmitted() ? 'Edits not submitted' : 'Submitted') : pill('idle','Not submitted'),
             open && canOpenStep('intake') ? `<button class="btn btn--secondary btn--sm" data-go="intake-mine">Open your questionnaire</button>` : '') : ''}
           ${hubRow('Adopted profile',
             crit ? crit+' criteria adopted. Screening, surveys, and interviews all score against these.' : 'Not adopted yet. It is built from the committee’s answers.',
@@ -4184,33 +4459,54 @@ function vTeam(){
  * runs the window and reads the room. A consultant who is both sees both.
  * ========================================================================= */
 
+// This member's own response record: their private draft and their last
+// submitted answer, which are two different things. Nobody else's draft is
+// ever in here, because the server does not send it.
+function myResponse(){
+  return (state.search?.intake?.responses || {})[state.user.id] || null;
+}
+
 function mySubmission(){
-  return (state.search?.intake?.submissions || {})[state.user.id] || null;
+  return myResponse()?.submitted || null;
+}
+
+/** The version this member's next write is a change to. */
+function myResponseRevision(){
+  return Number(myResponse()?.revision || 1);
 }
 
 function intakeDoneBy(userId){
-  const sub = (state.search?.intake?.submissions || {})[userId];
-  if (sub) return Boolean(sub.submitted);
-  // While the window is open the server only ships you your own answer, so
-  // everyone else's status has to come from the consensus roll-up.
+  // Who has answered is published while the window is open; what they said is
+  // not. One field, so the roster tick never depends on reading an answer.
+  const answered = state.search?.intake?.answered;
+  if (answered && Object.hasOwn(answered, userId)) return Boolean(answered[userId]);
   const agg = state.search?.consensus;
   if (!agg) return false;
   return !agg.pending.some(p => p.userId === userId);
 }
 
 // The draft a member is editing lives in state, not the DOM, so adding a line
-// or changing a weight does not lose what they already typed elsewhere.
+// or changing a weight does not lose what they already typed elsewhere. It
+// starts from their saved draft when they have one, and otherwise from what
+// they last submitted, so revising begins with the answer they gave.
 function intakeDraft(){
   if (!state.intake) {
-    const mine = mySubmission();
+    const record = myResponse();
+    const start = record?.draft || record?.submitted || null;
     state.intake = {
-      items: (mine?.items || []).map(i => ({ ...i })),
-      mustHave: mine?.mustHave || '',
-      dealBreaker: mine?.dealBreaker || '',
-      context: mine?.context || ''
+      items: (start?.items || []).map(i => ({ ...i })),
+      mustHave: start?.mustHave || '',
+      dealBreaker: start?.dealBreaker || '',
+      context: start?.context || ''
     };
   }
   return state.intake;
+}
+
+/** Saved-but-unsubmitted edits sitting on top of a submitted answer. */
+function intakeHasUnsubmitted(){
+  const record = myResponse();
+  return Boolean(record?.submitted && record?.draft);
 }
 
 function collectIntakeText(){
@@ -4231,13 +4527,19 @@ function collectIntakeText(){
 }
 
 function intakeRow(item, i){
+  // Five buttons reading "1" to "5" are indistinguishable to a screen reader
+  // once a form holds a dozen of them. Name the priority and the scale, the
+  // same way the profile editor already does (CA-11).
+  const named = String(item.label||'').trim();
+  const what = named || (KIND[item.kind]?.label || 'this priority') + ' ' + (i+1);
   return `<div class="intake-row" data-row="${i}">
     <div class="stack u-gap-6">
-      <input class="input" data-f="label" value="${esc(item.label)}" placeholder="Name it in your own words">
-      <input class="input" data-f="note" value="${esc(item.note||'')}" placeholder="Why does this matter here? (optional)">
+      <input class="input" data-f="label" value="${esc(item.label)}" placeholder="Name it in your own words" aria-label="${esc(named ? 'Priority: '+what : 'Name '+what)}">
+      <input class="input" data-f="note" value="${esc(item.note||'')}" placeholder="Why does this matter here? (optional)" aria-label="Why ${esc(what)} matters here (optional)">
     </div>
-    <div class="wgt" title="How much does this matter?">${[1,2,3,4,5].map(n=>`<button type="button" data-iw="${n}" aria-pressed="${Number(item.weight)===n}">${n}</button>`).join('')}</div>
-    <button class="btn btn--ghost btn--sm" data-idel="${i}">Remove</button>
+    ${ratingGroup('How much '+what+' matters — 1, nice to have, to 5, decisive',
+      `<div class="wgt">${[1,2,3,4,5].map(n=>`<button type="button" data-iw="${n}" aria-label="Rate ${esc(what)} ${n} of 5" aria-pressed="${Number(item.weight)===n}">${n}</button>`).join('')}</div>`)}
+    <button class="btn btn--ghost btn--sm" data-idel="${i}" aria-label="Remove ${esc(what)}">Remove</button>
   </div>`;
 }
 
@@ -4266,9 +4568,36 @@ function intakeGroup(kind){
     </div></section>`;
 }
 
+/**
+ * What happened when a save collided with the same member's other tab.
+ *
+ * Both versions stay on screen and the local rows are never cleared, so
+ * recovering is a choice between two readable answers rather than copying text
+ * out of a form before reloading (CA-12).
+ */
+function intakeConflictPanel(){
+  const c = state.intakeConflict;
+  if (!c) return '';
+  const theirs = c.submitted || c.draft;
+  const describe = answer => !answer ? 'nothing on file' :
+    (answer.items || []).filter(i => String(i.label||'').trim()).map(i => esc(i.label)+' ('+i.weight+')').join(', ') || 'no priorities named';
+  return `<div class="notice notice--stop"><div>
+    <div class="notice__t">Your answers were changed somewhere else</div>
+    <div class="notice__b">Nothing you have typed here was lost, and nothing here was overwritten. Another tab or device saved
+      ${c.submitted ? 'a submitted answer' : 'a draft'} for you${theirs?.updatedAt ? ' on '+esc(String(theirs.updatedAt).slice(0,10)) : ''}.
+      <div class="t-small u-mt-3"><b>Saved elsewhere:</b> ${describe(theirs)}</div>
+      <div class="t-small"><b>On this page:</b> ${describe({ items: intakeDraft().items })}</div>
+      <div class="row u-mt-3">
+        <button type="button" class="btn btn--secondary btn--sm" data-act="intake-keep-mine">Keep what is on this page</button>
+        <button type="button" class="btn btn--ghost btn--sm" data-act="intake-take-theirs">Use the version saved elsewhere</button>
+      </div></div>
+  </div></div>`;
+}
+
 function vIntakeAnswer(){
   const s = state.search;
   const intake = s.intake || {};
+  const record = myResponse();
   const mine = mySubmission();
   const d = intakeDraft();
   const open = intake.status === 'open';
@@ -4276,17 +4605,29 @@ function vIntakeAnswer(){
   const count = d.items.filter(i => String(i.label||'').trim()).length;
   return shell(`
     ${head('Step '+stepNo('intake'), 'What are you looking for?',
-      'Answer for yourself. Nobody on the committee sees your answers, or anyone else’s, until the account manager closes the window. Then everything is read together.')}
+      'Answer for yourself. Anything you save without submitting stays yours alone. Once you submit, the search team can read your '
+      + 'answer while they facilitate, and the rest of the committee reads it after the account manager closes the window.')}
     <div class="band"><div class="wrap stack">
+      ${intakeConflictPanel()}
       ${!open ? `<div class="notice notice--${closed?'ok':'info'}"><div>
         <div class="notice__t">${closed ? 'Intake is closed' : 'Intake has not opened yet'}</div>
         <div class="notice__b">${closed
           ? 'The window is shut and the committee’s answers have been read together. Ask '+esc(s.accountManager?.name||'the account manager')+' if you still need to add something.'
           : esc(s.accountManager?.name||'The account manager')+' will open it when the roster is set.'}</div>
       </div></div>` : ''}
-      ${mine?.submitted ? `<div class="notice notice--ok"><div>
-        <div class="notice__t">Your answers are in</div>
-        <div class="notice__b">Submitted ${esc((mine.updatedAt||mine.at||'').slice(0,10))}. ${open?'You can still change them while the window is open.':''}</div>
+      ${mine ? `<div class="notice notice--${intakeHasUnsubmitted()?'wait':'ok'}"><div>
+        <div class="notice__t">${intakeHasUnsubmitted() ? 'Submitted — you have unpublished changes' : 'Your answers are in'}</div>
+        <div class="notice__b">Submitted ${esc((mine.submittedAt||mine.updatedAt||mine.at||'').slice(0,10))} and counted in the tally.
+          ${intakeHasUnsubmitted() ? 'Your saved edits are private until you choose <b>Update my answers</b>; until then the tally still shows what you submitted.' : ''}
+          ${open?'You can change them while the window is open.':''}</div>
+      </div></div>` : ''}
+      ${!mine && record?.draft ? `<div class="notice notice--info"><div>
+        <div class="notice__t">Saved, not submitted</div>
+        <div class="notice__b">Only you can read this. It is not in the tally and the search team cannot see it until you submit.</div>
+      </div></div>` : ''}
+      ${record?.withdrawnAt ? `<div class="notice notice--wait"><div>
+        <div class="notice__t">You withdrew your answers</div>
+        <div class="notice__b">They are out of the tally and back in your own draft. Anything already built from them stays on file and is marked as resting on earlier answers. Submit again to count.</div>
       </div></div>` : ''}
       ${intake.dueBy ? `<div class="t-small"><b>Due:</b> ${esc(intake.dueBy)}</div>` : ''}
       ${intake.prompt ? `<div class="spec"><div class="spec__bar">From the account manager</div><div class="spec__body"><p>${esc(intake.prompt)}</p></div></div>` : ''}
@@ -4305,12 +4646,19 @@ function vIntakeAnswer(){
           ${field('What would make you say no?','', `<textarea class="input ed" id="intake-dealBreaker" rows="3">${esc(d.dealBreaker)}</textarea>`)}
           ${field('Anything else the search team should know','', `<textarea class="input ed" id="intake-context" rows="3">${esc(d.context)}</textarea>`)}
         </div></section>
+        ${beforeYouAct('<b>Save and finish later</b> keeps a private draft: '
+          + (mine ? 'the answers you already submitted stay exactly as they are.' : 'nobody can read it.')
+          + ' ' + esc(TIPS.submitIntake))}
         ${actionBar(
-          `<button type="button" class="btn btn--primary" data-act="submit-intake">${mine?.submitted?'Update my answers':'Submit my answers'}</button>`,
+          `<button type="button" class="btn btn--primary" data-act="submit-intake">${mine?'Update my answers':'Submit my answers'}</button>`,
           withTip(`<button type="button" class="btn btn--secondary" data-act="save-intake">Save and finish later</button>`,
-            'Keep what you have written without submitting it. Nobody reads it until you submit.'),
+            mine
+              ? 'Keep these edits privately. Your submitted answers stay in the tally until you choose Update my answers.'
+              : 'Keep what you have written without submitting it. Nobody reads it until you submit.')
+          + (mine ? withTip(`<button type="button" class="btn btn--ghost" data-act="withdraw-intake">Withdraw my answers</button>`,
+            'Take your submitted answers out of the tally. They come back to you as a private draft.') : ''),
           count+' named so far.',
-          'Not submitted yet')}` : ''}
+          mine ? (intakeHasUnsubmitted() ? 'Saved edits not submitted' : 'Submitted') : 'Not submitted yet')}` : ''}
       ${closed && s.consensus ? consensusPanels(s.consensus, false) : ''}
       ${!open ? stepFooter('intake') : ''}
     </div></div>`);
@@ -4340,7 +4688,14 @@ function consensusPanels(agg, showEmpty=true){
     return showEmpty ? `<div class="empty"><div class="empty__t">Nothing submitted yet</div>Consensus appears as members answer.</div>` : '';
   }
   const kinds = [['skill','Essential skills'],['trait','Leadership and personality traits'],['chall','Current challenges'],['opp','Future opportunities']];
-  return kinds.map(([k,label]) => {
+  // Participation and support, said once and together. Every count below is
+  // out of the people who answered, and somebody not naming an item is not a
+  // vote against it.
+  const turnout = `<p class="t-small">${agg.submitted} of ${agg.asked} people asked submitted answers.
+    Each count below is out of those ${agg.submitted}. Somebody who did not name an item was not voting against it.
+    Matching is by wording, so “Budgeting” and “Financial management” stay separate entries.
+    The must-have, deal-breaker and context answers are guidance for the search team, not rules the profile enforces.</p>`;
+  return turnout + kinds.map(([k,label]) => {
     const list = agg.byKind[k] || [];
     return `<div class="spec"><div class="spec__bar">${esc(label)} ${pill(list.length>=3?'ok':'wait', list.length+' named')}</div>
       <div class="spec__body stack">
@@ -4353,6 +4708,60 @@ function consensusPanels(agg, showEmpty=true){
       ${v.dealBreaker ? `<div class="t-small"><b>No to:</b> ${esc(v.dealBreaker)}</div>` : ''}
       ${v.context ? `<div class="t-small"><b>Also:</b> ${esc(v.context)}</div>` : ''}
     </div>`).join('')}</div></div>` : '');
+}
+
+/**
+ * The proposed profile, before it is saved.
+ *
+ * Rebuilding used to quietly carry an old committee item forward with its old
+ * "named by 2 of 2" still attached, and to drop hand-written criteria past the
+ * cap without saying so. Every one of those is a line on this panel, and
+ * keeping an unsupported item is a decision with a reason on it (CA-03).
+ */
+function adoptPlanPanel(){
+  const plan = state.adoptPlan;
+  if (!plan) return '';
+  const c = plan.changes || {};
+  const retained = new Set(plan.retain || []);
+  const line = (row, extra='') => `<li><b>${esc(row.label)}</b> <span class="mono t-small">${esc(row.id||'')}</span>
+    <span class="t-small">${esc(KIND[row.kind]?.label || row.kind)}</span>${extra}</li>`;
+  const group = (title, rows, render) => rows.length
+    ? `<div class="spec"><div class="spec__bar">${esc(title)} ${pill('idle', String(rows.length))}</div>
+        <div class="spec__body"><ul class="stack stack--tight">${rows.map(render).join('')}</ul></div></div>` : '';
+  return `<div class="spec" id="adoptplan"><div class="spec__bar">Review the proposed profile</div>
+    <div class="spec__body stack">
+      <p class="t-small">Built from ${plan.respondents} of ${plan.participants} who were asked. Nothing is saved until you confirm.</p>
+      ${group('Arriving from the committee', c.added || [], r => line(r,
+        ` <span class="t-small">named by ${r.mentions} of ${plan.respondents}${r.contested?', contested':''}</span>`))}
+      ${group('Already on the profile, support refreshed', c.changed || [], r => line(r,
+        ` <span class="t-small">now named by ${r.mentions} of ${plan.respondents}${r.was && r.was.label !== r.label ? '; you renamed it from “'+esc(r.was.label)+'”' : ''}</span>`))}
+      ${group('Proposed for removal — nobody names these now', c.removed || [], r => `<li>
+        <b>${esc(r.label)}</b> <span class="mono t-small">${esc(r.id)}</span>
+        <div class="t-small">${esc(r.why)}</div>
+        <label class="t-small"><input type="checkbox" data-retain="${esc(r.id)}" ${retained.has(r.id)?'checked':''}>
+          Keep it anyway, as my decision</label>
+        ${retained.has(r.id) ? `<input class="input" data-retain-reason="${esc(r.id)}" placeholder="Why keep it? Recorded with the profile." value="${esc((plan.retainReasons||{})[r.id]||'')}">` : ''}
+      </li>`)}
+      ${group('Your own criteria, kept', c.kept || [], r => line(r))}
+      ${group('Kept by your decision — support describes earlier answers', c.retained || [], r => line(r,
+        ` <span class="t-small">${esc(r.why)}</span>`))}
+      ${group('Excluded — the category holds five', c.excluded || [], r => `<li>
+        <b>${esc(r.label)}</b> <span class="t-small">${esc(KIND[r.kind]?.label || r.kind)} — ${esc(r.why)}</span></li>`)}
+      ${(plan.discussion || []).length ? `<div class="spec"><div class="spec__bar">For discussion, not on the profile ${pill('stop', String(plan.discussion.length))}</div>
+        <div class="spec__body stack">${plan.discussion.map(d => `<div class="t-small">
+          <b>${esc(d.label)}</b> — named by ${d.mentions} of ${d.respondents}, rated ${d.minWeight} to ${d.maxWeight}${d.contested?', contested':''}.
+          ${(d.reasons||[]).slice(0,3).map(r => esc((r.name||'A member')+': '+r.note)).join(' · ')}
+        </div>`).join('')}</div></div>` : ''}
+      ${(plan.gaps || []).length
+        ? `<p class="t-small"><b>The finished profile would still be short in:</b> ${plan.gaps.map(g=>esc(g.label.toLowerCase())).join(', ')}.</p>`
+        : `<p class="t-small">Every category would have 3 to 5 criteria.</p>`}
+      ${(plan.coverage || []).length
+        ? `<p class="t-small">The committee named fewer than three items in ${plan.coverage.map(g=>esc(g.label.toLowerCase())).join(', ')}. That is what they nominated, which is a different thing from what the profile still needs.</p>` : ''}
+      <div class="row">
+        <button type="button" class="btn btn--primary" data-act="adopt-apply">Save this profile</button>
+        <button type="button" class="btn btn--ghost" data-act="adopt-cancel">Cancel</button>
+      </div>
+    </div></div>`;
 }
 
 function vIntakeManage(){
@@ -4397,15 +4806,35 @@ function vIntakeManage(){
         <p class="t-small">You can close the window without them. They can still score candidates later.</p>
         </div></div>` : ''}
 
-      ${!mine?.submitted && you().member ? `<div class="notice notice--info"><div>
+      ${!mine && you().member ? `<div class="notice notice--info"><div>
         <div class="notice__t">You have not answered yet</div>
         <div class="notice__b">Your own answers are counted in the tally too. <button class="btn btn--ghost btn--sm" data-go="intake-mine">Answer now</button></div>
       </div></div>` : ''}
 
-      ${!closed ? `<div class="notice notice--info"><div>
-        <div class="notice__t">Answers are private until you close the window</div>
-        <div class="notice__b">You can read the running tally because you are facilitating. The committee cannot, so nobody times their answer against the count.</div>
+      ${intake.rosterChangedAt && open ? `<div class="notice notice--stop"><div>
+        <div class="notice__t">The roster changed while the window is open</div>
+        <div class="notice__b">Everyone on the roster, including anyone just added, can keep answering. Confirm the roster again in Step ${stepNo('team')} before you close the window or publish the profile — who was asked is part of what “${agg?agg.submitted:0} of ${agg?agg.asked:0} answered” means.
+          <button class="btn btn--ghost btn--sm" data-go="team">Open the roster</button></div>
       </div></div>` : ''}
+
+      ${!closed ? `<div class="notice notice--info"><div>
+        <div class="notice__t">Who can read what, while the window is open</div>
+        <div class="notice__b">A member's saved draft is theirs alone — nobody else reads it, including you and including after the window closes.
+          A <b>submitted</b> answer can be read by the search team in this workspace, because you facilitate; the rest of the committee
+          reads submitted answers only once you close the window, so nobody times their own answer against the count.
+          Matching is by wording, so “Budgeting” and “Financial management” stay separate entries.</div>
+      </div></div>` : `<div class="notice notice--ok"><div>
+        <div class="notice__t">The window is closed</div>
+        <div class="notice__b">Submitted answers are now readable by everyone on the search. Drafts nobody submitted are still private to their author.
+          Reopening collects new input under the same rules — it does not take back anything already shared.</div>
+      </div></div>`}
+
+      ${intake.completedEmpty ? `<div class="notice notice--wait"><div>
+        <div class="notice__t">Completed without committee input</div>
+        <div class="notice__b">${esc(intake.completedEmpty.byName||'The account manager')} recorded this on ${esc(String(intake.completedEmpty.at||'').slice(0,10))}: “${esc(intake.completedEmpty.reason)}”. No responses were collected.</div>
+      </div></div>` : ''}
+
+      ${adoptPlanPanel()}
 
       <div class="sub">What the committee said</div>
       ${agg ? consensusPanels(agg) : ''}
@@ -4413,9 +4842,12 @@ function vIntakeManage(){
       ${agg && agg.submitted ? `<div class="next">
         <div class="t-label">Turn this into the profile</div>
         <h2>Step ${stepNo('profile')}. Adopt the candidate profile</h2>
-        <p class="t-small">Ranked by how many members named each item, weighted by how much they said it mattered. Anything you have already written by hand is kept behind the consensus. You edit it afterward.</p>
+        <p class="t-small">Ranked by how many of the people who answered named each item, weighted by how much they said it mattered. You review what would change before anything is saved.</p>
         <div class="row">
-          <button class="btn btn--primary" data-act="adopt-consensus">Build the profile from this</button>
+          ${closed
+            ? `<button class="btn btn--primary" data-act="adopt-preview">Review what this would change</button>`
+            : `<button class="btn btn--primary" disabled>Review what this would change</button>
+               <span class="t-small">Close the window first. Building the profile publishes what the committee said to everyone on the search.</span>`}
           <button class="btn btn--secondary" data-go="profile">Open Step ${stepNo('profile')}</button>
         </div>
       </div>` : ''}
@@ -4443,23 +4875,59 @@ function kindTotal(kind){
   return (state.search.criteria||[]).filter(c => c.kind===kind).length;
 }
 
-// The consensus entry a profile line came from, matched on the label so the
-// badge survives the consultant renaming or reweighting it.
-function consensusFor(kind, label){
+// Where a profile line came from, read off the line's own source record rather
+// than by looking its label up in today's tally. Editing the wording is not a
+// change of origin, and a hand-written criterion cannot acquire somebody
+// else's support by happening to match their words (CA-08).
+function critOrigin(c){
+  return c && c.source && c.source.key ? c.source : null;
+}
+
+/** The evidence this line was adopted on, as it stood at adoption. */
+function adoptedEvidence(c){
+  const origin = critOrigin(c);
+  if (!origin) return null;
+  return (state.search?.adoption?.groups || []).find(g => g.key === origin.key) || null;
+}
+
+/** What the committee says about this line now, if they still say anything. */
+function currentSupport(c){
+  const origin = critOrigin(c);
   const agg = state.search?.consensus;
-  if (!agg) return null;
-  const want = String(label||'').trim().toLowerCase();
-  if (!want) return null;
-  return (agg.byKind[kind] || []).find(e => e.label.trim().toLowerCase() === want) || null;
+  if (!origin || !agg) return null;
+  return (agg.byKind[c.kind] || []).find(e => e.key === origin.key) || null;
 }
 
 function critSource(c){
-  const e = consensusFor(c.kind, c.label);
-  if (e) {
-    return `<span class="crit-src">${pill(e.contested?'stop':'ok', e.mentions+' of '+state.search.consensus.submitted)}${e.contested?pill('stop','Contested'):''}</span>`;
+  const origin = critOrigin(c);
+  const now = currentSupport(c);
+  const then = adoptedEvidence(c);
+  if (origin && now) {
+    return `<span class="crit-src">${pill(now.contested?'stop':'ok', now.mentions+' of '+state.search.consensus.submitted)}${now.contested?pill('stop','Contested'):''}</span>`;
   }
+  if (origin && origin.support === 'historical') {
+    // Kept deliberately, and dated. The count it carries describes the answers
+    // that were on file then, not the ones on file now.
+    return `<span class="crit-src">${pill('wait', then ? then.mentions+' of '+then.respondents+' on '+String(origin.retainedAt||origin.at||'').slice(0,10) : 'Earlier answers')}</span>`;
+  }
+  if (origin && then) {
+    return `<span class="crit-src">${pill('wait', then.mentions+' of '+then.respondents+' on '+String(then.at||origin.at||'').slice(0,10))}</span>`;
+  }
+  if (c.from === 'committee') return `<span class="crit-src">${pill('wait','From the committee')}</span>`;
   if (c.from === 'draft') return `<span class="crit-src">${pill('info','Drafted')}</span>`;
   return `<span class="crit-src">${pill('idle','Yours')}</span>`;
+}
+
+/** The disagreement behind an adopted line, if the committee had any. */
+function critEvidence(c){
+  const then = adoptedEvidence(c);
+  if (!then) return '';
+  const reasons = (then.reasons || []).slice(0, 4);
+  if (!then.contested && !reasons.length) return '';
+  return `<div class="t-small crit-evid">
+    ${then.contested ? `<b>The committee disagreed.</b> Rated as low as ${then.minWeight} and as high as ${then.maxWeight} by the ${then.mentions} of ${then.respondents} who named it. Both readings are below; neither was merged into the other.` : ''}
+    ${reasons.length ? `<div>${reasons.map(r => esc((r.name||'A member')+' ('+r.weight+'): '+r.note)).join('<br>')}</div>` : ''}
+  </div>`;
 }
 
 function critRow(c, i){
@@ -4472,7 +4940,8 @@ function critRow(c, i){
     </div>
     ${ratingGroup('Weight for '+name+' — 1, nice to have, to 5, decisive',
       `<div class="wgt">${[1,2,3,4,5].map(n=>`<button type="button" data-w="${n}" aria-label="Weight ${n} of 5 for ${esc(name)}" aria-pressed="${Number(c.weight)===n}">${n}</button>`).join('')}</div>`)}
-    <button type="button" class="btn btn--ghost btn--sm" data-del="${i}">Remove</button>
+    <button type="button" class="btn btn--ghost btn--sm" data-del="${i}" aria-label="Remove ${esc(name)}">Remove</button>
+    ${critEvidence(c)}
   </div>`;
 }
 
@@ -4507,18 +4976,34 @@ function vProfile(){
         'What the search is looking for, adopted from the committee’s answers. Candidates are screened and interviewed against these.',
         nextBtn('profile'))}
       <div class="band"><div class="wrap stack">
-        ${!(s.criteria||[]).length ? `<div class="empty"><div class="empty__t">Not adopted yet</div>${esc(s.accountManager?.name||'The account manager')} builds this from committee input.</div>` : ''}
+        ${s.profileWithheld ? `<div class="notice notice--info"><div>
+          <div class="notice__t">Not published yet</div>
+          <div class="notice__b">${esc(s.profileWithheld.reason)}</div>
+        </div></div>` : ''}
+        ${!s.profileWithheld && !(s.criteria||[]).length ? `<div class="empty"><div class="empty__t">Not adopted yet</div>${esc(s.accountManager?.name||'The account manager')} builds this from committee input.</div>` : ''}
+        ${s.adoption ? `<div class="notice notice--ok"><div>
+          <div class="notice__t">Built from committee input on ${esc(String(s.adoption.at||'').slice(0,10))}</div>
+          <div class="notice__b">${s.adoption.respondents} of ${s.adoption.participants} people asked submitted answers. A badge of
+            “${s.adoption.respondents ? '2 of '+s.adoption.respondents : 'x of y'}” counts the people who answered and named that item —
+            not naming something is not a vote against it. The narratives members wrote are guidance for the search team, not rules the profile enforces.
+            ${s.sourceChanged ? '<b>Committee input has changed since this was adopted.</b> The profile below is the one that was adopted; its counts describe the answers on file at that time.' : ''}</div>
+        </div></div>` : ''}
         ${Object.keys(KIND).map(k => {
           const rows = labeledKind(k, s.criteria);
           if (!rows.length) return '';
           return `<div class="spec"><div class="spec__bar">${KIND[k].plural}</div>
             <div class="spec__body stack">${rows.map(c => `
               <div class="crit-read">
-                <span class="mono t-small">${esc(c.id)}</span>
-                <div><b>${esc(c.label)}</b>${c.note?`<div class="t-small">${esc(c.note)}</div>`:''}</div>
+                <span class="mono t-small">${esc(c.id)}${critSource(c)}</span>
+                <div><b>${esc(c.label)}</b>${c.note?`<div class="t-small">${esc(c.note)}</div>`:''}${critEvidence(c)}</div>
                 <span class="t-small mono">weight ${esc(c.weight)}</span>
               </div>`).join('')}</div></div>`;
         }).join('')}
+        ${(s.adoption?.discussion || []).length ? `<div class="spec"><div class="spec__bar">Raised, and not on the profile</div>
+          <div class="spec__body stack">
+            <p class="t-small">The committee named these, and the profile holds five per category. They are recorded for discussion rather than dropped.</p>
+            ${s.adoption.discussion.map(d => `<div class="t-small"><b>${esc(d.label)}</b> — named by ${d.mentions} of ${d.respondents}, rated ${d.minWeight} to ${d.maxWeight}${d.contested?', contested':''}.</div>`).join('')}
+          </div></div>` : ''}
         ${stepFooter('profile')}
       </div></div>`);
   }
@@ -4573,12 +5058,24 @@ function vProfile(){
   return shell(`
     ${head('Step '+stepNo('profile'),'Candidate profile','This is the spine. Built from what the committee said in Step '+stepNo('intake')+', then edited by you. Recruiting markets it. Surveys test it. Interviews evidence it.')}
     <div class="band"><div class="wrap stack">
+      ${s.sourceChanged ? `<div class="notice notice--stop"><div>
+        <div class="notice__t">Committee input has changed since this profile was adopted</div>
+        <div class="notice__b">The profile has not been altered, and it will not be: a changed answer is something to look at, not an automatic edit to a
+          published record. The support badges below describe the answers on file when each line was adopted.
+          <button type="button" class="btn btn--ghost btn--sm" data-act="adopt-preview">Review what rebuilding would change</button></div>
+      </div></div>` : ''}
+      ${s.adoptionProvenance === 'unverified' ? `<div class="notice notice--wait"><div>
+        <div class="notice__t">This profile's committee provenance is not on file</div>
+        <div class="notice__b">It was adopted before Slate recorded what each line rested on, so there is no stored evidence for its support claims and
+          today's tally is not that evidence. The committee does not see this profile until you review and save it.</div>
+      </div></div>` : ''}
       ${agg?.submitted ? `<div class="notice notice--${adopted?'ok':'info'}"><div>
-        <div class="notice__t">${agg.submitted} of ${agg.asked} on the committee answered</div>
+        <div class="notice__t">${agg.submitted} of ${agg.asked} people asked submitted answers</div>
         <div class="notice__b">${adopted
-          ? 'This profile was built from their answers. The badge on each line shows how many of them named it. Edit freely; the badges follow the label.'
+          ? 'This profile was built from their answers. Each badge counts the people who answered and named that line; it follows the line, not its wording, so renaming one does not change where it came from. Not naming something is not a vote against it.'
           : 'Build the matrix from their answers rather than typing it from memory, then edit.'}
-          ${agg.contested.length ? ' <b>'+agg.contested.length+'</b> item'+(agg.contested.length===1?' is':'s are')+' contested — the committee disagrees on how much '+(agg.contested.length===1?'it matters':'they matter')+'.' : ''}
+          ${agg.contested.length ? ' <b>'+agg.contested.length+'</b> item'+(agg.contested.length===1?' is':'s are')+' contested — the committee disagrees on how much '+(agg.contested.length===1?'it matters':'they matter')+'. Disagreement is kept as disagreement rather than averaged away.' : ''}
+          Matching is by wording, so “Budgeting” and “Financial management” stay separate entries.
           <button type="button" class="btn btn--ghost btn--sm" data-go="intake">See what they said</button></div>
       </div></div>` : `<div class="notice notice--info"><div>
         <div class="notice__t">No committee input on file</div>
@@ -4598,9 +5095,24 @@ function vProfile(){
           </div>
         </div>
       </div>
+      ${(s.adoption?.discussion || []).length ? `<div class="spec"><div class="spec__bar">Raised, and not on the profile ${pill('stop', String(s.adoption.discussion.length))}</div>
+        <div class="spec__body stack">
+          <p class="t-small">The committee named these and the cap is five per category. They are kept for the conversation rather than forced into a slot.</p>
+          ${s.adoption.discussion.map(d => `<div class="t-small"><b>${esc(d.label)}</b> — ${esc(KIND[d.kind]?.label||d.kind)}, named by ${d.mentions} of ${d.respondents}, rated ${d.minWeight} to ${d.maxWeight}${d.contested?', contested':''}.
+            ${(d.reasons||[]).slice(0,3).map(r => esc((r.name||'A member')+': '+r.note)).join(' · ')}</div>`).join('')}
+        </div></div>` : ''}
+      ${agg?.submitted && canManage()
+        ? beforeYouAct(esc(TIPS.adoptPreview) + ' Adoption is a save: it sets the criteria every candidate is scored against, and it is recorded with the answers it rested on.')
+        : ''}
+      ${!canManage() && canEdit()
+        ? beforeYouAct(esc(askManager() + ' Adopting the profile is their decision; prepare it here and ask them to review it.'))
+        : ''}
       ${actionBar(
         `<button type="button" class="btn btn--primary" data-act="save-profile">Save profile</button>`,
-        `${agg?.submitted && canManage() ? withTip(`<button type="button" class="btn btn--secondary" data-act="adopt-consensus">${adopted?'Rebuild from committee':'Build from committee'}</button>`, 'Replace this matrix with what the committee named, ranked by how many of them named it.') : ''}
+        `${agg?.submitted && canManage() ? withTip(`<button type="button" class="btn btn--secondary" data-act="adopt-preview" ${s.intake?.status==='closed'?'':'disabled'}>${adopted?'Rebuild from committee':'Build from committee'}</button>`,
+          s.intake?.status==='closed'
+            ? 'Show what the committee’s answers would add, change and remove. Nothing is saved until you confirm it.'
+            : 'Close the committee input window first. Building the profile publishes what the committee said to everyone on the search.') : ''}
          <button type="button" class="btn btn--secondary" data-act="save-profile-next">Save and move on</button>`,
         profileGaps(s.criteria||[]).length
           ? 'Still needed: '+esc(profileGaps(s.criteria||[]).join(', '))+'.'
@@ -5765,6 +6277,9 @@ function vScreen(){
         <thead><tr><th scope="col">Candidate</th><th scope="col">Stage</th><th scope="col">Response</th><th scope="col">Actions</th></tr></thead>
         <tbody>${rows || `<tr><td colspan="4">No candidate matches these filters. <button type="button" class="btn btn--ghost btn--sm" data-act="clear-filters">Clear filters</button></td></tr>`}</tbody>
       </table></div>` : ''}
+      ${may('releaseScores') ? beforeYouAct(s.released
+        ? '<b>Seal scores</b> hides the panel again so each person sees only their own. It cannot recall an export somebody already took.'
+        : '<b>Release scores</b> makes every panel score and note visible to everyone on this search, including the committee. There is no partial release.') : ''}
       ${actionBar(
         nextBtn('screen') || `<button class="btn btn--primary" data-go="overview">Back to this search</button>`,
         may('releaseScores') ? withTip(`<button type="button" class="btn btn--secondary" data-act="toggle-release">${s.released?'Seal scores':'Release scores'}</button>`, s.released ? TIPS.seal : TIPS.release) : '',
@@ -5803,6 +6318,7 @@ function vSend2(){
       </table></div>` : emptyState('No semifinalists yet',
         'Advance people from Screening, then open the questionnaire for them here.',
         openBtn('screen','Open screening', true))}
+      ${canEdit() && list.length ? beforeYouAct(esc(TIPS.openQuestionnaireAccess)) : ''}
       ${actionBar(
         nextBtn('send2'),
         canEdit() && list.length
@@ -6191,6 +6707,8 @@ function vApply(){
           <div class="q__hd"><span class="q__n" aria-hidden="true">${String(q.n).padStart(2,'0')}</span><span class="q__t" id="q${q.n}-label">${esc(q.prompt)}${q.required?' <span class="req" aria-hidden="true">*</span>':''}</span></div>
           <div class="q__bd"><textarea class="input ed" name="q${q.n}" id="q${q.n}-input" aria-labelledby="q${q.n}-label" ${q.required?'required aria-required="true"':''}>${esc(draftAnswers['q'+q.n] || '')}</textarea></div>
         </div>`).join('')}
+      ${beforeYouAct('<b>Save draft</b> keeps your answers and lets you return with this same link. '
+        + 'Your questionnaire is not submitted until you select <b>Submit questionnaire</b>.')}
       <div class="applybar">
         <button class="btn btn--primary" type="submit">Submit questionnaire</button>
         <button class="btn btn--secondary" type="button" data-act="save-apply-draft" data-which="${which}">Save draft</button>
@@ -6383,6 +6901,458 @@ function historyRecord(entry){
  * how a search manager ends up waiting on access that was never granted.
  * ========================================================================= */
 
+/* ===========================================================================
+ * The public job posting
+ *
+ * Consultants write and preview it; the search manager publishes. The screen
+ * draws that split from the authority answers the server sends rather than
+ * from a role name, so the buttons and the refusals cannot disagree.
+ *
+ * The single most important thing this screen has to communicate is that
+ * editing is not publishing. A draft saved here changes nothing the public can
+ * see until somebody deliberately publishes it, and the state of the live page
+ * is stated separately from the state of the draft on every render.
+ * ========================================================================= */
+
+const POSTING_FIELDS = [
+  { key:'title', label:'Position title', req:true, hint:'What the job is called in the advertisement. “City Manager”, not “Search 2026-04”.' },
+  { key:'employer', label:'Employer or jurisdiction', req:true, hint:'Who the applicant would work for.' },
+  { key:'location', label:'Location', req:true, hint:'Where the position is. Applicants filter on this.' },
+  { key:'compensation', label:'Compensation', hint:'Only what the client has approved for publication. Leave empty rather than estimating.' }
+];
+
+const POSTING_TEXT = [
+  { key:'summary', label:'About this position', req:true, rows:6, hint:'A short description of the role and the organization.' },
+  { key:'responsibilities', label:'Responsibilities', rows:8 },
+  { key:'qualifications', label:'Qualifications', req:true, rows:8, hint:'What applicants are measured against. This is what they read to decide whether to apply.' },
+  { key:'applicationInstructions', label:'How to apply', req:true, rows:6, hint:'What an applicant has to provide, and anything they should know before starting.' },
+  { key:'privacyNotice', label:'Privacy notice', req:true, rows:6, hint:'The firm’s approved wording about what is collected and how long it is kept. A posting cannot be published without one.' }
+];
+
+/**
+ * Read the posting screen back off the page.
+ *
+ * Questions and materials keep their `key` where they already have one, so
+ * reordering or rewording a question does not orphan the answers an applicant
+ * has already written against it (the server generates a key for a new one).
+ */
+function collectPosting(){
+  const value = key => $('[data-posting="'+key+'"]')?.value ?? '';
+  const held = state.postingDraft || {};
+  const previous = state.posting?.draft || {};
+  const kind = $('[data-posting-deadline="kind"]:checked')?.value
+    || (held.deadline || previous.deadline || {}).kind || 'open';
+
+  const rows = (selector, shape) => {
+    const out = [];
+    for (const el of $$('[' + selector + ']')){
+      const [index, part] = el.getAttribute(selector).split(':');
+      const i = Number(index);
+      out[i] ||= { ...shape };
+      out[i][part] = el.type === 'checkbox' ? el.checked : el.value;
+    }
+    return out.filter(Boolean);
+  };
+
+  const source = held.questions || previous.questions || [];
+  const questions = rows('data-posting-q', { prompt:'', help:'', required:false })
+    .map((q, i) => (source[i]?.key ? { ...q, key: source[i].key } : q));
+  const materialSource = held.materials || previous.materials || [];
+  const materials = rows('data-posting-m', { label:'', note:'', required:false })
+    .map((m, i) => (materialSource[i]?.key ? { ...m, key: materialSource[i].key } : m));
+
+  return {
+    title: value('title'), employer: value('employer'), location: value('location'),
+    compensation: value('compensation'),
+    summary: value('summary'), responsibilities: value('responsibilities'),
+    qualifications: value('qualifications'),
+    applicationInstructions: value('applicationInstructions'),
+    privacyNotice: value('privacyNotice'),
+    supportEmail: value('supportEmail'), supportPhone: value('supportPhone'),
+    supportHours: value('supportHours'),
+    deadline: {
+      kind,
+      closesAt: $('[data-posting-deadline="closesAt"]')?.value || '',
+      firstReviewOn: $('[data-posting-deadline="firstReviewOn"]')?.value || '',
+      timezone: $('[data-posting-deadline="timezone"]')?.value || ''
+    },
+    questions, materials
+  };
+}
+
+function postingStatePill(p){
+  if (!p.published) return pill('idle','Not published');
+  if (p.frozenBySearch) return pill('stop','Offline: the search is closed');
+  if (p.state === 'published') return p.accepting ? pill('ok','Live · accepting applications') : pill('wait','Live · past its closing date');
+  if (p.state === 'paused') return pill('wait','Live · paused');
+  return pill('idle','Live · closed to new applications');
+}
+
+function postingDraftValue(key){
+  const draft = state.postingDraft || {};
+  if (draft[key] !== undefined) return draft[key];
+  return state.posting?.draft?.[key] ?? '';
+}
+
+function postingDeadline(){
+  return (state.postingDraft?.deadline) || state.posting?.draft?.deadline || { kind:'open', closesAt:'', firstReviewOn:'', timezone:'' };
+}
+
+function vPosting(){
+  const p = state.posting;
+  if (!p) return shell(`${head('This search','Public posting','Loading.')}`);
+  const canPublish = may('publishPosting');
+  const caps = p.capabilities || {};
+  const deadline = postingDeadline();
+  const questions = state.postingDraft?.questions || p.draft.questions || [];
+  const materials = state.postingDraft?.materials || p.draft.materials || [];
+
+  const text = f => field(esc(f.label), esc(f.hint || ''),
+    `<textarea class="input ed" rows="${f.rows}" data-posting="${esc(f.key)}">${esc(postingDraftValue(f.key))}</textarea>`,
+    { req:f.req, span:true });
+
+  return shell(`
+    ${head('This search', 'Public posting',
+      'The job page members of the public read. Nothing here is visible to anyone until it is published, and '
+      + 'editing a published posting changes nothing until it is published again.',
+      p.publicUrl ? withTip(`<a class="btn btn--secondary btn--sm" href="${esc(p.publicUrl)}" target="_blank" rel="noopener">Open the live page</a>`, TIPS.previewPosting) : '')}
+    <div class="band"><div class="wrap stack">
+
+      <div class="spec"><div class="spec__bar">What the public sees right now</div>
+        <div class="spec__body stack stack--tight">
+          <p>${postingStatePill(p)}</p>
+          ${p.published
+            ? `<p class="t-small">Version ${esc(p.published.version)}, published ${esc(String(p.published.at).slice(0,10))}${p.published.byName?' by '+esc(p.published.byName):''}.</p>
+               ${p.publicUrl ? `<p class="t-small mono u-wrap-any">${esc(p.publicUrl)}</p>` : ''}
+               ${p.frozenBySearch ? `<div class="notice notice--stop" role="status"><div>
+                 <div class="notice__t">This posting is offline because the search is closed</div>
+                 <div class="notice__b">Closing or archiving a search stops public intake. Reopening the search does not republish the posting; that is a separate, deliberate act.</div></div></div>` : ''}
+               ${p.unpublishedChanges ? `<div class="notice notice--wait" role="status"><div>
+                 <div class="notice__t">You have saved changes the public cannot see</div>
+                 <div class="notice__b">The live page is still version ${esc(p.published.version)}. ${canPublish
+                   ? 'Publish changes below when the new wording is approved.'
+                   : esc(askManager() + ' Publishing is their decision.')}</div></div></div>` : ''}`
+            : `<p class="t-small">This search is not advertised anywhere. Filling this in changes nothing until somebody publishes it.</p>`}
+        </div></div>
+
+      ${p.readiness.missing.length ? `<div class="notice notice--wait" role="status"><div>
+        <div class="notice__t">Still needed before this can be published</div>
+        <div class="notice__b"><ul class="u-mt-3">${p.readiness.missing.map(m => `<li>${esc(m)}</li>`).join('')}</ul></div>
+      </div></div>` : ''}
+
+      ${postingCapabilityNotice(caps)}
+
+      <form id="postingform" class="spec"><div class="spec__bar">The posting</div>
+        <div class="spec__body stack">
+          <div class="grid2">
+            ${POSTING_FIELDS.map(f => field(esc(f.label), esc(f.hint || ''),
+              `<input class="input" data-posting="${esc(f.key)}" value="${esc(postingDraftValue(f.key))}">`, { req:f.req })).join('')}
+          </div>
+          ${POSTING_TEXT.map(text).join('')}
+        </div>
+      </form>
+
+      <div class="spec"><div class="spec__bar">Closing date</div>
+        <div class="spec__body stack stack--tight">
+          <p class="t-small">Only the policy you choose here is enforced. An advisory review date never closes applications, and never will.</p>
+          <div class="row">
+            <label class="radio"><input type="radio" name="deadlinekind" value="hard" data-posting-deadline="kind"
+              ${deadline.kind==='hard'?'checked':''}> Closes on a date</label>
+            <label class="radio"><input type="radio" name="deadlinekind" value="open" data-posting-deadline="kind"
+              ${deadline.kind!=='hard'?'checked':''}> Open until filled</label>
+          </div>
+          <div class="grid2">
+            ${deadline.kind==='hard'
+              ? field('Closing date','Applications are accepted through the end of this day, then the page stops taking them.',
+                `<input class="input" type="date" data-posting-deadline="closesAt" value="${esc(deadline.closesAt||'')}">`, { req:true })
+              : field('First review date','Optional, and advisory only. Shown to applicants as when reading begins.',
+                `<input class="input" type="date" data-posting-deadline="firstReviewOn" value="${esc(deadline.firstReviewOn||'')}">`)}
+            ${field('Timezone','Stated beside every date on the public page, so nobody has to guess.',
+              `<input class="input" data-posting-deadline="timezone" value="${esc(deadline.timezone||'')}" placeholder="America/Phoenix">`, { req:true })}
+          </div>
+        </div></div>
+
+      <div class="spec"><div class="spec__bar">Support and accommodation contact</div>
+        <div class="spec__body stack stack--tight">
+          <p class="t-small">Published on the job page. Somebody who cannot complete the application, or who needs an accommodation, has to have a person to reach. A posting cannot be published without at least an address or a phone number.</p>
+          <div class="grid2">
+            ${field('Email','', `<input class="input" type="email" data-posting="supportEmail" value="${esc(postingDraftValue('supportEmail'))}">`)}
+            ${field('Phone','', `<input class="input" data-posting="supportPhone" value="${esc(postingDraftValue('supportPhone'))}">`)}
+          </div>
+          ${field('Hours','When somebody actually reads it. Leave empty rather than promising cover you do not have.',
+            `<input class="input" data-posting="supportHours" value="${esc(postingDraftValue('supportHours'))}">`, { span:true })}
+        </div></div>
+
+      <div class="spec"><div class="spec__bar">Application questions${questions.length?' · '+questions.length:''}</div>
+        <div class="spec__body stack stack--tight">
+          <p class="t-small">Short questions every applicant answers. These are not the screening questionnaire: they are the public form, and applicants read them before deciding to apply.</p>
+          ${questions.map((q, i) => `<div class="artitem" data-row="${i}">
+            <div class="artitem__hd"><b>Question ${i+1}</b>
+              <button type="button" class="btn btn--ghost btn--sm" data-act="posting-drop-q" data-i="${i}">Remove</button></div>
+            ${field('Prompt','', `<input class="input" data-posting-q="${i}:prompt" value="${esc(q.prompt||'')}">`, { span:true })}
+            ${field('Help text','Optional. Shown under the field.', `<input class="input" data-posting-q="${i}:help" value="${esc(q.help||'')}">`, { span:true })}
+            <label class="radio"><input type="checkbox" data-posting-q="${i}:required" ${q.required?'checked':''}> Required</label>
+          </div>`).join('')}
+          <div class="row"><button type="button" class="btn btn--secondary btn--sm" data-act="posting-add-q">Add a question</button></div>
+        </div></div>
+
+      <div class="spec"><div class="spec__bar">Materials${materials.length?' · '+materials.length:''}</div>
+        <div class="spec__body stack stack--tight">
+          <p class="t-small">What an applicant has to attach. ${caps.files?.uploads
+            ? 'Files are accepted as PDF, up to 8 MB each.'
+            : 'This deployment is not accepting uploads, so a required material here cannot be provided through the portal. Say in “How to apply” where to send it instead.'}</p>
+          ${materials.map((m, i) => `<div class="artitem" data-row="m${i}">
+            <div class="artitem__hd"><b>Material ${i+1}</b>
+              <button type="button" class="btn btn--ghost btn--sm" data-act="posting-drop-m" data-i="${i}">Remove</button></div>
+            ${field('Label','', `<input class="input" data-posting-m="${i}:label" value="${esc(m.label||'')}" placeholder="Resume">`, { span:true })}
+            ${field('Note','Optional guidance shown beside it.', `<input class="input" data-posting-m="${i}:note" value="${esc(m.note||'')}">`, { span:true })}
+            <label class="radio"><input type="checkbox" data-posting-m="${i}:required" ${m.required?'checked':''}> Required</label>
+          </div>`).join('')}
+          <div class="row"><button type="button" class="btn btn--secondary btn--sm" data-act="posting-add-m">Add a material</button></div>
+        </div></div>
+
+      ${actionBar(
+        `<button type="button" class="btn btn--primary" data-act="save-posting">Save posting</button>`,
+        [
+          canPublish && p.readiness.ready
+            ? withTip(`<button type="button" class="btn btn--${p.published?'secondary':'primary'}" data-act="publish-posting">${p.published?'Publish changes':'Publish posting'}</button>`,
+                p.published ? TIPS.republishPosting : TIPS.publishPosting)
+            : '',
+          canPublish && p.published && p.state === 'published'
+            ? withTip(`<button type="button" class="btn btn--secondary" data-act="posting-state" data-state="paused">Pause applications</button>`, TIPS.pausePosting)
+            : '',
+          canPublish && p.published && p.state === 'paused'
+            ? `<button type="button" class="btn btn--secondary" data-act="posting-state" data-state="published">Accept applications again</button>`
+            : '',
+          canPublish && p.published && p.state !== 'closed'
+            ? withTip(`<button type="button" class="btn btn--ghost" data-act="posting-state" data-state="closed">Close applications</button>`, TIPS.closePosting)
+            : '',
+          canPublish && p.published && p.state === 'closed'
+            ? `<button type="button" class="btn btn--ghost" data-act="posting-state" data-state="published">Reopen applications</button>`
+            : ''
+        ].filter(Boolean).join(' '),
+        canPublish
+          ? 'Saving changes nothing the public can see.'
+          : esc(askManager() + ' Publishing, pausing, and closing the posting are their decisions; prepare and preview it here.'),
+        'Not saved yet.')}
+    </div></div>`);
+}
+
+/**
+ * What this deployment can honestly offer an applicant.
+ *
+ * Shown before publishing rather than discovered by the first person who tries
+ * to apply. Without a mail provider there is no way to verify an address, so
+ * there is no application flow at all — and saying that here is the difference
+ * between a posting that tells people how to reach the firm and one that
+ * collects an address and goes quiet.
+ */
+function postingCapabilityNotice(caps){
+  if (!caps.mail) return '';
+  const rows = [];
+  if (!caps.mail.configured) {
+    rows.push('<b>Online applications are not available on this service.</b> No mail provider is configured, so an applicant cannot verify an address or return to a saved application. The job page will be published as a readable advertisement with your support contact, and will not offer an application form.');
+  }
+  if (caps.files && !caps.files.uploads) {
+    rows.push('<b>File uploads are switched off.</b> Applicants cannot attach materials here. Say in “How to apply” where to send them.');
+  } else if (caps.files && !caps.files.scans) {
+    rows.push('<b>No virus scanner is configured.</b> Uploaded materials are stored and will not be openable by reviewers. Nothing is lost, but nobody can read it until a scanner is in place.');
+  }
+  if (!rows.length) return '';
+  return `<div class="notice notice--wait" role="status"><div>
+    <div class="notice__t">What this service can do for applicants today</div>
+    <div class="notice__b">${rows.map(r => `<p>${r}</p>`).join('')}</div>
+  </div></div>`;
+}
+
+/* ===========================================================================
+ * Applications from the public portal
+ *
+ * Only submitted applications appear here. A draft somebody is still writing
+ * is not an application: it is not in this list, not in the committee's
+ * candidate list, and not in any export.
+ * ========================================================================= */
+
+function vApplications(){
+  const data = state.applicationList;
+  if (!data) return shell(`${head('Candidates','New applications','Loading.')}`);
+  const rows = data.applications || [];
+  const open = state.application;
+
+  if (open) return vApplication(open);
+
+  return shell(`
+    ${head('Candidates', 'New applications',
+      'Applications submitted through the public job page. Reading one does not tell the applicant anything; '
+      + 'they see only their own receipt.')}
+    <div class="band"><div class="wrap stack">
+      ${!data.posting.published ? `<div class="notice notice--info" role="status"><div>
+        <div class="notice__t">This search is not advertised publicly</div>
+        <div class="notice__b">Nothing arrives here until a posting is published.
+          <button class="btn btn--secondary btn--sm" data-go="posting">Open Public posting</button></div>
+      </div></div>` : ''}
+
+      ${rows.length ? `<div class="tablewrap"><table class="candtable">
+        <thead><tr>
+          <th scope="col">Applicant</th><th scope="col">Submitted</th>
+          <th scope="col">Materials</th><th scope="col">State</th><th scope="col">Actions</th>
+        </tr></thead>
+        <tbody>${rows.map(a => `<tr>
+          <th scope="row"><span class="candname">${esc(a.name)}</span>
+            <span class="candmeta">${esc(a.email)}${a.location?' · '+esc(a.location):''}</span>
+            <span class="candmeta mono">${esc(a.reference)}</span></th>
+          <td data-label="Submitted">${esc(String(a.submittedAt).slice(0,10))}
+            ${a.corrections?`<span class="candmeta">Version ${esc(a.version)} after a correction</span>`:''}</td>
+          <td data-label="Materials">${a.materials || 0}
+            ${a.outstanding.length?`<span class="candmeta">Outstanding: ${esc(a.outstanding.join(', '))}</span>`:''}</td>
+          <td data-label="State">${a.accepted
+            ? pill('ok','On the candidate list')
+            : a.possibleMatches.length ? pill('wait','Possible duplicate') : pill('wait','Not reviewed')}</td>
+          <td data-label="Actions" class="candacts">
+            <button class="btn btn--secondary btn--sm" data-act="open-application" data-aid="${esc(a.id)}">Open</button>
+          </td>
+        </tr>`).join('')}</tbody>
+      </table></div>`
+      : emptyState('No applications yet',
+        data.posting.accepting
+          ? 'Applications submitted through the public job page arrive here. Nothing else does: a draft somebody has saved but not sent is not an application and is not shown.'
+          : 'This posting is not accepting applications at the moment.',
+        `<button class="btn btn--secondary" data-go="posting">Open Public posting</button>`)}
+
+      ${rows.length ? `<p class="t-small">${esc(data.counts.awaiting)} of ${esc(data.counts.submitted)} not yet on the candidate list.</p>` : ''}
+    </div></div>`);
+}
+
+function vApplication(a){
+  const back = `<button type="button" class="btn btn--secondary btn--sm" data-act="close-application">Back to applications</button>`;
+  return shell(`
+    ${head('New applications', a.name,
+      // Named as UTC, because a consultant deciding whether this arrived
+      // before a Phoenix closing date needs to know which clock they are
+      // reading. The applicant's own copy is converted into the posting's
+      // timezone; this one is the stored instant, and says so.
+      'Submitted ' + esc(String(a.submittedAt).replace('T',' ').slice(0,16)) + ' UTC'
+      + ' · reference <span class="mono">' + esc(a.reference) + '</span> · source ' + esc(a.source), back)}
+    <div class="band"><div class="wrap stack">
+      ${a.possibleMatches.length && !a.accepted ? `<div class="notice notice--wait" role="alert"><div>
+        <div class="notice__t">This may be somebody already on this search</div>
+        <div class="notice__b">
+          <p>Matched on ${esc(a.possibleMatches.map(m => m.on).join(' and '))}: ${esc(a.possibleMatches.map(m => m.name).join(', '))}.</p>
+          <p>Nothing has been merged and nothing has been revealed to the applicant. Read both records and decide.
+             Two people can share an address, and an address is not proof of identity.</p>
+        </div></div></div>` : ''}
+
+      ${a.accepted ? `<div class="notice notice--ok" role="status"><div>
+        <div class="notice__t">On the candidate list since ${esc(String(a.acceptedAt).slice(0,10))}</div>
+        <div class="notice__b">From here they are an ordinary candidate.
+          <button class="btn btn--secondary btn--sm" data-go="person" data-cid="${esc(a.candidateId)}">Open the candidate</button></div>
+      </div></div>` : ''}
+
+      <div class="spec"><div class="spec__bar">Contact</div><div class="spec__body">
+        <dl class="kv">
+          <dt>Email</dt><dd>${esc(a.email)}</dd>
+          ${a.phone?`<dt>Phone</dt><dd>${esc(a.phone)}</dd>`:''}
+          ${a.location?`<dt>Based in</dt><dd>${esc(a.location)}</dd>`:''}
+        </dl></div></div>
+
+      ${a.background ? `<div class="spec"><div class="spec__bar">Relevant background</div>
+        <div class="spec__body"><p class="u-wrap-any">${esc(a.background).replace(/\n/g,'<br>')}</p></div></div>` : ''}
+
+      ${a.form.questions.length ? `<div class="spec"><div class="spec__bar">Answers</div><div class="spec__body stack stack--tight">
+        ${a.form.questions.map(q => `<div class="q">
+          <div class="q__hd"><span class="q__t">${esc(q.prompt)}</span></div>
+          <div class="q__bd"><p class="u-wrap-any">${esc(a.responses[q.key] || '').replace(/\n/g,'<br>') || '<span class="t-small">Not answered</span>'}</p></div>
+        </div>`).join('')}
+      </div></div>` : ''}
+
+      <div class="spec"><div class="spec__bar">Materials</div><div class="spec__body">
+        ${a.documents.length ? `<div class="tablewrap"><table class="candtable">
+          <thead><tr><th scope="col">File</th><th scope="col">Received</th><th scope="col">State</th><th scope="col">Open</th></tr></thead>
+          <tbody>${a.documents.map(d => `<tr>
+            <th scope="row">${esc(d.label)}<span class="candmeta">${Math.round(d.bytes/1024)} KB</span></th>
+            <td data-label="Received">${esc(String(d.uploadedAt).slice(0,10))}</td>
+            <td data-label="State">${d.available?pill('ok','Available'):pill('wait','Not available')}
+              <span class="candmeta">${esc(d.note)}</span></td>
+            <td data-label="Open" class="candacts">${d.available
+              ? withTip(`<button type="button" class="btn btn--secondary btn--sm" data-act="download-material" data-aid="${esc(a.id)}" data-fid="${esc(d.id)}" data-label="${esc(d.label)}">Download</button>`, TIPS.applicationFile)
+              : '<span class="t-small">Not openable</span>'}</td>
+          </tr>`).join('')}</tbody></table></div>`
+        : '<p class="t-small">No materials were attached.</p>'}
+      </div></div>
+
+      ${a.history.length ? `<div class="spec"><div class="spec__bar">Earlier versions</div><div class="spec__body">
+        ${a.history.map(h => `<p class="t-small">Version submitted ${esc(String(h.submittedAt).slice(0,16).replace('T',' '))} (${esc(h.reference)}), reopened ${esc(String(h.at).slice(0,10))} by ${esc(h.byName||'a consultant')}: ${esc(h.reason)}</p>`).join('')}
+      </div></div>` : ''}
+
+      ${actionBar(
+        a.accepted ? '' : withTip(`<button type="button" class="btn btn--primary" data-act="accept-application" data-aid="${esc(a.id)}">Accept onto the candidate list</button>`, TIPS.acceptApplication),
+        a.accepted ? '' : withTip(`<button type="button" class="btn btn--secondary" data-act="reopen-application" data-aid="${esc(a.id)}">Let them correct it</button>`, TIPS.reopenApplication),
+        a.accepted
+          ? 'This application is on the candidate list. Corrections are made on the candidate record now.'
+          : 'Accepting adds them to the candidate list. The applicant is not notified by it, and their receipt does not change.')}
+    </div></div>`);
+}
+
+/* ===========================================================================
+ * Help and the user guide
+ *
+ * The content lives in content/help and is rendered by public/help.js, which
+ * the candidate portal loads too. This file only supplies the entry points:
+ * the screen, the navigation link, and the per-screen drawer.
+ * ========================================================================= */
+
+async function loadHelp(){
+  state.helpError = null;
+  try { await window.SlateHelp.load(); }
+  catch (error) { state.helpError = error.message; }
+}
+
+/**
+ * Put "Help with this page" on the screen once the guide has arrived.
+ *
+ * Deliberately not a re-render. The catalog is fetched in the background at
+ * boot, and `paint()` rebuilds the page from state — so a consultant who
+ * started typing into Search facts before the request came back would have
+ * lost it the moment it did. Nothing about this application's forms holds an
+ * unsaved value anywhere but the DOM, which makes an unrequested render a way
+ * to destroy work.
+ *
+ * So the control is inserted into the page that is already there. Idempotent,
+ * and a no-op on a screen the guide has no article for.
+ */
+function paintHelpControl(){
+  const row = $('.pagehead__row');
+  if (!row || $('[data-act="help-page"]')) return;
+  const markup = helpControl();
+  if (!markup) return;
+  let slot = row.querySelector(':scope > .pagehead__act');
+  if (!slot){
+    slot = document.createElement('div');
+    slot.className = 'pagehead__act';
+    row.appendChild(slot);
+  }
+  slot.insertAdjacentHTML('beforeend', markup);
+}
+
+function vHelp(){
+  return shell(`
+    ${head('Workspace', 'Help & user guide',
+      'Task-by-task instructions for Slate, written against this build. Every screen also has a '
+      + '<b>Help with this page</b> control that opens the right article beside your work without disturbing it.')}
+    <div class="band"><div class="wrap stack">
+      ${state.search && checklistDismissed() ? `<div class="notice notice--info" role="status"><div>
+        <div class="notice__t">The getting-started checklist is hidden on ${esc(state.search.client || 'this search')}</div>
+        <div class="notice__b">It lists what is outstanding for you on that search.
+          <button type="button" class="btn btn--secondary btn--sm" data-act="restore-checklist">Show it again</button></div>
+      </div></div>` : ''}
+      ${window.SlateHelp.pageHtml({
+        role: state.helpRole,
+        query: state.helpQuery,
+        articleId: state.helpArticle
+      })}
+    </div></div>`);
+}
+
 async function loadTeam(){
   state.teamError = null;
   try { state.team = await api('/api/organization/members'); }
@@ -6479,7 +7449,10 @@ function page(){
     case 'role-pending': return vRolePending();
     case 'assignment-pending': return vAssignmentPending();
   }
+  if (state.view === 'help') return vHelp();
   if (state.view === 'team-access') return vTeamAccess();
+  if (state.view === 'posting') return vPosting();
+  if (state.view === 'applications') return vApplications();
   if (state.view === 'community') return vCommunity();
   if (state.view === 'brochure') return vBrochure();
   if (STAFF[state.view]) return vStaff(state.view);
@@ -6533,6 +7506,12 @@ function focusKey(el){
   if (el.id) return '#' + el.id;
   const row = el.closest?.('[data-row]');
   if (row && el.dataset.f) return '[data-row="'+row.dataset.row+'"] [data-f="'+el.dataset.f+'"]';
+  // A rating button, in intake and in the profile editor. Rating a priority
+  // redraws the row, and the keyboard has to stay on the scale it was using
+  // rather than being dropped at the top of the form.
+  for (const attr of ['iw', 'w']) {
+    if (row && el.dataset[attr]) return '[data-row="'+row.dataset.row+'"] [data-'+attr+'="'+el.dataset[attr]+'"]';
+  }
   if (el.dataset.path) return '[data-path="'+el.dataset.path+'"]';
   // Suggestion chips and add/remove controls: identified by what they act on,
   // so the keyboard stays where it was after the list redraws.
@@ -6780,6 +7759,27 @@ function artHasContent(body){
   return Object.keys(body).length > 0;
 }
 
+/**
+ * Ask the server what adopting would do, without doing it.
+ *
+ * The retain decisions are the manager's and are remembered here; everything
+ * else in the plan — including which items the cap excludes once an item is
+ * retained — is the server's answer, so the panel always shows the profile
+ * that would actually be saved.
+ */
+async function refreshAdoptPlan(){
+  const keepRetain = state.adoptPlan?.retain || [];
+  const keepReasons = state.adoptPlan?.retainReasons || {};
+  await withBusy(async () => {
+    const plan = await api('/api/searches/'+state.search.id+'/intake/adopt', {
+      method:'POST', body:{ preview:true, retain: keepRetain }
+    });
+    plan.retain = keepRetain;
+    plan.retainReasons = keepReasons;
+    state.adoptPlan = plan;
+  }, waitSave('Working out what would change'));
+}
+
 async function persistProfile(moveOn){
   const criteria = collectCriteria();
   const skills = labeledKind('skill', criteria);
@@ -6831,6 +7831,20 @@ document.addEventListener('change', e => {
     if (state.view === 'home') render();
     return;
   }
+  if (e.target.dataset.retain && state.adoptPlan){
+    // Keeping an unsupported criterion is a decision. Ticking it re-asks the
+    // server what the profile would then look like, so the panel always shows
+    // the proposal that would actually be saved.
+    const id = e.target.dataset.retain;
+    const next = new Set(state.adoptPlan.retain || []);
+    if (e.target.checked) next.add(id); else next.delete(id);
+    state.adoptPlan.retain = [...next];
+    $$('[data-retain-reason]').forEach(el => {
+      state.adoptPlan.retainReasons = { ...(state.adoptPlan.retainReasons||{}), [el.dataset.retainReason]: el.value };
+    });
+    refreshAdoptPlan();
+    return;
+  }
   if (e.target.id === 'premium') state.premium = e.target.checked;
   if (e.target.dataset.photo) uploadBrochurePhoto(e.target.dataset.photo, e.target.files?.[0]);
 });
@@ -6846,6 +7860,64 @@ function closeMenusExcept(el){
     state.open[btn.dataset.panel] = false;
   }
 }
+
+/* --- the user guide ------------------------------------------------------
+ *
+ * Handled ahead of everything else and outside the application's own render,
+ * because the whole promise of this control is that reading the instructions
+ * costs nothing: no navigation, no re-render, no lost form. The only branch
+ * that redraws the page is the one for the full help screen, which has no form
+ * on it to lose.
+ * ------------------------------------------------------------------------ */
+document.addEventListener('click', async e => {
+  const help = e.target.closest('[data-act="help-page"],[data-help-article],[data-help-role],[data-help-print],[data-help-retry]');
+  if (!help) return;
+
+  if (help.dataset.act === 'help-page'){
+    await window.SlateHelp.openDrawer({ screen: help.dataset.screen, trigger: help });
+    return;
+  }
+  if (help.hasAttribute('data-help-retry')){
+    await loadHelp();
+    render();
+    return;
+  }
+  if (help.hasAttribute('data-help-print')){
+    window.SlateHelp.print({ role: state.helpRole });
+    return;
+  }
+  if (help.hasAttribute('data-help-role')){
+    state.helpRole = help.dataset.helpRole || null;
+    render();
+    return;
+  }
+  // An article link. On the help screen it opens the article in the reading
+  // pane; anywhere else — inside the drawer, from a glossary term — the drawer
+  // handles it itself and this never sees it.
+  if (help.dataset.helpArticle && state.view === 'help'){
+    state.helpArticle = help.dataset.helpArticle;
+    render();
+    $('#help-article-' + CSS.escape(state.helpArticle))?.scrollIntoView({ block: 'start' });
+    $('.help__reading')?.focus?.();
+  }
+});
+
+// Searching the guide. Debounced against the render so the caret is not chased
+// around the field while somebody types.
+let helpFindTimer = null;
+document.addEventListener('input', e => {
+  const field = e.target.closest('[data-help-search]');
+  if (!field) return;
+  clearTimeout(helpFindTimer);
+  helpFindTimer = setTimeout(() => {
+    state.helpQuery = field.value;
+    render();
+    $('#help-search')?.focus();
+  }, 220);
+});
+
+// "Open the full guide" from inside the drawer.
+window.addEventListener('slate:help-open-guide', () => { go('help'); });
 
 document.addEventListener('click', async e => {
   closeMenusExcept(e.target);
@@ -7066,6 +8138,9 @@ document.addEventListener('click', async e => {
   }
 
   const act = t.dataset.act;
+  // Handled by the guide's own listener above, which deliberately does not
+  // re-render the page.
+  if (act==='help-page') return;
   if (act==='tip-help'){
     // The touch equivalent of hover: a labelled control that discloses the
     // same description. Tapping the action itself still performs the action.
@@ -7093,6 +8168,143 @@ document.addEventListener('click', async e => {
   if (act==='reload-search') {
     if (state.dirty && !confirm('Discard unsaved edits and load the latest search?')) return;
     await withBusy(() => loadSearch(state.search.id));
+    return;
+  }
+  if (act==='dismiss-checklist'){
+    setChecklistDismissed(true);
+    render();
+    toast('Hidden for this search. Reopen it from Help & user guide.');
+    return;
+  }
+  if (act==='restore-checklist'){
+    setChecklistDismissed(false);
+    toast('The getting-started checklist is back on this search.');
+    render();
+    return;
+  }
+
+  /* --- the public posting ------------------------------------------------ */
+
+  if (act==='posting-add-q' || act==='posting-drop-q' || act==='posting-add-m' || act==='posting-drop-m'){
+    // Read the form first, so adding or removing a row never costs somebody a
+    // paragraph they typed into the row above it.
+    const draft = collectPosting();
+    if (act==='posting-add-q') draft.questions.push({ prompt:'', help:'', required:false });
+    if (act==='posting-drop-q') draft.questions.splice(Number(t.dataset.i), 1);
+    if (act==='posting-add-m') draft.materials.push({ label:'', note:'', required:false });
+    if (act==='posting-drop-m') draft.materials.splice(Number(t.dataset.i), 1);
+    state.postingDraft = draft;
+    state.dirty = true;
+    render();
+    return;
+  }
+  if (act==='save-posting'){
+    await withBusy(async () => {
+      state.posting = await api('/api/searches/'+state.search.id+'/posting',
+        { method:'PUT', body: collectPosting() });
+      state.postingDraft = null;
+      state.dirty = false;
+      toast('Posting saved. Nothing the public sees has changed.');
+    }, waitSave('Saving the posting'));
+    render();
+    return;
+  }
+  if (act==='publish-posting'){
+    const p = state.posting;
+    const first = !p.published;
+    const question = first
+      ? 'Publish this job page? Anyone with its address will be able to read it, and applications can be submitted to this search.'
+      : 'Replace the live job page with what you have saved? Applicants reading it will see the new version.';
+    if (!confirm(question)) return;
+    await withBusy(async () => {
+      state.posting = await api('/api/searches/'+state.search.id+'/posting/publish', { method:'POST' });
+      state.search = await api('/api/searches/'+state.search.id);
+      toast(first ? 'Published. The address is on this screen.' : 'The live page now shows your changes.');
+    }, waitSave('Publishing the posting'));
+    render();
+    return;
+  }
+  if (act==='posting-state'){
+    const next = t.dataset.state;
+    const ask = {
+      paused:'Pause applications? The job page stays readable and says it is not accepting applications right now.',
+      closed:'Close this posting to new applications? The search stays open and you keep working the applicants you have.',
+      published:'Accept applications again on this posting?'
+    }[next];
+    if (ask && !confirm(ask)) return;
+    await withBusy(async () => {
+      state.posting = await api('/api/searches/'+state.search.id+'/posting/state', { method:'POST', body:{ state: next } });
+      state.search = await api('/api/searches/'+state.search.id);
+    }, waitSave('Updating the posting'));
+    render();
+    return;
+  }
+
+  /* --- applications from the portal --------------------------------------- */
+
+  if (act==='open-application'){
+    await withBusy(async () => {
+      state.application = await api('/api/searches/'+state.search.id+'/applications/'+t.dataset.aid);
+    }, false);
+    render();
+    window.scrollTo({ top:0, behavior:'instant' });
+    return;
+  }
+  if (act==='close-application'){
+    state.application = null;
+    render();
+    return;
+  }
+  if (act==='accept-application'){
+    const application = state.application;
+    const duplicate = application?.possibleMatches?.length;
+    if (duplicate && !confirm('Slate found ' + duplicate + ' candidate' + (duplicate===1?'':'s')
+      + ' on this search who might be the same person. Add this applicant as a separate candidate anyway?')) return;
+    await withBusy(async () => {
+      const out = await api('/api/searches/'+state.search.id+'/applications/'+t.dataset.aid+'/accept',
+        { method:'POST', body:{ reconciled: Boolean(duplicate) } });
+      state.search = out.search;
+      state.applicationList = await api('/api/searches/'+state.search.id+'/applications');
+      state.application = await api('/api/searches/'+state.search.id+'/applications/'+t.dataset.aid);
+      toast('Added to the candidate list.');
+    }, waitSave('Adding the candidate'));
+    render();
+    return;
+  }
+  if (act==='reopen-application'){
+    const reason = prompt('Why is this application being reopened? The applicant sees this, and it stays on the record.');
+    if (!reason || !reason.trim()) return;
+    await withBusy(async () => {
+      await api('/api/searches/'+state.search.id+'/applications/'+t.dataset.aid+'/reopen',
+        { method:'POST', body:{ reason } });
+      state.applicationList = await api('/api/searches/'+state.search.id+'/applications');
+      state.application = null;
+      toast('Reopened. Their submission is kept, and they can send a correction.');
+    }, waitSave('Reopening the application'));
+    render();
+    return;
+  }
+  if (act==='download-material'){
+    // An authorized GET, so it cannot be a plain link: the session token lives
+    // in memory and a browser navigation would not carry it. Same reason as
+    // the export below.
+    await withBusy(async () => {
+      const token = await window.SlateAuth.token();
+      const res = await fetch('/api/searches/'+state.search.id+'/applications/'
+        + encodeURIComponent(t.dataset.aid)+'/files/'+encodeURIComponent(t.dataset.fid),
+        { headers: token ? { authorization:'Bearer ' + token } : {} });
+      if (!res.ok){
+        const detail = await res.json().catch(() => ({}));
+        throw new Error(detail.error || 'That file could not be opened.');
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = t.dataset.label || 'document.pdf';
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    }, false);
     return;
   }
   if (act==='export-record') {
@@ -7152,7 +8364,7 @@ document.addEventListener('click', async e => {
     if (act==='reopen-survey') {
       reason = prompt('Why are you reopening this response? The original stays in history.');
       if (!reason?.trim()) return;
-    } else if (!confirm('Replace this candidate link? The old link will stop working.')) return;
+    } else if (!confirm('Replace this candidate link?\n\nThe old link stops working immediately. Anything the candidate has already submitted is kept, but a draft they have not sent is reachable only from the link you are about to revoke. You will need to share the new link with them yourself.')) return;
     await withBusy(async () => {
       state.search = await api('/api/searches/'+state.search.id+'/candidates/'+t.dataset.cid+'/'+(act==='reopen-survey'?'reopen':'invite'), { method:'POST', body:{ which:t.dataset.which, reason } });
       toast('Copy the new link below and share it with the candidate.');
@@ -7482,15 +8694,31 @@ document.addEventListener('click', async e => {
     const open = act==='intake-open';
     const form = $('#intakewindow');
     const win = form ? Object.fromEntries(new FormData(form).entries()) : {};
+    let emptyReason = '';
     if (!open) {
       const waiting = (state.search.consensus?.pending || []).length;
       if (waiting && !confirm(waiting+' member'+(waiting===1?' has':'s have')+' not answered yet. Close the window anyway?')) return;
+      // Finishing with nothing on file is a decision somebody makes and signs,
+      // not a step that quietly reports itself complete.
+      if (!(state.search.consensus?.submitted)) {
+        emptyReason = String(prompt('Nobody submitted committee input. Closing now completes this step without it.\n\nWhy are you completing it without committee input? This is recorded on the search.') || '').trim();
+        if (!emptyReason) { toast('Not closed. A reason is needed to complete this step without committee input.'); return; }
+      }
     }
     await withBusy(async () => {
-      state.search = await api('/api/searches/'+state.search.id+'/intake/status', {
-        method:'POST', body:{ status: open ? 'open' : 'closed', ...win }
-      });
-      toast(open ? 'Intake is open. Everyone on the search can answer now.' : 'Intake closed. The committee can see what the room said.');
+      try {
+        state.search = await api('/api/searches/'+state.search.id+'/intake/status', {
+          method:'POST', body:{ status: open ? 'open' : 'closed', ...win, ...(emptyReason ? { emptyReason } : {}) }
+        });
+      } catch (err) {
+        if (err.code === 'ROSTER_UNCONFIRMED'){ toast(err.message); go('team'); return; }
+        throw err;
+      }
+      toast(open
+        ? 'Intake is open. Everyone on the search can answer now.'
+        : (emptyReason
+          ? 'Completed without committee input. The reason is on the record.'
+          : 'Intake closed. Everyone on the search can now read the submitted answers.'));
     }, waitSave(open ? 'Opening the window' : 'Closing the window'));
     return;
   }
@@ -7514,28 +8742,98 @@ document.addEventListener('click', async e => {
       return;
     }
     await withBusy(async () => {
-      state.search = await api('/api/searches/'+state.search.id+'/intake', {
-        method:'PUT',
-        body:{ items, mustHave:d.mustHave, dealBreaker:d.dealBreaker, context:d.context, submitted }
-      });
+      try {
+        state.search = await api('/api/searches/'+state.search.id+'/intake', {
+          method:'PUT',
+          // This member's own version, not the whole search's. Another member
+          // submitting at the same moment is not a conflict with this answer.
+          body:{ items, mustHave:d.mustHave, dealBreaker:d.dealBreaker, context:d.context,
+            submitted, responseRevision: myResponseRevision() }
+        });
+      } catch (err) {
+        // Keep every local field. The recovery is a choice on the page, not a
+        // reload that would throw the typed rows away (CA-12).
+        if (err.code === 'STALE_RESPONSE') { state.intakeConflict = err.detail?.response || {}; return; }
+        if (err.code === 'RESPONSE_REVISION_REQUIRED' || err.code === 'INTAKE_SHUT') { toast(err.message); return; }
+        throw err;
+      }
       state.intake = null;
-      toast(submitted ? 'Your answers are in. The rest of the committee cannot see them yet.' : 'Saved. Come back and submit when you are ready.');
+      state.intakeConflict = null;
+      toast(submitted
+        ? 'Your answers are in. The rest of the committee cannot see them until the window closes.'
+        : 'Saved privately. Your submitted answers are unchanged until you choose Update my answers.');
       if (submitted && you().consultant) go('intake');
     }, waitSave(submitted ? 'Submitting your answers' : 'Saving your answers'));
     return;
   }
-  if (act==='adopt-consensus'){
-    const adopted = (state.search.criteria||[]).some(c => String(c.label||'').trim());
-    if (adopted && !confirm('Rebuild the profile from committee input? Consensus items come first; anything you wrote by hand is kept behind them, up to five per section.')) return;
+  if (act==='intake-keep-mine'){
+    state.intakeConflict = null;
+    toast('Kept. Save or submit again to write this version.');
+    render();
+    return;
+  }
+  if (act==='intake-take-theirs'){
+    const theirs = state.intakeConflict?.submitted || state.intakeConflict?.draft;
+    state.intake = theirs ? {
+      items: (theirs.items || []).map(i => ({ ...i })),
+      mustHave: theirs.mustHave || '', dealBreaker: theirs.dealBreaker || '', context: theirs.context || ''
+    } : null;
+    state.intakeConflict = null;
+    // The conflicting version is now on the page, and the record it came from
+    // is the one this page holds, so the next save has the right precondition.
+    await withBusy(async () => { state.search = await api('/api/searches/'+state.search.id); }, waitSave('Loading the other version'));
+    toast('Loaded the version saved elsewhere. Edit it and save.');
+    return;
+  }
+  if (act==='withdraw-intake'){
+    if (!confirm('Withdraw your answers from the committee tally?\n\nThey come back to you as a private draft, and the counts on any profile already built from them will be marked as describing earlier answers. This is not the same as saving a draft.')) return;
     await withBusy(async () => {
-      const out = await api('/api/searches/'+state.search.id+'/intake/adopt', { method:'POST', body:{} });
-      state.search = out.search;
-      const gaps = out.gaps || [];
-      toast(gaps.length
-        ? 'Built from the committee. Still short in '+gaps.map(g=>g.label.toLowerCase()).join(', ')+' — fill those in.'
-        : 'Built from the committee. Edit the weights and wording, then save.');
-      go('profile');
-    }, waitSave('Building the profile from committee input'));
+      state.search = await api('/api/searches/'+state.search.id+'/intake/withdraw', { method:'POST', body:{} });
+      state.intake = null;
+      toast('Withdrawn. Your answers are out of the tally and saved as your own draft.');
+    }, waitSave('Withdrawing your answers'));
+    return;
+  }
+  if (act==='adopt-preview' || act==='adopt-consensus'){
+    await refreshAdoptPlan();
+    if (state.adoptPlan && state.view !== 'intake') go('intake');
+    return;
+  }
+  if (act==='adopt-cancel'){
+    state.adoptPlan = null;
+    render();
+    return;
+  }
+  if (act==='adopt-apply'){
+    const plan = state.adoptPlan;
+    if (!plan) return;
+    // Read the reasons off the panel before the re-render, the same way the
+    // intake and profile forms do.
+    const reasons = { ...(plan.retainReasons || {}) };
+    $$('[data-retain-reason]').forEach(el => { reasons[el.dataset.retainReason] = el.value; });
+    await withBusy(async () => {
+      try {
+        const out = await api('/api/searches/'+state.search.id+'/intake/adopt', {
+          method:'POST',
+          body:{ retain: plan.retain || [], retainReasons: reasons,
+            fingerprint: plan.fingerprint, profileRevision: plan.profileRevision }
+        });
+        state.search = out.search;
+        state.adoptPlan = null;
+        const gaps = out.gaps || [];
+        toast(gaps.length
+          ? 'Profile saved from committee input. It is still short in '+gaps.map(g=>g.label.toLowerCase()).join(', ')+' — write those yourself.'
+          : 'Profile saved from committee input. Edit the weights and wording, then save.');
+        go('profile');
+      } catch (err) {
+        if (err.code === 'STALE_SOURCE' || err.code === 'STALE_PROFILE') {
+          state.adoptPlan = null;
+          toast(err.message);
+          return;
+        }
+        throw err;
+      }
+    }, waitSave('Saving the profile'));
     return;
   }
   if (act==='research'){
@@ -8192,6 +9490,13 @@ window.addEventListener('hashchange', async () => {
 $('#lookup-cancel')?.addEventListener('click', () => { if (showWait._cancel) showWait._cancel(); });
 
 (async function boot(){
+  // The guide reads the staff catalog through the same session as everything
+  // else. Configured before anything can ask for it; the catalog itself is
+  // fetched on first use, not at boot, because most sessions never open it.
+  window.SlateHelp.configure({
+    endpoint: '/api/help',
+    token: () => authToken().catch(() => null)
+  });
   await loadHealth();
   const m = location.pathname.match(/^\/apply\/([^/]+)/);
   if (m){
@@ -8235,6 +9540,12 @@ $('#lookup-cancel')?.addEventListener('click', () => { if (showWait._cancel) sho
       await refreshSearches();
       await applyRoute(parseRoute(location.hash), { push:false });
     }
+    // In the background, and never blocking the first paint. "Help with this
+    // page" appears once the guide is there; until then the screen is simply
+    // the screen, rather than offering a control that would open nothing.
+    // Inserted into the page rather than rendered onto it — see
+    // paintHelpControl for why that distinction matters.
+    loadHelp().then(paintHelpControl);
   } else {
     render();
   }
@@ -8244,6 +9555,17 @@ $('#lookup-cancel')?.addEventListener('click', () => { if (showWait._cancel) sho
 // The role select on Team & access commits on change rather than behind a save
 // button: it is one field with one effect, and leaving it looking changed while
 // it is not would be worse than a moment's wait.
+// Choosing a deadline policy changes which date the screen asks for, so it
+// redraws. Everything typed so far is read off the page first: a consultant
+// halfway through a posting must not lose it by changing their mind about the
+// closing date.
+document.addEventListener('change', e => {
+  if (!e.target.matches('[data-posting-deadline="kind"]')) return;
+  state.postingDraft = collectPosting();
+  state.dirty = true;
+  render();
+});
+
 document.addEventListener('change', async e => {
   const select = e.target.closest('select[data-act="set-role"]');
   if (!select) return;

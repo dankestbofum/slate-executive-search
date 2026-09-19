@@ -1,0 +1,303 @@
+{
+  "generatedAt": "2026-09-18T00:38:19.541Z",
+  "mode": "offline real production modules; synthetic data; no server or paid calls",
+  "scenarioCount": 10,
+  "scenarios": [
+    {
+      "id": "A01-core-math",
+      "expected": "Five submitted; 3/5 support; average 4; more mentions outrank higher average; draft excluded",
+      "actual": {
+        "submitted": 5,
+        "asked": 6,
+        "rank": [
+          {
+            "label": "Financial management",
+            "mentions": 3,
+            "share": 0.6,
+            "avgWeight": 4,
+            "consensus": "strong"
+          },
+          {
+            "label": "Other",
+            "mentions": 2,
+            "share": 0.4,
+            "avgWeight": 5,
+            "consensus": "split"
+          }
+        ]
+      }
+    },
+    {
+      "id": "A02-duplicate-first-wins",
+      "expected": "Duplicate within one response contributes one vote; first weight survives",
+      "actual": {
+        "key": "skill:community engagement",
+        "kind": "skill",
+        "label": "Community engagement",
+        "mentions": 1,
+        "share": 1,
+        "avgWeight": 1,
+        "minWeight": 1,
+        "maxWeight": 1,
+        "spread": 0,
+        "contested": false,
+        "consensus": "single",
+        "voters": [
+          {
+            "userId": "u0",
+            "name": "",
+            "weight": 1,
+            "note": ""
+          }
+        ],
+        "notes": []
+      }
+    },
+    {
+      "id": "A03-normalization",
+      "expected": "Lexical normalization merges Good governance/Governance, but Budgeting/Financial management remain separate",
+      "actual": [
+        {
+          "label": "Governance",
+          "mentions": 2,
+          "avgWeight": 3,
+          "contested": true
+        },
+        {
+          "label": "Budgeting",
+          "mentions": 1,
+          "avgWeight": 5,
+          "contested": false
+        },
+        {
+          "label": "Financial management",
+          "mentions": 1,
+          "avgWeight": 5,
+          "contested": false
+        }
+      ]
+    },
+    {
+      "id": "A04-contested-loss",
+      "expected": "Diagnostic expectation: preserve disagreement in adopted evidence; actual direct adoption keeps first note and midpoint weight",
+      "actual": {
+        "aggregate": {
+          "key": "trait:decisiveness",
+          "kind": "trait",
+          "label": "Decisiveness",
+          "mentions": 2,
+          "share": 1,
+          "avgWeight": 3,
+          "minWeight": 1,
+          "maxWeight": 5,
+          "spread": 4,
+          "contested": true,
+          "consensus": "unanimous",
+          "voters": [
+            {
+              "userId": "u0",
+              "name": "",
+              "weight": 5,
+              "note": "Need fast decisions."
+            },
+            {
+              "userId": "u1",
+              "name": "",
+              "weight": 1,
+              "note": "Avoid rushed decisions."
+            }
+          ],
+          "notes": [
+            {
+              "name": "",
+              "note": "Need fast decisions."
+            },
+            {
+              "name": "",
+              "note": "Avoid rushed decisions."
+            }
+          ]
+        },
+        "adopted": {
+          "id": "T1",
+          "kind": "trait",
+          "label": "Decisiveness",
+          "weight": 3,
+          "note": "Named by 2 of 2 on the committee. Need fast decisions.",
+          "from": "committee"
+        }
+      }
+    },
+    {
+      "id": "A05-withdrawn-priority-retained",
+      "expected": "Diagnostic expectation: refreshed profile explicitly distinguishes withdrawn evidence; actual retained line still claims 2 of 2 support",
+      "actual": {
+        "currentAggregate": [
+          {
+            "key": "skill:new priority",
+            "kind": "skill",
+            "label": "New priority",
+            "mentions": 2,
+            "share": 1,
+            "avgWeight": 4.5,
+            "minWeight": 4,
+            "maxWeight": 5,
+            "spread": 1,
+            "contested": false,
+            "consensus": "unanimous",
+            "voters": [
+              {
+                "userId": "u0",
+                "name": "",
+                "weight": 5,
+                "note": ""
+              },
+              {
+                "userId": "u1",
+                "name": "",
+                "weight": 4,
+                "note": ""
+              }
+            ],
+            "notes": []
+          }
+        ],
+        "adopted": [
+          {
+            "id": "S2",
+            "kind": "skill",
+            "label": "New priority",
+            "weight": 5,
+            "note": "Named by 2 of 2 on the committee.",
+            "from": "committee"
+          },
+          {
+            "id": "S1",
+            "kind": "skill",
+            "label": "Old priority",
+            "weight": 5,
+            "note": "Named by 2 of 2 on the committee.",
+            "from": "committee"
+          }
+        ]
+      }
+    },
+    {
+      "id": "A06-intake-change-not-stale",
+      "expected": "Diagnostic expectation: adopted profile signals source change; actual source revision alone creates no profile/derived-artifact stale flag",
+      "actual": {
+        "revision": 2,
+        "profileRevision": 1,
+        "staleArtifacts": {},
+        "history": []
+      }
+    },
+    {
+      "id": "A07-false-gap-warning",
+      "expected": "Diagnostic expectation: UI says short only when final profile is short; actual four gaps returned despite all categories having >=3",
+      "actual": {
+        "finalCounts": {
+          "skill": 4,
+          "trait": 3,
+          "chall": 3,
+          "opp": 3
+        },
+        "returnedGaps": [
+          {
+            "kind": "skill",
+            "label": "Essential skills",
+            "have": 1,
+            "need": 3
+          },
+          {
+            "kind": "trait",
+            "label": "Leadership and personality traits",
+            "have": 0,
+            "need": 3
+          },
+          {
+            "kind": "chall",
+            "label": "Current challenges",
+            "have": 0,
+            "need": 3
+          },
+          {
+            "kind": "opp",
+            "label": "Future opportunities",
+            "have": 0,
+            "need": 3
+          }
+        ]
+      }
+    },
+    {
+      "id": "A08-empty-normalized-id-collision",
+      "expected": "Diagnostic expectation: unique criterion ids even for accepted short labels; actual Strong and Good both reuse S1",
+      "actual": {
+        "aggregateKeys": [
+          "skill:strong",
+          "skill:good"
+        ],
+        "adopted": [
+          {
+            "id": "S1",
+            "kind": "skill",
+            "label": "Strong",
+            "weight": 5,
+            "note": "Named by 1 of 2 on the committee.",
+            "from": "committee"
+          },
+          {
+            "id": "S1",
+            "kind": "skill",
+            "label": "Good",
+            "weight": 4,
+            "note": "Named by 1 of 2 on the committee.",
+            "from": "committee"
+          }
+        ]
+      }
+    },
+    {
+      "id": "A09-contested-prompt-cap-conflict",
+      "expected": "AI instructed to retain every contested item, but nine contested skills exceed five-item schema cap and main source list contains only eight",
+      "actual": {
+        "rankedCount": 9,
+        "promptSkills": 8,
+        "promptContested": 9,
+        "directAdopted": 5,
+        "missingFromMainList": [
+          {
+            "label": "Priority 8",
+            "kind": "skill",
+            "low": 1,
+            "high": 5
+          }
+        ]
+      }
+    },
+    {
+      "id": "A10-prose-and-coverage-tradeoffs",
+      "expected": "Direct adoption considers structured items only; free text remains separate and is available to AI",
+      "actual": {
+        "directAdopted": [
+          {
+            "id": "S1",
+            "kind": "skill",
+            "label": "Communication",
+            "weight": 5,
+            "note": "Named by 1 of 1 on the committee.",
+            "from": "committee"
+          }
+        ],
+        "promptVoices": [
+          {
+            "mustHave": "Municipal budgeting expertise",
+            "dealBreaker": "No local government experience"
+          }
+        ],
+        "categoryDenominator": 1
+      }
+    }
+  ]
+}

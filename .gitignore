@@ -25,3 +25,6 @@ Slate - Partnership Proposal.md
 # demand from a synthetic search; evidence for a person to look at, not an
 # artifact of the build.
 /print-samples/
+
+# Stray crash log from a local Chromium run, not an artifact of the build.
+debug.log

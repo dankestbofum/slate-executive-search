@@ -99,6 +99,80 @@ test('the candidate questionnaire has no WCAG 2.1 AA violations', async ({ page 
   expect(violations, '\n    ' + describeViolations(violations)).toEqual([]);
 });
 
+/**
+ * The public portal is the other path used by people who did not choose this
+ * software. Scanned in both themes, because the whole flow is served to the
+ * viewer's own theme and an applicant does not get to change it.
+ */
+test('the careers portal has no WCAG 2.1 AA violations, in either theme', async ({ page }, testInfo) => {
+  await installClerk(page);
+  const label = 'Accessible Careers ' + testInfo.project.name;
+  const created = await (await page.request.post('/api/searches', {
+    data: { client: label, position: 'City Manager', jurisdictionType: 'municipality' }
+  })).json();
+  const revision = async () => String((await (await page.request.get('/api/searches/' + created.id)).json()).revision);
+
+  await page.request.put('/api/searches/' + created.id + '/posting', {
+    headers: { 'if-match': await revision() },
+    data: {
+      title: 'City Manager', employer: 'City of Accessible', location: 'Accessible, AZ',
+      summary: 'A synthetic posting used by the accessibility scan.',
+      responsibilities: 'Run the synthetic organization.',
+      qualifications: 'Ten years of synthetic experience.',
+      applicationInstructions: 'Answer the questions below.',
+      privacyNotice: 'Synthetic privacy notice.',
+      supportEmail: 'recruitment@example.gov',
+      deadline: { kind: 'hard', closesAt: '2026-12-31', timezone: 'America/Phoenix' },
+      questions: [{ prompt: 'Why this city?', required: true }],
+      materials: []
+    }
+  });
+  const published = await (await page.request.post('/api/searches/' + created.id + '/posting/publish', {
+    headers: { 'if-match': await revision() }
+  })).json();
+  const path = new URL(published.publicUrl).pathname;
+
+  await page.context().clearCookies();
+  for (const theme of ['light', 'dark']) {
+    await page.emulateMedia({ colorScheme: theme });
+    for (const where of [path.replace(/\/[^/]+$/, ''), path, path + '/apply']) {
+      await page.goto(where);
+      await page.waitForLoadState('networkidle');
+      const violations = await scan(page);
+      expect(violations, where + ' (' + theme + ')\n    ' + describeViolations(violations)).toEqual([]);
+    }
+  }
+  await page.emulateMedia({ colorScheme: 'light' });
+});
+
+test('the help screen and the help drawer have no WCAG 2.1 AA violations', async ({ page }) => {
+  await installClerk(page);
+  await page.goto('/');
+  // Below the breakpoint the rail is a drawer, and the application's opening
+  // navigation closes it — so the page has to have settled before it is opened.
+  await page.waitForLoadState('networkidle');
+  const menu = page.getByRole('button', { name: 'Menu', exact: true });
+  if (await menu.isVisible().catch(() => false)) await menu.click();
+  const guide = page.locator('.rail__link', { hasText: 'Help & user guide' }).first();
+  await expect(guide).toBeVisible();
+  await guide.click();
+  await page.getByRole('button', { name: /Sign in for the first time/ }).click();
+  await page.waitForLoadState('networkidle');
+
+  let violations = await scan(page);
+  expect(violations, 'help screen\n    ' + describeViolations(violations)).toEqual([]);
+
+  // And the drawer, which is a different tree: it lives outside #app and is
+  // the only part of the guide most people will ever read.
+  await page.goto('/');
+  // Exact: on a touch screen the tooltip's tap-alternative beside it is named
+  // "Explain Help with this page", which a substring match would also find.
+  await page.getByRole('button', { name: 'Help with this page', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Help' })).toBeVisible();
+  violations = await scan(page);
+  expect(violations, 'help drawer\n    ' + describeViolations(violations)).toEqual([]);
+});
+
 test('the page still works at 200% zoom without horizontal scrolling', async ({ page }) => {
   await page.setViewportSize({ width: 640, height: 720 });
   await page.goto('/');

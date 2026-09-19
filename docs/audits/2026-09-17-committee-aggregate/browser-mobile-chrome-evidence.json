@@ -1,0 +1,315 @@
+{
+  "project": "mobile-chrome",
+  "steps": [
+    {
+      "step": "Facilitator opens intake",
+      "detail": "Confirmed roster and opened window in browser, with due date and prompt. Roster creation used authenticated fixture API."
+    },
+    {
+      "step": "Member saves draft and reloads",
+      "detail": "All four categories entered via browser. Draft persisted; consultant aggregate stayed at zero submissions."
+    },
+    {
+      "step": "Member submits",
+      "detail": "Submitted draft through browser; consultant aggregate changed to one."
+    },
+    {
+      "step": "Save after submission",
+      "detail": "Clicking Save and finish later withdrew the previously submitted answers from the tally without confirmation."
+    },
+    {
+      "step": "Concurrent member submission",
+      "detail": "Second member opened before first submitted. Their submit received HTTP 409; reload discarded unsaved rows. Reentered answers after reload to continue."
+    },
+    {
+      "step": "Second member submits matching wording",
+      "detail": "Financial management merged into 2 of 2, average 3.0, Contested for weights 5 and 1. Manager remained pending (2 of 3 people answered)."
+    },
+    {
+      "step": "Close and release",
+      "detail": "Close action warned that one member had not answered. After accepting, member could read named aggregate and could no longer edit answers."
+    },
+    {
+      "step": "Adopt aggregate",
+      "detail": "Browser built persisted profile with average weight rounded to 3 and support/contested badges. Missing categories still require additions before profile completion."
+    },
+    {
+      "step": "Rename adopted criterion",
+      "detail": "Renaming then clicking a weight rerendered the committee-origin line as Yours and removed its support/contested badge."
+    }
+  ],
+  "observations": {
+    "accessibility": [],
+    "overflow": 0,
+    "openMemberConsensus": null,
+    "saveAfterSubmit": {
+      "submittedCount": 0,
+      "pendingCount": 3,
+      "confirmationDialogs": []
+    },
+    "concurrentSubmission": {
+      "status": 409,
+      "body": {
+        "error": "This search changed since you opened it. Your edits were not saved. Copy your edits, then reload the search and try again.",
+        "code": "STALE_SEARCH"
+      },
+      "retainedRowsBeforeReload": 4,
+      "inAppReloadControls": 0,
+      "retryStatus": 409,
+      "rowsAfterReload": 0
+    },
+    "aggregate": {
+      "submitted": 2,
+      "asked": 3,
+      "pending": [
+        {
+          "userId": "u1",
+          "name": "Abe Macy",
+          "searchRole": "manager"
+        }
+      ],
+      "byKind": {
+        "skill": [
+          {
+            "key": "skill:financial management",
+            "kind": "skill",
+            "label": "Financial management",
+            "mentions": 2,
+            "share": 1,
+            "avgWeight": 3,
+            "minWeight": 1,
+            "maxWeight": 5,
+            "spread": 4,
+            "contested": true,
+            "consensus": "unanimous",
+            "voters": [
+              {
+                "userId": "u-717b7c0f",
+                "name": "Alex Budget",
+                "weight": 5,
+                "note": "Balance a constrained budget."
+              },
+              {
+                "userId": "u-0dd64bbe",
+                "name": "Blair Growth",
+                "weight": 1,
+                "note": "Delegate technical work; focus on leadership."
+              }
+            ],
+            "notes": [
+              {
+                "name": "Alex Budget",
+                "note": "Balance a constrained budget."
+              },
+              {
+                "name": "Blair Growth",
+                "note": "Delegate technical work; focus on leadership."
+              }
+            ]
+          }
+        ],
+        "trait": [
+          {
+            "key": "trait:integrity",
+            "kind": "trait",
+            "label": "Integrity",
+            "mentions": 2,
+            "share": 1,
+            "avgWeight": 5,
+            "minWeight": 5,
+            "maxWeight": 5,
+            "spread": 0,
+            "contested": false,
+            "consensus": "unanimous",
+            "voters": [
+              {
+                "userId": "u-717b7c0f",
+                "name": "Alex Budget",
+                "weight": 5,
+                "note": ""
+              },
+              {
+                "userId": "u-0dd64bbe",
+                "name": "Blair Growth",
+                "weight": 5,
+                "note": ""
+              }
+            ],
+            "notes": []
+          }
+        ],
+        "chall": [
+          {
+            "key": "chall:infrastructure renewal",
+            "kind": "chall",
+            "label": "Infrastructure renewal",
+            "mentions": 2,
+            "share": 1,
+            "avgWeight": 4,
+            "minWeight": 4,
+            "maxWeight": 4,
+            "spread": 0,
+            "contested": false,
+            "consensus": "unanimous",
+            "voters": [
+              {
+                "userId": "u-717b7c0f",
+                "name": "Alex Budget",
+                "weight": 4,
+                "note": ""
+              },
+              {
+                "userId": "u-0dd64bbe",
+                "name": "Blair Growth",
+                "weight": 4,
+                "note": ""
+              }
+            ],
+            "notes": []
+          }
+        ],
+        "opp": [
+          {
+            "key": "opp:economic development",
+            "kind": "opp",
+            "label": "Economic development",
+            "mentions": 1,
+            "share": 0.5,
+            "avgWeight": 5,
+            "minWeight": 5,
+            "maxWeight": 5,
+            "spread": 0,
+            "contested": false,
+            "consensus": "single",
+            "voters": [
+              {
+                "userId": "u-0dd64bbe",
+                "name": "Blair Growth",
+                "weight": 5,
+                "note": ""
+              }
+            ],
+            "notes": []
+          },
+          {
+            "key": "opp:regional partnerships",
+            "kind": "opp",
+            "label": "Regional partnerships",
+            "mentions": 1,
+            "share": 0.5,
+            "avgWeight": 3,
+            "minWeight": 3,
+            "maxWeight": 3,
+            "spread": 0,
+            "contested": false,
+            "consensus": "single",
+            "voters": [
+              {
+                "userId": "u-717b7c0f",
+                "name": "Alex Budget",
+                "weight": 3,
+                "note": ""
+              }
+            ],
+            "notes": []
+          }
+        ]
+      },
+      "contested": [
+        {
+          "key": "skill:financial management",
+          "kind": "skill",
+          "label": "Financial management",
+          "mentions": 2,
+          "share": 1,
+          "avgWeight": 3,
+          "minWeight": 1,
+          "maxWeight": 5,
+          "spread": 4,
+          "contested": true,
+          "consensus": "unanimous",
+          "voters": [
+            {
+              "userId": "u-717b7c0f",
+              "name": "Alex Budget",
+              "weight": 5,
+              "note": "Balance a constrained budget."
+            },
+            {
+              "userId": "u-0dd64bbe",
+              "name": "Blair Growth",
+              "weight": 1,
+              "note": "Delegate technical work; focus on leadership."
+            }
+          ],
+          "notes": [
+            {
+              "name": "Alex Budget",
+              "note": "Balance a constrained budget."
+            },
+            {
+              "name": "Blair Growth",
+              "note": "Delegate technical work; focus on leadership."
+            }
+          ]
+        }
+      ],
+      "voices": [
+        {
+          "userId": "u-717b7c0f",
+          "name": "Alex Budget",
+          "mustHave": "Evidence of transparent financial decisions.",
+          "dealBreaker": "",
+          "context": "",
+          "at": "2026-09-18T00:44:48.520Z"
+        }
+      ]
+    },
+    "adoptedCriteria": [
+      {
+        "id": "S1",
+        "kind": "skill",
+        "label": "Financial management",
+        "weight": 3,
+        "note": "Named by 2 of 2 on the committee. Balance a constrained budget.",
+        "from": "committee"
+      },
+      {
+        "id": "T1",
+        "kind": "trait",
+        "label": "Integrity",
+        "weight": 5,
+        "note": "Named by 2 of 2 on the committee.",
+        "from": "committee"
+      },
+      {
+        "id": "C1",
+        "kind": "chall",
+        "label": "Infrastructure renewal",
+        "weight": 4,
+        "note": "Named by 2 of 2 on the committee.",
+        "from": "committee"
+      },
+      {
+        "id": "O1",
+        "kind": "opp",
+        "label": "Economic development",
+        "weight": 5,
+        "note": "Named by 1 of 2 on the committee.",
+        "from": "committee"
+      },
+      {
+        "id": "O2",
+        "kind": "opp",
+        "label": "Regional partnerships",
+        "weight": 3,
+        "note": "Named by 1 of 2 on the committee.",
+        "from": "committee"
+      }
+    ],
+    "renamedSourceBadge": "Yours"
+  },
+  "dialogs": [
+    "1 member has not answered yet. Close the window anyway?"
+  ]
+}

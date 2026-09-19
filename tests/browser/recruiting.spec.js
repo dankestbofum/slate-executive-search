@@ -113,7 +113,7 @@ test('switching candidate sections keeps unsaved scores and an unsaved note', as
   await expect(page.locator('[data-score="S1"][data-val="4"]')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('#cnote')).toHaveValue('Strong on the budget question.');
 
-  await page.getByRole('button', { name: 'Save my scores' }).click();
+  await page.getByRole('button', { name: 'Save my scores', exact: true }).click();
   await expect(page.locator('#toast')).toContainText(/on the file/i);
   const after = await (await page.request.get('/api/searches/' + search.id)).json();
   expect(Object.values(Object.values(after.scores || {})[0] || {})[0]).toMatchObject({ S1: 4 });

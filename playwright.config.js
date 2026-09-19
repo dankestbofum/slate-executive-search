@@ -88,6 +88,14 @@ module.exports = defineConfig({
       ANTHROPIC_API_KEY: '',
       SLATE_SUPPORT_EMAIL: 'recruitment@example.gov',
       SLATE_SUPPORT_HOURS: 'Weekdays 8am-5pm Arizona time',
+      // The careers portal needs the capabilities it otherwise refuses to
+      // pretend to have. `echo` returns the verification message to the caller
+      // so a browser test can complete a verification without a mailbox;
+      // server/mailer.js resolves it to "none" under NODE_ENV=production, so
+      // it cannot be switched on by a deployment.
+      SLATE_MAIL_TRANSPORT: 'echo',
+      SLATE_APPLICATION_UPLOADS: 'on',
+      SLATE_FILE_SCANNER: 'accept-all',
       // Playwright gives this process a stdin pipe. Closing it is what tells
       // the server to go when the runner is interrupted, instead of leaving a
       // listener behind that makes the next run fail on a used port.

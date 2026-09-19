@@ -11,7 +11,7 @@ const path = require('path');
 const vm = require('vm');
 
 const root = path.resolve(__dirname, '..');
-const roots = ['server', 'scripts', 'tests', 'public'];
+const roots = ['server', 'scripts', 'tests', 'public', 'content'];
 const skip = new Set(['node_modules', 'data', '.git']);
 
 function collect(directory) {

@@ -125,9 +125,7 @@ function adoptPendingAssignments(store, user, orgId) {
         userId: user.id, searchRole: committee.searchRoleOf(held.searchRole),
         addedAt: store.now(), addedBy: held.invitedBy || null, fromInvitation: held.id
       });
-      // The roster changed, so a confirmation given before this person joined
-      // no longer describes the committee.
-      search.team = { confirmedAt: null, confirmedBy: null };
+      store.rosterChanged(search);
       store.touch(search, user, 'joined the search from an invitation');
     }
     organizations.removePendingAssignment(store.db, held.id);

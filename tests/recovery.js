@@ -203,6 +203,77 @@ check('a configured but failing copy is reported overdue', () => {
     'a configured off-volume copy that has never run was not reported overdue');
 });
 
+/* --- snapshots are bounded ------------------------------------------------
+ *
+ * A snapshot now copies applicant materials as well as the store and the
+ * brochure photography, which is what makes a restore whole. It is also what
+ * makes an unbounded pile of them dangerous: every day copies every resume
+ * again, and the production volume is 1 GB. These pin the sweep that keeps
+ * that from filling the disk, and pin what it must never touch.
+ * ------------------------------------------------------------------------ */
+
+function seedWithMaterials() {
+  const dir = seedStore();
+  const held = path.join(dir, 'application-files', 'apl-abc123');
+  fs.mkdirSync(held, { recursive: true });
+  fs.writeFileSync(path.join(held, 'a'.repeat(32) + '.pdf'), Buffer.from('%PDF-1.4\nsynthetic'));
+  return dir;
+}
+
+check('a snapshot carries applicant materials, so a restore is whole', () => {
+  const source = seedWithMaterials();
+  const dest = path.join(tmpdir('snap'), 'today');
+  backup.snapshot(source, dest);
+  const restored = tmpdir('restored');
+  fs.rmSync(restored, { recursive: true, force: true });
+  backup.restore(dest, restored);
+  const file = path.join(restored, 'application-files', 'apl-abc123', 'a'.repeat(32) + '.pdf');
+  assert.ok(fs.existsSync(file), 'a restore brought back the records without the documents they name');
+  assert.match(fs.readFileSync(file, 'utf8'), /^%PDF/);
+});
+
+check('daily snapshots are swept to a bounded number, newest first', () => {
+  const source = seedWithMaterials();
+  for (let day = 1; day <= 20; day += 1) {
+    backup.snapshot(source, path.join(source, 'backups', '2026-09-' + String(day).padStart(2, '0')));
+  }
+  const result = backup.pruneSnapshots(source, 14);
+  const left = fs.readdirSync(path.join(source, 'backups')).sort();
+  assert.strictEqual(result.removed.length, 6);
+  assert.strictEqual(left.length, 14);
+  assert.strictEqual(left[left.length - 1], '2026-09-20', 'the sweep removed the newest snapshot');
+  assert.strictEqual(left[0], '2026-09-07', 'the sweep kept the wrong end of the range');
+});
+
+check('the sweep never removes a pre-migration safety copy', () => {
+  const source = seedWithMaterials();
+  for (let day = 1; day <= 18; day += 1) {
+    backup.snapshot(source, path.join(source, 'backups', '2026-09-' + String(day).padStart(2, '0')));
+  }
+  const preserved = path.join(source, 'backups', 'pre-migration-7-to-8-1758300000000');
+  fs.mkdirSync(preserved, { recursive: true });
+  fs.writeFileSync(path.join(preserved, 'slate.json'), '{}');
+  backup.pruneSnapshots(source, 14);
+  assert.ok(fs.existsSync(preserved),
+    'a one-off copy taken before a schema change was swept away with the dailies');
+});
+
+check('the retention window is configurable and never drops below one', () => {
+  assert.strictEqual(backup.keepDays({}), 14);
+  assert.strictEqual(backup.keepDays({ SLATE_BACKUP_KEEP_DAYS: '30' }), 30);
+  assert.strictEqual(backup.keepDays({ SLATE_BACKUP_KEEP_DAYS: '0' }), 14,
+    'a zero would have meant keeping no backups at all');
+  assert.strictEqual(backup.keepDays({ SLATE_BACKUP_KEEP_DAYS: 'nonsense' }), 14);
+});
+
+check('snapshot usage is reportable, so the disk filling is visible before it does', () => {
+  const source = seedWithMaterials();
+  backup.snapshot(source, path.join(source, 'backups', '2026-09-01'));
+  const usage = backup.snapshotUsage(source);
+  assert.strictEqual(usage.snapshots, 1);
+  assert.ok(usage.bytes > 0, 'a snapshot reported as costing nothing');
+});
+
 check('status reports state, never record contents', () => {
   const text = JSON.stringify(recovery.status({ intervalMs: 60000 }));
   assert.doesNotMatch(text, /Recovery County|Dana Ruiz|My answer/, 'record contents leaked into backup status');

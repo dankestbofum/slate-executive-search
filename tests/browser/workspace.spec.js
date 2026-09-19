@@ -125,7 +125,7 @@ test('Back from a candidate returns to the filtered list', async ({ page }) => {
   await page.locator('#cand-filter').fill('Bo');
   await expect(page.locator('.candtable tbody tr')).toHaveCount(1);
 
-  await page.locator('.candtable tbody tr').first().getByRole('button', { name: 'Review' }).click();
+  await page.locator('.candtable tbody tr').first().getByRole('button', { name: 'Review', exact: true }).click();
   await page.waitForURL(/\/person\//);
   await expect(page.locator('#main h1')).toContainText('Bo Chen');
 
@@ -172,7 +172,7 @@ test('the screening list offers invitation actions instead of a raw link column'
   expect(rowText, 'the raw invitation URL is back in the table').not.toContain('/apply/' + invite);
 
   await page.locator('.candacts').getByRole('button', { name: 'Invite', exact: true }).first().click();
-  await expect(page.getByRole('button', { name: 'Copy invite link' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Copy invite link', exact: true })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Open questionnaire' })).toHaveAttribute('href', '/apply/' + invite);
 });
 
@@ -230,7 +230,7 @@ test('unsaved scores cannot vanish into a stage change', async ({ page }) => {
   await expect(page.locator('.actionbar__state')).toContainText('Unsaved');
 
   page.once('dialog', d => d.accept());
-  await page.getByRole('button', { name: /advance to semifinalist/i }).click();
+  await page.getByRole('button', { name: /^advance to semifinalist$/i }).click();
   await expect(page.locator('#main h1')).toContainText('Robin Vale', { timeout: 10000 });
 
   // The rating survived the stage change rather than being discarded with it.
@@ -247,7 +247,7 @@ test('hover text is available on focus and dismissed with Escape', async ({ page
 
   await page.goto('/#/s/' + search.id + '/screen');
   await page.locator('.candacts').getByRole('button', { name: 'Invite', exact: true }).first().click();
-  const copy = page.getByRole('button', { name: 'Copy invite link' }).first();
+  const copy = page.getByRole('button', { name: 'Copy invite link', exact: true }).first();
   await expect(copy).toBeVisible({ timeout: 10000 });
 
   await copy.focus();

@@ -238,6 +238,9 @@ button.strip__s:hover{background:var(--sunken)}
   display:grid; grid-template-columns:3.2em minmax(0,1fr) auto auto;
   gap:var(--s-3); align-items:start; padding:var(--s-3) 0; border-bottom:1px solid var(--line);
 }
+/* What the committee actually said about this line, under the controls rather
+   than in a fifth column: opposing reasons are prose, not a field. */
+.crit-evid{grid-column:1/-1; color:var(--ink-2); border-left:2px solid var(--line-strong); padding-left:var(--s-3)}
 .apply-shell{max-width:760px; margin:0 auto; padding:var(--s-8) var(--s-5)}
 .lede{max-width:62ch; color:var(--ink-2); font-size:1.05rem; line-height:1.6}
 .band{padding:var(--s-6) 0}
@@ -529,4 +532,71 @@ button.strip__s:hover{background:var(--sunken)}
 
 @media (max-width:600px){
   .wslist__row{align-items:flex-start; flex-direction:column; gap:var(--s-2)}
+}
+
+/* --- public posting and application inbox --------------------------------- *
+ *
+ * Two screens the staff application did not have. They reuse .spec, .field and
+ * .candtable; these are the few pieces that had no existing equivalent.
+ * ------------------------------------------------------------------------- */
+
+/* A checkbox or radio that reads as one control with its words, so the label
+   is a target and not just text sitting next to a twelve-pixel square. */
+.radio{
+  display:inline-flex; align-items:center; gap:var(--s-2);
+  min-height:34px; font-size:15px; cursor:pointer;
+}
+.radio input{margin:0}
+
+/* Label-and-value pairs on the application detail. Collapses to stacked rows
+   on a phone rather than squeezing a value into a third of the width. */
+.kv{margin:0; display:grid; grid-template-columns:minmax(120px,180px) 1fr; gap:var(--s-2) var(--s-4)}
+.kv dt{font-weight:600; color:var(--ink-2)}
+.kv dd{margin:0; overflow-wrap:anywhere}
+@media (max-width:600px){
+  .kv{grid-template-columns:1fr; gap:2px}
+  .kv dd{margin-bottom:var(--s-2)}
+}
+
+/* An instruction that has to be read before an action is taken.
+   Distinct from .t-small, which is an aside, and from .notice, which is a
+   state the page is in. This is a sentence that changes what somebody
+   decides to do, so it sits beside the control at full reading size and is
+   never behind a hover. */
+.foreword{
+  max-width:var(--measure);
+  margin:var(--s-4) 0 var(--s-2);
+  padding:var(--s-3) var(--s-4);
+  background:var(--accent-tint);
+  border-radius:var(--r-2);
+  font-size:15px; line-height:1.55; color:var(--ink);
+}
+.foreword b{font-weight:600}
+@media print{ .foreword{display:none} }
+
+/* --- getting-started checklist -------------------------------------------- */
+
+/* Visually hidden, still announced. Used where a mark carries meaning that a
+   sighted reader gets from the strike-through and a screen-reader user would
+   otherwise get from nothing at all. */
+.sr-only{
+  position:absolute; width:1px; height:1px; padding:0; margin:-1px;
+  overflow:hidden; clip-path:inset(50%); white-space:nowrap; border:0;
+}
+
+.startlist__l{list-style:none; margin:var(--s-3) 0 0; padding:0; display:grid; gap:var(--s-2)}
+.startlist__i{
+  display:grid; grid-template-columns:20px 1fr auto; gap:var(--s-3); align-items:start;
+  padding:var(--s-2) 0; border-bottom:1px solid var(--line);
+}
+.startlist__i:last-child{border-bottom:0}
+.startlist__mark{display:inline-flex; justify-content:center; padding-top:3px; color:var(--ok)}
+.startlist__t{display:grid; gap:2px; min-width:0}
+/* Done lines stay on the list rather than vanishing, so the checklist reads as
+   progress instead of quietly getting shorter. */
+.startlist__i--done .startlist__t b{text-decoration:line-through; color:var(--ink-3)}
+.startlist__i--done .startlist__t .t-small{color:var(--ink-3)}
+@media (max-width:600px){
+  .startlist__i{grid-template-columns:20px 1fr; gap:var(--s-2)}
+  .startlist__i .btn{grid-column:2}
 }
