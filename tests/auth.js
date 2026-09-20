@@ -221,7 +221,21 @@ const as = (base, email, route = '/api/me') => fetch(base + route, { headers: si
     await stop();
 
     const upgraded = JSON.parse(fs.readFileSync(file, 'utf8'));
-    assert.equal(upgraded.schemaVersion, 7);
+    assert.equal(upgraded.schemaVersion, 8);
+    // 7 -> 8 added public postings and the applicant tables. Every existing
+    // search is left unpublished: inferring "this search is advertising" from
+    // an ad plan would put a client's search on the public internet because
+    // somebody upgraded the application.
+    for (const search of [...upgraded.searches, ...upgraded.archivedSearches]) {
+      assert.ok(search.posting, 'a migrated search has no posting record at all');
+      assert.equal(search.posting.state, 'draft', 'a migrated search came back advertising');
+      assert.equal(search.posting.published, null, 'a migrated search came back published');
+      assert.equal(search.posting.slug, null, 'a migrated search was given a public address');
+    }
+    for (const table of ['applications', 'applicants', 'applicantChallenges', 'applicantSessions']) {
+      assert.ok(Array.isArray(upgraded[table]), 'the ' + table + ' table was not created');
+      assert.equal(upgraded[table].length, 0, 'the ' + table + ' table was not empty on a legacy store');
+    }
     // 6 -> 7 split a member's private draft from their committed answer. A
     // legacy record is read for what it actually was, and nothing invents a
     // submitted version the old schema had already overwritten.
@@ -252,7 +266,7 @@ const as = (base, email, route = '/api/me') => fetch(base + route, { headers: si
     assert.equal(upgraded.sessions, undefined, 'the session table survived the migration');
     assert.ok(upgraded.users.every(u => !('pin' in u) && !('pinHash' in u)));
     assert.equal(upgraded.archivedSearches[0].archivedUsers[0].pinHash, undefined);
-    assert.ok(fs.readdirSync(path.join(directory, 'backups')).some(n => n.startsWith('pre-migration-1-to-7-')));
+    assert.ok(fs.readdirSync(path.join(directory, 'backups')).some(n => n.startsWith('pre-migration-1-to-8-')));
     console.log('PASS  Account linking, disabled accounts, public sign-up, workspace creation, and migration to organization ownership');
   } finally { await stop(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

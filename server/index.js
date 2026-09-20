@@ -29,6 +29,12 @@ const aibudget = require('./aibudget');
 const researchOp = require('./research-op');
 const researchJobs = require('./research-jobs');
 const organizations = require('./organizations');
+const help = require('./help');
+const postings = require('./postings');
+const applications = require('./applications');
+const applicantAccess = require('./applicant-access');
+const applicationFiles = require('./application-files');
+const mailer = require('./mailer');
 const {
   assembleBrochure, applyBrochureDefaults, packTheme, packScheme,
   PLACE_FIELDS, GOV_FIELDS, PACK_THEMES, PACK_SCHEMES
@@ -77,6 +83,16 @@ function releaseIdentity(){
 const ENGINE_FLOOR = Number(String(require('../package.json').engines?.node || '').match(/\d+/)?.[0] || 0);
 const NON_ARTIFACT_STEPS = new Set(['profile', 'screen', 'send2', 'finalists', ...db.STAFF_STEPS]);
 const ARTIFACTS = new Set(db.STEPS.map(s => s.key).filter(k => !NON_ARTIFACT_STEPS.has(k)));
+
+// The user guide names process steps and packages. A guide that points at a
+// step this build does not have is a broken help link in front of somebody who
+// is already stuck, so it is checked here rather than discovered there.
+try {
+  help.verify();
+} catch (error) {
+  console.error('Slate: ' + error.message);
+  process.exit(1);
+}
 
 /**
  * Whether a step is on this search's file at all. A Basic search has no
@@ -127,13 +143,22 @@ const PHOTO_FILE_RE = new RegExp('^(' + [...PHOTO_SLOTS].join('|') + ')(\\.[a-f0
 // inherit an upload-sized allowance. body-parser marks the request once
 // parsed, so the general parser below is a no-op for these.
 const MEDIA_UPLOAD = /^\/api\/searches\/[^/]+\/media\/?$/;
+// An application material arrives the same way: base64 inside JSON, so it
+// passes through the same origin and session checks as every other write
+// rather than needing a second, differently-guarded upload path. The cap is
+// the file limit in server/application-files.js plus base64 overhead.
+const FILE_UPLOAD = /^\/api\/applications\/[^/]+\/files\/?$/;
 const jsonMedia = express.json({ limit: '9mb' });
+const jsonUpload = express.json({ limit: '12mb' });
 app.use((req, res, next) => (req.method === 'POST' && MEDIA_UPLOAD.test(req.path)) ? jsonMedia(req, res, next) : next());
+app.use((req, res, next) => (req.method === 'POST' && FILE_UPLOAD.test(req.path)) ? jsonUpload(req, res, next) : next());
 app.use(express.json({ limit: '256kb' }));
 
 app.use((req, res, next) => {
-  // Candidate links and public configuration do not depend on Clerk availability.
-  if (/^\/api\/(config|health|ready|apply)(\/|$)/.test(req.path)) return next();
+  // Candidate links, the public portal, and public configuration do not depend
+  // on Clerk availability. An applicant reading a job page must not be turned
+  // away because the staff identity provider is having a bad afternoon.
+  if (/^\/api\/(config|health|ready|apply|public|applications)(\/|$)/.test(req.path)) return next();
   if (req.path.startsWith('/api/') || req.path.startsWith('/media/')) return auth.middleware(req, res, next);
   next();
 });
@@ -189,6 +214,39 @@ const generateLimit = http.limiter({
 const researchLimit = http.limiter({
   windowMs: 10 * 60 * 1000, max: 60, key: req => 'research:' + (req.user?.id || clientIp(req)),
   message: 'Too much research requested. Wait a few minutes.'
+});
+
+/* Portal limits.
+ *
+ * Keyed by the verified applicant where there is one and by address otherwise,
+ * so a whole county behind one NAT address is not locked out because somebody
+ * else on it applied for a job this morning. Verification is keyed by the
+ * *email address* as well as the caller, because the thing worth bounding
+ * there is how often a code can be posted to one mailbox — that limit protects
+ * a person who is not making the requests.
+ */
+const portalReadLimit = http.limiter({
+  windowMs: 5 * 60 * 1000, max: 600, key: req => 'portal:' + clientIp(req),
+  message: 'Too many requests. Wait a few minutes and try again.'
+});
+const verifyLimit = http.limiter({
+  windowMs: 15 * 60 * 1000, max: 20, key: req => 'verify:' + clientIp(req),
+  message: 'Too many verification attempts from this connection. Wait a few minutes and try again.'
+});
+const verifyAddressLimit = http.limiter({
+  windowMs: 15 * 60 * 1000, max: 5,
+  key: req => 'verify-to:' + applicantAccess.normalizeEmail(req.body?.email || ''),
+  message: 'A code was sent to that address recently. Check your mail, including spam, before asking for another.'
+});
+const applicationLimit = http.limiter({
+  windowMs: 5 * 60 * 1000, max: 240,
+  key: req => 'application:' + (req.applicant?.id || clientIp(req)),
+  message: 'Too many requests. Wait a few minutes and try again.'
+});
+const uploadLimit = http.limiter({
+  windowMs: 30 * 60 * 1000, max: 30,
+  key: req => 'upload:' + (req.applicant?.id || clientIp(req)),
+  message: 'Too many uploads. Wait a few minutes and try again.'
 });
 
 function clientIp(req){
@@ -291,6 +349,22 @@ function painted(req, search){
   // this rather than re-deriving authority from a role name, so a policy change
   // moves the buttons and the refusals together.
   if (req.access && out.you) out.you.may = authority.permissions(search, req.access);
+  // Whether this search is advertising, and how many applications are waiting.
+  // Staff only: a committee member has no publishing screen and no application
+  // inbox, and the count of who has applied is the firm's working information
+  // until an applicant is accepted onto the candidate list.
+  if (db.canEdit(search, req.access)) {
+    const posting = postings.of(search);
+    out.posting = {
+      state: posting.state,
+      published: Boolean(posting.published),
+      live: postings.isLive(posting, { searchFrozen: disposition.isFrozen(search) }),
+      accepting: postings.acceptsApplications(posting, { searchFrozen: disposition.isFrozen(search) }),
+      unpublishedChanges: Boolean(posting.published)
+        && JSON.stringify(posting.draft) !== JSON.stringify(posting.published.fields)
+    };
+    out.applications = applications.countsFor(db.db, search);
+  }
   return out;
 }
 
@@ -613,6 +687,31 @@ app.get('/api/ready', (_req, res) => {
       limits: researchOp.limits(),
       ...jobs.counts()
     },
+    // What the public portal can honestly do on this deployment. Reported
+    // rather than assumed, because both of these are "off" by default and a
+    // posting published without them behaves differently: no mail means no
+    // application flow at all, and no scanner means materials are stored but
+    // unreadable. An operator should be able to see that without publishing a
+    // posting to find out.
+    portal: {
+      postings: db.db.searches.filter(s => s.posting?.published).length,
+      mail: mailer.status(),
+      files: {
+        ...applicationFiles.scannerStatus(),
+        uploads: applicationFiles.uploadsEnabled(),
+        // What the materials are costing, and what the snapshots of them are
+        // costing on top. These are the two numbers that decide whether the
+        // volume is big enough, and an operator should not have to shell into
+        // the container to find them.
+        bytes: applicationFileBytes(),
+        snapshots: require('./backup').snapshotUsage(db.DATA_DIR),
+        keepDays: require('./backup').keepDays()
+      },
+      applications: (db.db.applications || []).reduce((counts, a) => {
+        counts[a.state] = (counts[a.state] || 0) + 1;
+        return counts;
+      }, {})
+    },
     recovery: recoveryStatus,
     alerts: telemetry.alerts(),
     metrics: telemetry.metrics({
@@ -676,6 +775,22 @@ function storeBytes(){
   catch { return null; }
 }
 
+/** What applicant materials occupy on the volume, live rather than in snapshots. */
+function applicationFileBytes(){
+  const root = applicationFiles.root(db.DATA_DIR);
+  let total = 0;
+  try {
+    for (const dir of fs.readdirSync(root, { withFileTypes: true })) {
+      if (!dir.isDirectory()) continue;
+      for (const name of fs.readdirSync(path.join(root, dir.name))) {
+        try { total += fs.statSync(path.join(root, dir.name, name)).size; }
+        catch { /* removed while being counted */ }
+      }
+    }
+  } catch { return 0; }
+  return total;
+}
+
 /**
  * Watch the conditions worth waking someone for.
  *
@@ -708,6 +823,51 @@ function watchAlerts(){
     });
   };
   const timer = setInterval(check, 60000);
+  timer.unref();
+  return timer;
+}
+
+/**
+ * Remove work nobody came back to.
+ *
+ * Three things expire, and only one of them used to be cleaned up at all:
+ *
+ *  - Application drafts, with the files attached to them. These are the reason
+ *    this exists. The bytes live on disk rather than in the store, so deleting
+ *    the record without deleting the file would leave somebody's resume behind
+ *    with nothing pointing at it and nothing ever removing it.
+ *  - Candidate questionnaire drafts, which were already treated as spent on
+ *    read but stayed in the store for ever.
+ *  - Verification challenges and applicant sessions.
+ *
+ * Deliberately not on the request path. Sweeping on every call would put a
+ * whole-store walk in front of ordinary work, which is the mistake the backup
+ * used to make.
+ */
+function sweepExpiredDrafts(){
+  let changed = 0;
+  try {
+    const expired = applications.pruneDrafts(db.db);
+    for (const id of expired.ids) applicationFiles.removeAll(db.DATA_DIR, id);
+    changed += expired.removed;
+    for (const search of db.db.searches) changed += candidates.pruneDrafts(search);
+    // Both tables, not just sessions. A sweep that cleared only expired
+    // verification challenges would count nothing, skip the persist, and leave
+    // the store on disk holding rows this process has already dropped.
+    const before = (db.db.applicantSessions?.length || 0) + (db.db.applicantChallenges?.length || 0);
+    applicantAccess.prune(db.db);
+    changed += before - ((db.db.applicantSessions?.length || 0) + (db.db.applicantChallenges?.length || 0));
+    if (changed) db.persist();
+  } catch (error) {
+    // Never fatal. A sweep that cannot run is a storage problem the alerts
+    // already watch for, and it must not take the process down with it.
+    console.error('Slate: expiry sweep failed: ' + error.message);
+  }
+  return changed;
+}
+
+function expirySweep(){
+  const timer = setInterval(sweepExpiredDrafts, 6 * 60 * 60 * 1000);
   timer.unref();
   return timer;
 }
@@ -756,6 +916,27 @@ function visibleUsers(access){
 }
 
 const onboarding = require('./onboarding');
+
+/* ------------------------------------------------------------------ *
+ * The user guide
+ *
+ * Two projections of one catalog (content/help). The staff guide needs a
+ * signed-in reader because it describes the inside of a firm's workspace; the
+ * candidate guide is served to the public portal and is built from an
+ * allowlist of articles written for applicants, never from the staff guide
+ * with things taken out.
+ * ------------------------------------------------------------------ */
+app.get('/api/help', requireUser, (_req, res) => {
+  res.json(help.staffCatalog());
+});
+
+app.get('/api/public/help', (_req, res) => {
+  // Cacheable, unlike the rest of /api: it is the same content for everybody
+  // and it holds nothing about anybody. Short, so a correction reaches readers
+  // the same day it is made.
+  res.set('Cache-Control', 'public, max-age=300');
+  res.json(help.publicCatalog());
+});
 
 /** Every workspace this person can switch into, named, with their role in each. */
 async function workspacesFor(access){
@@ -1900,10 +2081,16 @@ app.put('/api/searches/:id/verification', ...requireWorkspace, requireSearch, re
 
 app.get('/api/searches/:id/export', ...requireWorkspace, requireSearch, requireEditor, authority.requireAuthority('exportRecords'), (req, res) => {
   const bundle = exporter.build(req.search, {
-    viewer: req.user,
+    // Staff is a workspace fact, not a property of the account record, so it
+    // is resolved here and handed over rather than re-derived from a role name.
+    viewer: { ...req.user, staff: db.isStaff(req.access) },
     users: db.db.users,
     dataDir: db.DATA_DIR,
-    release: RELEASE
+    release: RELEASE,
+    // Submitted applications only. Drafts are not passed in at all, rather
+    // than passed in and filtered downstream: the export module should not be
+    // holding an unsent application even for the length of one function.
+    applications: applications.submittedFor(db.db, req.search)
   });
 
   db.touch(req.search, req.user, 'exported the search record');
@@ -3081,6 +3268,236 @@ app.post('/api/searches/:id/candidates/:cid/reopen', ...requireWorkspace, requir
   res.json(painted(req, req.search));
 });
 
+/* ===========================================================================
+ * Public postings: the staff side
+ *
+ * Consultants prepare and preview; the search manager publishes. The split is
+ * enforced by the authority table (server/authority.js) rather than by a role
+ * check written out here, so the control the client draws and the answer the
+ * route gives come from the same statement.
+ * ========================================================================= */
+
+// Where a published posting lives, for the address shown to staff. Taken from
+// the request rather than configured, so it is right on every host the
+// application answers on instead of right on the one somebody remembered.
+function publicBase(req){
+  const configured = String(process.env.SLATE_PUBLIC_URL || '').trim().replace(/\/+$/, '');
+  if (configured) return configured;
+  // Fallback only. `req.protocol` is http behind a TLS terminator unless the
+  // proxy is trusted, and TRUST_PROXY is not set on the deployment — so
+  // without this a consultant would be handed an http:// address to paste
+  // into a job advertisement. The forwarded header is read the same way
+  // secureCookies() reads it. Set SLATE_PUBLIC_URL in production: the host
+  // here is whatever the client sent.
+  const scheme = (req.secure || req.get('x-forwarded-proto') === 'https') ? 'https' : req.protocol;
+  return scheme + '://' + req.get('host');
+}
+
+function postingResponse(req){
+  const posting = postings.of(req.search);
+  return {
+    // Editing a posting is an edit to the search, so it moves the search's
+    // revision. Returned here for the same reason every other write returns
+    // it: the client holds one revision per search and sends it as the
+    // precondition on the next save. Leaving it out would make the save after
+    // this one fail as a conflict that never happened.
+    revision: req.search.revision,
+    ...postings.staffView(posting, {
+      searchFrozen: disposition.isFrozen(req.search),
+      publicBase: publicBase(req)
+    })
+  };
+}
+
+app.get('/api/searches/:id/posting', ...requireWorkspace, requireSearch, requireEditor, (req, res) => {
+  res.json({
+    ...postingResponse(req),
+    // What the deployment can honestly promise an applicant. The screen warns
+    // before publishing rather than after somebody has tried to apply.
+    capabilities: {
+      mail: mailer.status(),
+      files: { ...applicationFiles.scannerStatus(), uploads: applicationFiles.uploadsEnabled() }
+    }
+  });
+});
+
+app.put('/api/searches/:id/posting', ...requireWorkspace, requireSearch, requireEditor, (req, res) => {
+  const invalid = postings.validateDraft(req.body);
+  if (invalid) return res.status(400).json({ error: invalid });
+  const posting = postings.ensure(req.search);
+  postings.applyDraft(posting, req.body || {});
+  // Saving the draft changes nothing the public can see. Said here because it
+  // is the single most useful fact about this screen.
+  db.touch(req.search, req.user, 'edited the public posting');
+  db.persist();
+  res.json(postingResponse(req));
+});
+
+app.post('/api/searches/:id/posting/publish', ...requireWorkspace, requireSearch, requireEditor,
+  authority.requireAuthority('publishPosting'), (req, res) => {
+    const organization = db.findOrganization(req.search.organizationId);
+    if (!organization) {
+      return res.status(409).json({ error: 'This search has no workspace on record, so it cannot be published. Contact support.' });
+    }
+    const result = postings.publish(req.search, organization, req.user);
+    if (result.error) return res.status(400).json({ error: result.error, missing: result.missing });
+    db.touch(req.search, req.user, 'published the public job posting (version ' + result.posting.version + ')');
+    db.persist();
+    res.json(postingResponse(req));
+  });
+
+app.post('/api/searches/:id/posting/state', ...requireWorkspace, requireSearch, requireEditor,
+  authority.requireAuthority('publishPosting'), (req, res) => {
+    const next = String(req.body?.state || '');
+    const result = postings.setState(req.search, next, req.user);
+    if (result.error) return res.status(400).json({ error: result.error });
+    db.touch(req.search, req.user, 'set the public posting to ' + next);
+    db.persist();
+    res.json(postingResponse(req));
+  });
+
+/* ===========================================================================
+ * Applications from the portal: the staff side
+ *
+ * Only submitted applications are visible here. A draft somebody is still
+ * writing is not an application, is not in this list, and is not in an export.
+ * ========================================================================= */
+
+function applicationOnSearch(req, res, next){
+  const application = applications.byId(db.db, req.params.aid);
+  // Scope is checked against the search this route already resolved and
+  // authorized, never against anything in the request.
+  if (!application
+      || application.searchId !== req.search.id
+      || application.organizationId !== req.search.organizationId) {
+    return res.status(404).json({ error: 'Application not found.' });
+  }
+  req.application = application;
+  next();
+}
+
+app.get('/api/searches/:id/applications', ...requireWorkspace, requireSearch, requireEditor, (req, res) => {
+  const list = applications.submittedFor(db.db, req.search);
+  res.json({
+    applications: list.map(a => applications.staffRow(a, req.search)),
+    counts: applications.countsFor(db.db, req.search),
+    posting: {
+      published: Boolean(req.search.posting?.published),
+      accepting: postings.acceptsApplications(postings.of(req.search), {
+        searchFrozen: disposition.isFrozen(req.search)
+      })
+    }
+  });
+});
+
+app.get('/api/searches/:id/applications/:aid', ...requireWorkspace, requireSearch, requireEditor,
+  applicationOnSearch, (req, res) => {
+    if (req.application.state !== 'submitted') return res.status(404).json({ error: 'Application not found.' });
+    res.json(applications.staffView(req.application, req.search, { files: applicationFiles }));
+  });
+
+/**
+ * One material, for a reviewer.
+ *
+ * Authorized per request against the search this file belongs to, and refused
+ * outright unless a scan has cleared it. An unscanned or quarantined file is
+ * not served on the grounds that the reviewer is trusted: the reviewer is not
+ * the risk, the file is.
+ */
+app.get('/api/searches/:id/applications/:aid/files/:fid', ...requireWorkspace, requireSearch, requireEditor,
+  applicationOnSearch, (req, res) => {
+    const application = req.application;
+    if (application.state !== 'submitted') return res.status(404).json({ error: 'Application not found.' });
+    const file = (application.submitted.files || []).find(f => f.id === req.params.fid);
+    if (!file) return res.status(404).json({ error: 'That file is not on this application.' });
+    if (!applicationFiles.readable(file)) {
+      return res.status(409).json({
+        error: applicationFiles.SCAN_STATES[file.scan.state]?.staff || 'That file is not available.',
+        code: 'FILE_NOT_CLEARED',
+        scanState: file.scan.state
+      });
+    }
+    let body;
+    try { body = applicationFiles.read(db.DATA_DIR, application.id, file); }
+    catch { return res.status(410).json({ error: 'That file is no longer in storage.' }); }
+    res.set('Content-Type', file.contentType);
+    res.set('Content-Disposition', 'attachment; filename="' + file.label.replace(/"/g, '') + '"');
+    res.set('Cache-Control', 'no-store, private');
+    res.send(body);
+  });
+
+/**
+ * Bring a submitted application onto the candidate list.
+ *
+ * The candidate record is built here, in the one place that owns what a
+ * candidate is, and the application keeps the link. Reconciliation is never
+ * automatic: if this person might already be on the file, the caller has to
+ * say they looked.
+ */
+app.post('/api/searches/:id/applications/:aid/accept', ...requireWorkspace, requireSearch, requireEditor,
+  applicationOnSearch, (req, res) => {
+    const application = req.application;
+    if (application.state !== 'submitted') return res.status(409).json({ error: 'Only a submitted application can be accepted.' });
+    const matches = applications.possibleMatches(req.search, application);
+    if (matches.length && !req.body?.reconciled) {
+      return res.status(409).json({
+        error: 'This application may be somebody already on this search. Read both records and confirm before adding a second one.',
+        code: 'RECONCILE_FIRST',
+        possibleMatches: matches
+      });
+    }
+    const answers = application.submitted.answers;
+    const candidate = {
+      id: db.nid('c'),
+      name: answers.name,
+      cur: '',
+      org: '',
+      yrs: 0,
+      email: answers.email,
+      stage: 'applicant',
+      invite: crypto.randomBytes(24).toString('hex'),
+      inviteVersion: 2,
+      survey1: null,
+      survey2: null,
+      survey2SentAt: null,
+      survey2Deadline: '',
+      addedAt: db.now(),
+      // Where this person came from, so the list can say so and an export can
+      // distinguish an applicant from somebody a consultant sourced by hand.
+      source: 'public-portal',
+      applicationId: application.id
+    };
+    req.search.candidates.push(candidate);
+    const accepted = applications.accept(application, candidate.id, req.user);
+    if (accepted.error) return res.status(409).json({ error: accepted.error });
+    db.touch(req.search, req.user, 'accepted a public application from ' + candidate.name);
+    db.persist();
+    res.json({ candidateId: candidate.id, search: painted(req, req.search) });
+  });
+
+/**
+ * Authorise a correction to a submitted application.
+ *
+ * Follows the questionnaire reopening pattern exactly: the original submission
+ * is kept in the record, the applicant can edit and submit again, and the
+ * reason is written down. Nothing is edited in place by staff.
+ */
+app.post('/api/searches/:id/applications/:aid/reopen', ...requireWorkspace, requireSearch, requireEditor,
+  applicationOnSearch, (req, res) => {
+    const reason = String(req.body?.reason || '').trim();
+    if (!reason) return res.status(400).json({ error: 'Record why this application is being reopened.' });
+    if (req.application.staff?.acceptedAt) {
+      return res.status(409).json({ error: 'This application is already on the candidate list. Correct the candidate record instead.' });
+    }
+    const result = applications.reopen(req.application, req.user, reason);
+    if (result.error) return res.status(409).json({ error: result.error });
+    db.touch(req.search, req.user, 'reopened a public application for correction: ' + reason);
+    db.persist();
+    // The activity entry moved the search's revision; hand it back so the next
+    // save from this client is not refused as a conflict.
+    res.json({ ok: true, revision: req.search.revision });
+  });
+
 app.get('/api/apply/:token', candidateLimit, (req, res) => {
   const found = db.findByInvite(req.params.token);
   if (found) {
@@ -3229,6 +3646,422 @@ app.post('/api/apply/:token/draft', candidateLimit, (req, res) => {
   res.json({ ok: true, savedAt: result.saved.at, expiresAt: result.saved.expiresAt });
 });
 
+/* ===========================================================================
+ * The public careers portal
+ *
+ * Everything below this comment is reachable by anybody on the internet with
+ * no account. Three rules run through all of it:
+ *
+ *  - The only records it can reach are published posting snapshots and, once
+ *    an address has been verified, that address's own application. It never
+ *    takes a search or a candidate as an argument.
+ *  - Scope is resolved from the server's own records. A submitted workspace or
+ *    search id is not read anywhere in this section.
+ *  - A refusal never tells the caller something they did not already know. An
+ *    unverified request learns nothing about whether an application exists.
+ * ========================================================================= */
+
+function searchFrozenFor(search){
+  return disposition.isFrozen(search);
+}
+
+/** Resolve a public address to a posting, or null. Archived searches are not consulted. */
+function resolvePosting(firmSlug, postingSlug){
+  const found = db.findPosting(String(firmSlug || ''), String(postingSlug || ''));
+  if (!found) return null;
+  const searchFrozen = searchFrozenFor(found.search);
+  if (!postings.isLive(found.posting, { searchFrozen })) return null;
+  return { ...found, searchFrozen };
+}
+
+app.get('/api/public/firms', portalReadLimit, (_req, res) => {
+  res.set('Cache-Control', 'public, max-age=60');
+  res.json({ firms: db.publishedFirms() });
+});
+
+/**
+ * The listings.
+ *
+ * Grouped by firm rather than served as one cross-firm directory: a combined
+ * index is a product decision the plan defers, and building one by default
+ * would make it by accident.
+ */
+app.get('/api/public/postings', portalReadLimit, (req, res) => {
+  const firm = String(req.query.firm || '').trim();
+  const query = String(req.query.q || '').trim().toLowerCase().slice(0, 120);
+  const place = String(req.query.location || '').trim().toLowerCase().slice(0, 120);
+  if (!firm) return res.status(400).json({ error: 'Name the recruiting firm whose openings you want to see.' });
+
+  const rows = db.livePostings(firm)
+    .map(({ search, posting }) => postings.publicSummary(posting, { searchFrozen: searchFrozenFor(search) }))
+    .filter(Boolean)
+    .filter(row => {
+      if (place && !String(row.location || '').toLowerCase().includes(place)) return false;
+      if (!query) return true;
+      return [row.title, row.employer, row.location].some(v => String(v || '').toLowerCase().includes(query));
+    })
+    .sort((a, b) => String(b.publishedAt).localeCompare(String(a.publishedAt)));
+
+  const organization = db.publishedFirms().find(f => f.slug === firm) || null;
+  // A short cache, because unpublishing has to reach the public quickly. A
+  // closed or paused posting stays listed with its state rather than
+  // disappearing, so somebody following an advertisement is told what happened
+  // instead of getting a page that says the job never existed.
+  res.set('Cache-Control', 'public, max-age=60');
+  res.json({ firm: organization, postings: rows });
+});
+
+app.get('/api/public/postings/:firmSlug/:postingSlug', portalReadLimit, (req, res) => {
+  const found = resolvePosting(req.params.firmSlug, req.params.postingSlug);
+  if (!found) return res.status(404).json({ error: 'That opening is not available.' });
+  const view = postings.publicView(found.posting, { searchFrozen: found.searchFrozen });
+  res.set('Cache-Control', 'public, max-age=60');
+  res.json({
+    posting: view,
+    firm: { slug: found.posting.published.firmSlug, name: found.organization?.name || 'Recruiting firm' },
+    // What this deployment can actually do, so the page offers an application
+    // flow only when it can complete one. Collecting an address and then
+    // failing to send a code is the outcome this prevents.
+    apply: {
+      available: view.accepting && mailer.configured(),
+      reason: !view.accepting
+        ? (view.state === 'paused'
+          ? 'This posting is not accepting applications right now.'
+          : 'This posting is closed to new applications.')
+        : (mailer.configured() ? null : 'Online applications are not available on this service yet. Use the contact below to reach the search team.'),
+      uploads: applicationFiles.uploadsEnabled()
+    }
+  });
+});
+
+/* --- applicant identity ------------------------------------------------- */
+
+// Attach the verified applicant, if the request carries a live session. Never
+// refuses: the routes that need one say so themselves, so a read can decide
+// what to show rather than being bounced.
+function readApplicant(req, _res, next){
+  const token = applicantAccess.readCookie(req);
+  const found = token ? applicantAccess.readSession(db.db, token) : null;
+  req.applicant = found?.applicant || null;
+  req.applicantToken = found ? token : null;
+  next();
+}
+
+function requireApplicant(req, res, next){
+  if (!req.applicant) {
+    return res.status(401).json({
+      error: 'Verify your email address to open your application.',
+      code: 'VERIFY_REQUIRED'
+    });
+  }
+  next();
+}
+
+function secureCookies(req){
+  return req.secure || req.get('x-forwarded-proto') === 'https';
+}
+
+/**
+ * Ask for a verification code.
+ *
+ * Answers identically whatever the address, whether or not it has ever applied
+ * for anything, and whether or not the mail actually went out. The only way to
+ * learn that an address has an application is to read the code sent to it.
+ */
+app.post('/api/applications/verify/start', verifyLimit, verifyAddressLimit, async (req, res) => {
+  const email = String(req.body?.email || '');
+  const same = {
+    ok: true,
+    message: 'If that address can apply, a code is on its way. It expires in '
+      + Math.round(applicantAccess.CODE_TTL_MS / 60000) + ' minutes.'
+  };
+  if (!applicantAccess.validEmail(email)) {
+    return res.status(400).json({ error: 'Enter an email address you can receive mail at.' });
+  }
+  if (!mailer.configured()) {
+    return res.status(503).json({
+      error: 'Online applications are not available on this service yet. Use the contact on the posting to reach the search team.',
+      code: 'MAIL_UNAVAILABLE'
+    });
+  }
+  // The posting is named only so the message can say which job it is about. It
+  // grants nothing and is not trusted for scope.
+  const found = req.body?.firmSlug && req.body?.postingSlug
+    ? resolvePosting(req.body.firmSlug, req.body.postingSlug) : null;
+  const title = found ? found.posting.published.fields.title : null;
+
+  const started = applicantAccess.startChallenge(db.db, email);
+  db.persist();
+  const message = mailer.verificationMessage({
+    code: started.code, posting: title, minutes: started.expiresInMinutes
+  });
+  const sent = await mailer.deliver({ to: applicantAccess.normalizeEmail(email), ...message });
+  if (!sent.accepted) {
+    return res.status(503).json({
+      error: 'The code could not be sent. Use the contact on the posting to reach the search team.',
+      code: 'MAIL_UNAVAILABLE'
+    });
+  }
+  // The test transport hands the message back so an automated test can finish
+  // a verification without a mailbox. It exists for that and nothing else:
+  // server/mailer.js resolves the transport to "none" under NODE_ENV
+  // production whatever the environment says, so this branch cannot be reached
+  // by a deployment and cannot be switched on by configuration alone.
+  if (mailer.transportName() === 'echo') return res.json({ ...same, testMessage: sent.body });
+  res.json(same);
+});
+
+app.post('/api/applications/verify/confirm', verifyLimit, (req, res) => {
+  const email = String(req.body?.email || '');
+  if (!applicantAccess.validEmail(email)) {
+    return res.status(400).json({ error: 'Enter the address the code was sent to.' });
+  }
+  const result = applicantAccess.verifyChallenge(db.db, email, req.body?.code);
+  if (result.error) {
+    db.persist();
+    return res.status(400).json({ error: result.error });
+  }
+  db.persist();
+  res.set('Set-Cookie', applicantAccess.cookieHeader(result.token, { secure: secureCookies(req) }));
+  res.json({ ok: true, email: result.applicant.email });
+});
+
+app.post('/api/applications/signout', readApplicant, (req, res) => {
+  if (req.applicantToken) {
+    applicantAccess.revokeSession(db.db, req.applicantToken);
+    db.persist();
+  }
+  res.set('Set-Cookie', applicantAccess.clearCookieHeader({ secure: secureCookies(req) }));
+  res.json({ ok: true });
+});
+
+app.get('/api/applications/session', portalReadLimit, readApplicant, (req, res) => {
+  res.json({ verified: Boolean(req.applicant), email: req.applicant?.email || null });
+});
+
+/* --- one applicant's application ---------------------------------------- */
+
+/**
+ * The applicant's application to one posting.
+ *
+ * Both the address and the session have to agree before anything is returned,
+ * and the application is found by (applicant, search) rather than by an id in
+ * the URL, so there is no id to guess.
+ */
+app.get('/api/applications/:firmSlug/:postingSlug', readApplicant, applicationLimit, requireApplicant, (req, res) => {
+  const found = resolvePosting(req.params.firmSlug, req.params.postingSlug);
+  if (!found) return res.status(404).json({ error: 'That opening is not available.' });
+  const application = applications.forApplicant(db.db, {
+    applicantId: req.applicant.id, searchId: found.search.id
+  });
+  if (!application) return res.json({ application: null, accepting: postings.acceptsApplications(found.posting, { searchFrozen: found.searchFrozen }) });
+  // A posting edited since this draft began. Told about on the read, not
+  // sprung at submit time.
+  const drift = application.state === 'draft'
+    ? applications.formDrift(application.form, found.posting) : { changed: false };
+  res.json({
+    application: applications.applicantView(application, { files: applicationFiles }),
+    accepting: postings.acceptsApplications(found.posting, { searchFrozen: found.searchFrozen }),
+    formChanged: drift.changed ? {
+      material: drift.material,
+      added: (drift.added || []).map(q => q.prompt),
+      nowRequired: (drift.nowRequired || []).map(q => q.prompt),
+      removed: (drift.removed || []).map(q => q.prompt),
+      reworded: (drift.reworded || []).length,
+      materials: (drift.materials || []).map(m => m.label)
+    } : null
+  });
+});
+
+app.post('/api/applications/:firmSlug/:postingSlug/start', readApplicant, applicationLimit, requireApplicant, (req, res) => {
+  const found = resolvePosting(req.params.firmSlug, req.params.postingSlug);
+  if (!found) return res.status(404).json({ error: 'That opening is not available.' });
+  if (!postings.acceptsApplications(found.posting, { searchFrozen: found.searchFrozen })) {
+    return res.status(409).json({
+      error: 'This posting is not accepting applications.',
+      support: postings.publicView(found.posting, { searchFrozen: found.searchFrozen })?.support || null
+    });
+  }
+  const result = applications.start(db.db, {
+    search: found.search, posting: found.posting,
+    applicant: req.applicant, prefillEmail: req.applicant.email
+  });
+  if (result.error) return res.status(409).json({ error: result.error });
+  db.persist();
+  res.json({ application: applications.applicantView(result.application, { files: applicationFiles }) });
+});
+
+/**
+ * Every write below is addressed by application id and then checked against
+ * the session. The id is generated and unguessable, but that is not what makes
+ * this safe — the ownership check is.
+ */
+function requireOwnApplication(req, res, next){
+  const application = applications.byId(db.db, req.params.appId);
+  if (!application || application.applicantId !== req.applicant.id) {
+    return res.status(404).json({ error: 'That application is not on this account.' });
+  }
+  const search = db.findSearch(application.searchId);
+  if (!search) return res.status(410).json({ error: 'That opening is no longer available.' });
+  req.ownApplication = application;
+  req.applicationSearch = search;
+  req.applicationPosting = postings.of(search);
+  next();
+}
+
+app.put('/api/applications/:appId', readApplicant, applicationLimit, requireApplicant, requireOwnApplication, (req, res) => {
+  const result = applications.saveDraft(req.ownApplication, req.body || {});
+  if (result.error) return res.status(409).json({ error: result.error });
+  db.persist();
+  res.json({
+    ok: true,
+    savedAt: result.application.updatedAt,
+    expiresAt: result.application.expiresAt,
+    missing: applications.missingFor(result.application)
+  });
+});
+
+/** Accept a posting's changed form onto this draft, keeping every answer. */
+app.post('/api/applications/:appId/adopt-form', readApplicant, applicationLimit, requireApplicant, requireOwnApplication, (req, res) => {
+  if (req.ownApplication.state !== 'draft') return res.status(409).json({ error: 'This application was already submitted.' });
+  const result = applications.adoptForm(req.ownApplication, req.applicationPosting);
+  db.persist();
+  res.json({
+    ok: true,
+    application: applications.applicantView(result.application, { files: applicationFiles })
+  });
+});
+
+app.post('/api/applications/:appId/files', readApplicant, uploadLimit, requireApplicant, requireOwnApplication, (req, res) => {
+  const application = req.ownApplication;
+  if (application.state !== 'draft') return res.status(409).json({ error: 'This application was already submitted.' });
+  const checked = applicationFiles.validate({
+    filename: req.body?.filename,
+    contentType: req.body?.contentType,
+    data: req.body?.data,
+    existing: (application.files || []).length
+  });
+  if (checked.error) return res.status(400).json({ error: checked.error });
+
+  let record;
+  try {
+    record = applicationFiles.store(db.DATA_DIR, application.id, {
+      type: checked.type, buffer: checked.buffer,
+      filename: req.body?.filename, materialKey: req.body?.materialKey
+    });
+  } catch (error) {
+    console.error('[' + req.ref + '] application file write failed: ' + error.message);
+    return res.status(503).json({ error: 'That file could not be stored. Try again in a moment.' });
+  }
+  application.files ||= [];
+  application.files.push(record);
+  application.updatedAt = db.now();
+  db.persist();
+  res.json({
+    ok: true,
+    file: applicationFiles.applicantView(record),
+    missing: applications.missingFor(application)
+  });
+});
+
+app.delete('/api/applications/:appId/files/:fid', readApplicant, applicationLimit, requireApplicant, requireOwnApplication, (req, res) => {
+  const application = req.ownApplication;
+  if (application.state !== 'draft') return res.status(409).json({ error: 'This application was already submitted.' });
+  const file = (application.files || []).find(f => f.id === req.params.fid);
+  if (!file) return res.status(404).json({ error: 'That file is not on this application.' });
+  application.files = application.files.filter(f => f !== file);
+  applicationFiles.remove(db.DATA_DIR, application.id, file);
+  application.updatedAt = db.now();
+  db.persist();
+  res.json({ ok: true, missing: applications.missingFor(application) });
+});
+
+/**
+ * Submit.
+ *
+ * The posting state, the deadline, and the form version are all re-checked
+ * here rather than trusted from when the page was drawn. Everything the commit
+ * touches is in memory until one persist, so a retry either finds the
+ * application already submitted — and gets the same receipt — or finds it
+ * untouched. A failed confirmation email is recorded and changes nothing: the
+ * application is received either way.
+ */
+app.post('/api/applications/:appId/submit', readApplicant, applicationLimit, requireApplicant, requireOwnApplication, async (req, res) => {
+  const application = req.ownApplication;
+  const posting = req.applicationPosting;
+  if (searchFrozenFor(req.applicationSearch)) {
+    return res.status(409).json({
+      error: 'This search has ended and is no longer accepting applications. Nothing you wrote has been lost, and it has not been submitted.',
+      code: 'POSTING_CLOSED'
+    });
+  }
+  const result = applications.submit(application, {
+    posting,
+    timezone: posting.published?.fields?.deadline?.timezone || null
+  });
+  if (result.duplicate) {
+    return res.json({ ok: true, duplicate: true, receipt: result.receipt,
+      message: 'This application was already received. Nothing was sent twice.' });
+  }
+  if (result.closed) {
+    return res.status(409).json({ error: result.error, code: 'POSTING_CLOSED',
+      support: postings.publicView(posting, {})?.support || null });
+  }
+  if (result.formChanged) {
+    return res.status(409).json({ error: result.error, code: 'FORM_CHANGED', drift: result.drift });
+  }
+  if (result.error) {
+    return res.status(400).json({ error: result.error, missing: result.missing, receipt: result.receipt });
+  }
+
+  db.touch(req.applicationSearch,
+    { name: application.submitted.answers.name, id: null, role: 'applicant' },
+    'submitted a public application');
+  db.persist();
+
+  // After the commit, and never allowed to undo it.
+  const receipt = result.receipt;
+  const message = mailer.receiptMessage({
+    reference: receipt.reference,
+    posting: posting.published?.fields?.title || null,
+    submittedAt: receipt.submittedAt,
+    returnUrl: publicBase(req) + '/careers/' + posting.published.firmSlug + '/' + posting.slug
+  });
+  let delivery = null;
+  try { delivery = await mailer.deliver({ to: req.applicant.email, ...message }); }
+  catch (error) { console.error('[' + req.ref + '] receipt mail failed: ' + error.message); }
+
+  res.json({
+    ok: true,
+    receipt,
+    // Said plainly rather than implied by the absence of a message: the
+    // application is received whether or not the confirmation reached them.
+    confirmationSent: Boolean(delivery?.accepted),
+    confirmationNote: delivery?.accepted
+      ? 'A confirmation has been sent to ' + req.applicant.email + '.'
+      : 'Your application was received. A confirmation email could not be sent, so keep the reference number above.'
+  });
+});
+
+/* --- the portal pages ---------------------------------------------------- */
+
+function careersPage(_req, res){
+  // No bearer token in these addresses, so they may be cached as an ordinary
+  // shell. The application data behind them is not.
+  res.sendFile(path.join(__dirname, '..', 'public', 'careers.html'));
+}
+
+app.get('/careers', portalReadLimit, careersPage);
+app.get('/careers/:firmSlug', portalReadLimit, careersPage);
+app.get('/careers/:firmSlug/:postingSlug', portalReadLimit, careersPage);
+app.get('/careers/:firmSlug/:postingSlug/apply', portalReadLimit, (_req, res) => {
+  // The application itself is private. It must not be cached on a borrowed
+  // computer, and it must not be indexed.
+  res.set('Cache-Control', 'no-store, private');
+  res.set('X-Robots-Tag', 'noindex, nofollow');
+  res.sendFile(path.join(__dirname, '..', 'public', 'careers.html'));
+});
+
 app.get('/apply/:token', candidateLimit, (_req, res) => {
   // The token is in the URL of this page. Keeping it out of the shared cache
   // and out of the back/forward buffer limits how long a candidate's link
@@ -3299,6 +4132,8 @@ const server = app.listen(PORT, HOST, () => {
   }
   telemetry.watchEventLoop();
   watchAlerts();
+  sweepExpiredDrafts();
+  expirySweep();
   console.log('Alerts:', telemetry.alerts().destination);
   telemetry.log.info('started', {
     port: server.address().port,

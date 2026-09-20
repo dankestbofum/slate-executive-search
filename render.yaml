@@ -87,3 +87,10 @@ services:
       # Shown to candidates who cannot proceed on their own.
       - key: SLATE_SUPPORT_EMAIL
         sync: false
+      # The public address of this deployment, used for the posting URL shown
+      # to staff and for the return link in an applicant's confirmation email.
+      # Set it here rather than letting the application fall back to the
+      # request's Host header, which the client supplies: a spoofed Host would
+      # otherwise end up as the link in a confirmation message.
+      - key: SLATE_PUBLIC_URL
+        sync: false

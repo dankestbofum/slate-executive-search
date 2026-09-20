@@ -690,6 +690,136 @@ Candidate pages state whether a date is enforced (it is not) and in which
 timezone, and carry the support contact, correction instructions, and the
 privacy notice — reporting the notice as missing until one is configured.
 
+## The user guide
+
+**One catalog, three renderings.** `content/help/` is the only copy of the
+help content; `server/help.js` projects it and `public/help.js` renders it into
+the in-app drawer, the searchable help screen, and the printable guide. Nothing
+downstream holds content of its own, so a printed copy a committee member is
+handed cannot drift from the button they are looking at.
+
+Every article follows one template, enforced by fields rather than prose:
+**who this is for → before you start → numbered steps using the actual button
+labels → how to know it worked → who sees the result → next step → recovery
+and help**. `content/help/schema.js` refuses an article that omits any of them.
+
+**The catalog is checked against the build it describes.** `help.verify()` runs
+at startup and the process refuses to start if an article names a process step
+or a package that does not exist. `tests/help.js` additionally lifts
+`knownView()` out of `public/app.js` and asserts that every screen the guide
+claims to explain is one this client can render — a help link that lands
+nowhere is found by somebody who is already stuck.
+
+**Help never costs you what you have typed.** "Help with this page" opens a
+drawer built against the live DOM and appended to `<body>`; it does not go
+through the application's renderer, which replaces the page. Escape closes it
+and focus returns to the control that opened it. The drawer is deliberately not
+`aria-modal`: the point is to read it while looking at the control it explains.
+
+**Every help trigger has a name of its own.** `withTip()` derives it from the
+control's own visible text — "Explain Replace candidate link" — rather than
+repeating "Explain this control" eleven times on one screen. It also *merges*
+into an existing `aria-describedby` rather than writing a second attribute,
+which browsers ignore: before this, adding a tooltip to a field silently
+replaced that field's visible hint in the accessibility tree.
+
+`GET /api/help` serves the whole guide to a signed-in reader.
+`GET /api/public/help` serves the candidate articles to the portal, built from
+an allowlist of `public: true` rather than from the staff guide with things
+taken out.
+
+## Public postings and the candidate portal
+
+**Nothing is public until a search manager publishes it.** There is no
+default-public state, and the 7→8 migration leaves every existing search
+unpublished — a migration that inferred "this search is advertising" from an ad
+plan would put a client's search on the internet because somebody upgraded the
+application. `publishPosting` is in the authority matrix
+(`server/authority.js`): consultants prepare and preview, the manager
+publishes, pauses, closes and republishes.
+
+**Publishing takes a snapshot.** `server/postings.js` freezes the approved
+fields at publication. Research, draft ads and search facts change all week and
+none of it reaches a page members of the public are reading; the live page
+serves that snapshot until somebody publishes a new one, and the staff screen
+says when the draft has moved on.
+
+**The public projection is an allowlist.** `publicView()` names every field it
+emits and never takes a search or a candidate as an argument, so there is
+nothing private in scope to leak by accident.
+
+**Posting state and search state are separate.** Closing recruitment stops new
+applications while staff carry on evaluating. Closing, cancelling or archiving
+the *search* takes the posting offline regardless, and restoring the search
+republishes nothing.
+
+**Only the deadline policy you choose is enforced.** A hard closing date closes
+applications at the end of the stated day. "Open until filled" with a first
+review date displays that date and never acts on it — the same promise the
+semifinalist questionnaire already makes.
+
+**Applicant identity is separate from staff identity.** `server/applicant-access.js`
+is passwordless: a six-digit code proves one email address, and that issues a
+revocable session cookie scoped to `/api/applications`. Codes and session
+tokens are stored as SHA-256 hashes, so a copy of the store does not let its
+reader open anybody's application. Asking for a code answers identically
+whatever the address, so the endpoint cannot be used to ask whether somebody
+applied for a job. An applicant never needs an invitation to anything, and an
+applicant session opens no staff route.
+
+**A draft is not an application.** `server/applications.js` keeps applications
+in their own table rather than on the search: a draft stored on the search
+would be one forgotten filter away from a committee's candidate list or an
+export. Drafts are invisible to staff, absent from every export, and expire
+after 14 days — the same policy the questionnaire drafts use. Saving again puts
+the expiry back.
+
+**Submission is idempotent and honest.** The posting state, the deadline and
+the form version are all rechecked at commit. A retry, a double-click or a lost
+response returns the same receipt rather than a second application. If the
+posting closed while somebody was writing, their work is preserved, they are
+given a contact, and no receipt is claimed. A failed confirmation email is
+recorded and changes nothing: the application is received either way.
+
+**A form that changes under a draft never discards an answer.** Questions carry
+a stable key, so rewording or reordering one keeps the answers against it.
+A *material* change — a new required question, one that became required, a
+removed question, a newly required material — stops the submission and shows
+the applicant exactly what changed. Answers to a removed question are kept out
+of sight rather than deleted.
+
+**A receipt is not a hiring status.** It says an application arrived, and every
+rendering of it says what it is not. The portal never infers "under review" or
+"shortlisted" from internal scoring or workflow, and staff accepting an
+application onto the candidate list changes nothing the applicant sees.
+
+**A possible duplicate is a review, not a merge.** Slate never merges records
+and never reveals an existing candidate because somebody entered the same
+address: two people can share a family mailbox. Staff read both and decide.
+
+**Materials are conservative** (`server/application-files.js`). Generated
+storage keys, an extension *and* content check against a narrow allowlist —
+PDF, with the posting's support contact as the accommodation route — bounded
+size and count, and per-request download authorization. Nothing is readable by
+a reviewer until a scanner has cleared it, and with no scanner configured that
+means nothing is readable and the record says so. The bytes live beside the
+store under `application-files/`, so `server/backup.js` covers them and a
+restore brings the documents back with the records that reference them.
+
+**Three things are off by default, and the application says so.** Without a
+mail provider a posting publishes as a readable advertisement and does not
+offer an application form it cannot complete; without uploads enabled no
+material can be attached; without a scanner no material can be opened. The
+posting screen warns before publishing and `/api/ready` reports all three. See
+`.env.example` for `SLATE_MAIL_TRANSPORT`, `SLATE_APPLICATION_UPLOADS` and
+`SLATE_FILE_SCANNER`.
+
+Public routes: `/careers`, `/careers/:firm`, `/careers/:firm/:posting`, and
+`/careers/:firm/:posting/apply` (no-store, `noindex`). Read APIs under
+`/api/public/`, applicant APIs under `/api/applications/`, staff publishing
+under the existing authorized search routes. The service worker bypasses all of
+it, and `public/robots.txt` allows the job pages and nothing else.
+
 ## County searches: facts that need a person
 
 A county's authority structure cannot be inferred from a position title. Two

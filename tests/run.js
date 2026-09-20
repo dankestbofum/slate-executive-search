@@ -11,7 +11,17 @@ const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'slate-tests-'));
 const fixture = identity.serverEnv();
 const env = { ...process.env, NODE_ENV:'test', PORT:'0', HOST:'127.0.0.1', DATA_DIR:path.join(directory, 'server'),
   TRUST_PROXY:'', ANTHROPIC_API_KEY:'', ...fixture.server,
-  SLATE_EMAIL_TEAM:'team@slate.local', SLATE_EMAIL_ABE:'abe@slate.local', SLATE_EMAIL_MIKE:'mike@slate.local' };
+  SLATE_EMAIL_TEAM:'team@slate.local', SLATE_EMAIL_ABE:'abe@slate.local', SLATE_EMAIL_MIKE:'mike@slate.local',
+  // The portal needs the three capabilities it refuses to pretend to have.
+  // `echo` returns the verification message to the caller so a test can finish
+  // a verification without a mailbox; server/mailer.js resolves it to "none"
+  // under NODE_ENV=production, so it cannot be turned on by a deployment.
+  // `accept-all` marks files openable without scanning and records that it did
+  // not scan them, which is what lets the suite exercise a cleared download
+  // while the honest default stays "unavailable".
+  SLATE_MAIL_TRANSPORT:'echo',
+  SLATE_APPLICATION_UPLOADS:'on',
+  SLATE_FILE_SCANNER:'accept-all' };
 const server = fork(path.join(__dirname, 'server.js'), [], { cwd:root, env, stdio:['ignore', 'ignore', 'inherit', 'ipc'], windowsHide:true });
 async function suite(file, suiteEnv) {
   const child = spawn(process.execPath, [path.join(__dirname, file)], { cwd:root, env:suiteEnv, stdio:'inherit', windowsHide:true });
@@ -58,7 +68,14 @@ async function suite(file, suiteEnv) {
     // covers the server half of the same operation.
     const researchUi = await suite('research-ui.js', suiteEnv);
     const regression = await suite('integrity.js', suiteEnv);
-    process.exitCode = organizationsSuite || auth || clerkAuth || baseline || counties || regression || security || roles || authority || storage || recover || monitoring || exports_ || cands || dispo || aichecks || researchChecks || researchUi;
+    // The committee aggregate findings, as corrected behaviour
+    // (docs/audits/2026-09-17-committee-aggregate).
+    const committeeChecks = await suite('committee.js', suiteEnv);
+    // The user guide, and the public posting and application portal
+    // (docs/audits/2026-09-19-user-guidance-candidate-portal).
+    const helpChecks = await suite('help.js', suiteEnv);
+    const portalChecks = await suite('portal.js', suiteEnv);
+    process.exitCode = organizationsSuite || auth || clerkAuth || baseline || counties || regression || security || roles || authority || storage || recover || monitoring || exports_ || cands || dispo || aichecks || researchChecks || researchUi || committeeChecks || helpChecks || portalChecks;
     console.log('Isolated test data: ' + directory);
   } catch (error) { console.error(error); process.exitCode = 1; }
   finally { server.kill(); }

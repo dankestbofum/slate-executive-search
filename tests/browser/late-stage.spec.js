@@ -188,7 +188,7 @@ test.describe('the late stage, connected', () => {
       await open(page, '/#/s/' + search.id + '/person/' + people.a.id);
       await page.locator('[data-score="S1"][data-val="' + value + '"]').click();
       await page.locator('#cnote').fill(note);
-      await page.getByRole('button', { name: 'Save my scores' }).click();
+      await page.getByRole('button', { name: 'Save my scores', exact: true }).click();
       await expect(page.locator('#toast')).toContainText(/on the file/i);
     }
     const sealed = JSON.parse(await download(manager, search.id));
@@ -441,7 +441,7 @@ test.describe('the late stage, connected', () => {
     await open(manager, '/#/s/' + search.id + '/screen');
     const adaRow = manager.locator('tr', { hasText: people.a.name });
     await adaRow.getByRole('button', { name: 'Invite', exact: true }).click();
-    await expect(adaRow.getByRole('button', { name: 'Copy invite link' })).toHaveCount(0);
+    await expect(adaRow.getByRole('button', { name: 'Copy invite link', exact: true })).toHaveCount(0);
     await expect(adaRow.getByRole('link', { name: 'Open questionnaire' })).toHaveCount(0);
     await adaRow.getByRole('button', { name: 'Issue a new link' }).click();
     await expect(manager.locator('#toast')).toContainText('Copy the new link');

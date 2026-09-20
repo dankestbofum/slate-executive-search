@@ -9,6 +9,7 @@ const backup = require('./backup');
 const jurisdictions = require('./jurisdictions');
 const organizations = require('./organizations');
 const committee = require('./committee');
+const postings = require('./postings');
 
 const isProd = process.env.NODE_ENV === 'production';
 const DATA_DIR = process.env.DATA_DIR
@@ -86,6 +87,11 @@ function blankSearch(input, user, organizationId){
     firstReview: input.firstReview || '',
     notes: input.notes || '',
     research: null,
+    // The public job page for this search: unpublished, with nothing approved.
+    // Present from the first moment rather than attached on first use, because
+    // a field that appears later looks like an edit to server/integrity.js and
+    // would move the revision under a client that had only read the search.
+    posting: postings.blank(),
     aiUsage: { input_tokens: 0, output_tokens: 0 },
     createdBy: user.id,
     createdAt: now(),
@@ -287,7 +293,7 @@ function releaseWriterLock(){
  * newer release is refused outright: rolling the application back onto a store
  * it does not understand is how a rollback turns into data loss.
  * ------------------------------------------------------------------ */
-const SCHEMA_VERSION = 7;
+const SCHEMA_VERSION = 8;
 
 function removeLegacyPins(store){
   const users = [...(store.users || []),
@@ -356,6 +362,28 @@ const MIGRATIONS = [
   store => {
     for (const s of [...(store.searches || []), ...(store.archivedSearches || [])]) migrateIntakeResponses(s);
   },
+  // 7 -> 8: public postings and applications from the portal.
+  //
+  // Purely additive, and every existing search is left unpublished. That is
+  // the only safe default: a migration that inferred "this search is
+  // advertising" from an ad plan or a brochure would put a client's search on
+  // the public internet because somebody upgraded the application. Publishing
+  // is a decision a named person makes, and nobody has made it for these.
+  //
+  // The applicant tables start empty. An older build cannot open this store,
+  // which is what stops a rollback from serving a portal whose sessions,
+  // drafts, and receipts the previous release neither writes nor recovers —
+  // and, worse, from continuing to accept applications into records it would
+  // then drop.
+  store => {
+    store.applications ||= [];
+    store.applicants ||= [];
+    store.applicantChallenges ||= [];
+    store.applicantSessions ||= [];
+    for (const s of [...(store.searches || []), ...(store.archivedSearches || [])]) {
+      if (!s.posting) s.posting = postings.blank();
+    }
+  }
 ];
 
 /**
@@ -452,6 +480,10 @@ function load(){
 function migrate(store){
   store.archivedSearches ||= [];
   store.researchJobs ||= [];
+  store.applications ||= [];
+  store.applicants ||= [];
+  store.applicantChallenges ||= [];
+  store.applicantSessions ||= [];
   store.users = store.users || [];
   organizations.ensureTables(store);
   for (const u of store.users) {
@@ -485,6 +517,10 @@ function migrate(store){
     // Searches written before packages existed ran the whole process. Keep it
     // that way rather than hiding steps that may already have work on file.
     if (!PACKAGES[s.package]) s.package = DEFAULT_PACKAGE;
+    // Unpublished, always, for anything that has never had one. Never inferred
+    // from an ad plan or a brochure: those are drafts of what might be posted,
+    // not a decision to post it.
+    if (!s.posting) s.posting = postings.blank();
     if (!s.staff || typeof s.staff !== 'object') s.staff = {};
     if (!Array.isArray(s.members) || !s.members.length) {
       s.members = [{
@@ -1011,6 +1047,58 @@ module.exports = {
     }
     return null;
   },
+  findOrganization: id => organizations.findOrganization(db, id),
+
+  /* ------------------------------------------------------------------ *
+   * Public posting lookups
+   *
+   * The only path from an address a member of the public typed to a record in
+   * this store. Two properties matter:
+   *
+   *  - Archived searches are not consulted at all. Archiving a search takes it
+   *    off the book, and a posting on an archived search is not something the
+   *    public should still be able to reach.
+   *  - A search whose lifecycle is closed or cancelled is found but reported
+   *    as not live, so the caller can decide between "no such posting" and
+   *    "this one has ended". The caller, not this lookup, owns that wording.
+   * ------------------------------------------------------------------ */
+  livePostings(firmSlug){
+    const out = [];
+    for (const s of db.searches) {
+      const posting = s.posting;
+      if (!posting?.published) continue;
+      if (posting.published.firmSlug !== firmSlug) continue;
+      out.push({ search: s, posting });
+    }
+    return out;
+  },
+
+  findPosting(firmSlug, postingSlug){
+    for (const s of db.searches) {
+      const posting = s.posting;
+      if (!posting?.published) continue;
+      if (posting.published.firmSlug !== firmSlug) continue;
+      if (posting.slug !== postingSlug) continue;
+      return { search: s, posting, organization: organizations.findOrganization(db, s.organizationId) };
+    }
+    return null;
+  },
+
+  /** Every firm with at least one published posting, for the portal index. */
+  publishedFirms(){
+    const seen = new Map();
+    for (const s of db.searches) {
+      const slug = s.posting?.published?.firmSlug;
+      if (!slug) continue;
+      if (!seen.has(slug)) {
+        const organization = organizations.findOrganization(db, s.organizationId);
+        seen.set(slug, { slug, name: organization?.name || 'Recruiting firm', postings: 0 });
+      }
+      seen.get(slug).postings += 1;
+    }
+    return [...seen.values()].sort((a, b) => a.name.localeCompare(b.name));
+  },
+
   touch(search, user, x){
     search.updatedAt = now();
     // `who` is the display name a reader recognises; `by` is the stable account

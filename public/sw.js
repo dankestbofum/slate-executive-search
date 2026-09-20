@@ -4,12 +4,14 @@
 // offline). Everything dynamic or auth-sensitive (/api, /media, /apply) is
 // intentionally never touched here — it always goes straight to the network.
 
-const CACHE_NAME = 'slate-shell-v4';
+const CACHE_NAME = 'slate-shell-v5';
 const SHELL_ASSETS = [
   '/',
   '/app.js',
   '/auth.js',
+  '/help.js',
   '/app.css',
+  '/help.css',
   '/styles.css',
   '/fonts/fonts.css',
   '/manifest.webmanifest',
@@ -35,11 +37,26 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+// Never cached, for two different reasons.
+//
+// /api and /media are dynamic and auth-sensitive, as they always were.
+// /apply and /careers are opened by members of the public, often on a borrowed
+// or shared device: an applicant's answers, their materials, and the page that
+// carries their session must not be left in a cache that nothing signs out of.
+// The listing pages under /careers are public, but they are cached by the
+// browser's own short cache header instead, so that unpublishing a posting
+// reaches a reader rather than being served from a worker that has no idea the
+// job has closed.
 function bypassed(url) {
   return url.origin !== self.location.origin
     || url.pathname.startsWith('/api/')
     || url.pathname.startsWith('/media/')
-    || url.pathname.startsWith('/apply/');
+    || url.pathname.startsWith('/apply/')
+    || url.pathname === '/careers'
+    || url.pathname.startsWith('/careers/')
+    || url.pathname === '/careers.html'
+    || url.pathname === '/careers.js'
+    || url.pathname === '/careers.css';
 }
 
 self.addEventListener('fetch', (event) => {

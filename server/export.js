@@ -439,6 +439,22 @@ function build(search, { viewer, users, dataDir, release, applications = [] }) {
         + 'was reviewed by a person before approval.'
     },
 
+    // What was advertised publicly, and what arrived through it. The posting
+    // is the published snapshot, not the working draft: the record has to say
+    // what the public was actually shown.
+    publicPosting: search.posting?.published
+      ? {
+        state: search.posting.state,
+        slug: search.posting.slug,
+        version: search.posting.published.version,
+        publishedAt: search.posting.published.at,
+        publishedBy: search.posting.published.byName || null,
+        fields: search.posting.published.fields,
+        log: search.posting.log || []
+      }
+      : null,
+    applications: applications.map(applicationRecord),
+
     completeness: {
       // Named gaps, so the absence of a section is never read as an absence of
       // the underlying activity.
@@ -632,6 +648,63 @@ function report(bundle) {
   }
   if (!bundle.documents.external.references.length) {
     lines.push('  - Nothing recorded. If material exists outside Slate, this file does not name it.');
+  }
+
+  head('Public posting');
+  if (!bundle.publicPosting) {
+    lines.push('  This search was never advertised through the public portal.');
+  } else {
+    const posting = bundle.publicPosting;
+    lines.push('  Version ' + posting.version + ', published ' + posting.publishedAt
+      + (posting.publishedBy ? ' by ' + posting.publishedBy : ''));
+    lines.push('  State at export: ' + posting.state);
+    lines.push('  Title: ' + (posting.fields.title || ''));
+    lines.push('  Employer: ' + (posting.fields.employer || ''));
+    lines.push('  Location: ' + (posting.fields.location || ''));
+    lines.push('  Deadline: ' + (posting.fields.deadline?.kind === 'hard'
+      ? 'closes ' + posting.fields.deadline.closesAt
+      : 'open until filled'
+        + (posting.fields.deadline?.firstReviewOn ? ', first review ' + posting.fields.deadline.firstReviewOn + ' (advisory)' : ''))
+      + (posting.fields.deadline?.timezone ? ' (' + posting.fields.deadline.timezone + ')' : ''));
+    lines.push('');
+    lines.push('  State changes:');
+    for (const entry of posting.log) {
+      lines.push('  - ' + entry.at + '  ' + entry.action + (entry.byName ? '  ' + entry.byName : ''));
+    }
+  }
+
+  head('Applications received through the portal');
+  if (!bundle.applications.length) {
+    lines.push('  None. A draft somebody saved and never submitted is not an application and is not in this record.');
+  }
+  for (const application of bundle.applications) {
+    lines.push('');
+    lines.push('  ' + application.applicant.name + '  [' + application.reference + ']');
+    lines.push('    Submitted:  ' + application.submittedAt + '  (version ' + application.version
+      + ' of the application, posting version ' + application.postingVersion + ')');
+    lines.push('    Contact:    ' + application.applicant.email
+      + (application.applicant.phone ? '  ' + application.applicant.phone : ''));
+    if (application.applicant.location) lines.push('    Based in:   ' + application.applicant.location);
+    lines.push('    On the candidate list: ' + (application.acceptedAt
+      ? 'yes, ' + application.acceptedAt + (application.acceptedBy ? ' by ' + application.acceptedBy : '')
+      : 'no'));
+    if (application.background) {
+      lines.push('    Background:');
+      lines.push('      ' + String(application.background).replace(/\n/g, '\n      '));
+    }
+    for (const question of application.questions) {
+      lines.push('    Q: ' + question.prompt);
+      lines.push('    A: ' + (question.answer ? String(question.answer).replace(/\n/g, '\n       ') : '(not answered)'));
+    }
+    for (const material of application.materials) {
+      lines.push('    Material: ' + material.label + '  ' + material.bytes + ' bytes  sha256 '
+        + material.sha256 + '  scan: ' + material.scanState + (material.scanned ? '' : ' (not scanned)'));
+    }
+    for (const earlier of application.supersededSubmissions) {
+      lines.push('    Superseded submission ' + earlier.reference + ' of ' + earlier.submittedAt
+        + ', reopened ' + earlier.reopenedAt + (earlier.reopenedBy ? ' by ' + earlier.reopenedBy : '')
+        + (earlier.reason ? ': ' + earlier.reason : ''));
+    }
   }
 
   head('Known gaps in this record');

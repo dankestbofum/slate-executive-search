@@ -99,7 +99,33 @@ function report(ok, label, detail) {
     }
   }
 
+  /* --------------------------------------------------------------------- *
+   * The public portal
+   *
+   * Not a pass or a fail: all three of these are legitimately off, and a
+   * deployment that only advertises jobs never needs them. But an operator
+   * about to publish a posting should be told what an applicant will actually
+   * be able to do, before somebody finds out by trying to apply.
+   * --------------------------------------------------------------------- */
+  const mailer = require('../server/mailer');
+  const files = require('../server/application-files');
+
+  console.log('\nPublic careers portal');
+  const mail = mailer.status();
+  console.log('  ' + (mail.configured ? ' ok  ' : ' off ') + 'Mail transport: ' + mail.transport);
+  console.log('        ' + mail.note);
+  const uploads = files.uploadsEnabled();
+  console.log('  ' + (uploads ? ' ok  ' : ' off ') + 'Application uploads: ' + (uploads ? 'on' : 'off'));
+  const scanner = files.scannerStatus();
+  console.log('  ' + (scanner.scans ? ' ok  ' : ' off ') + 'File scanner: ' + scanner.scanner);
+  console.log('        ' + scanner.note);
+  if (!mail.configured) {
+    console.log('        A posting will publish as a readable advertisement with its support');
+    console.log('        contact, and will not offer an application form.');
+  }
+
   console.log('\nWhat this did NOT check:');
+  console.log('  - Whether mail is actually delivered. That needs a controlled recipient.');
   console.log('  - Whether a draft or a research run actually succeeds. That is a billed call.');
   console.log('  - Latency or real cost under load.');
   console.log('  - Tool and effort compatibility in practice.');
