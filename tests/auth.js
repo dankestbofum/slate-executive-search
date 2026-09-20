@@ -60,6 +60,9 @@ const as = (base, email, route = '/api/me') => fetch(base + route, { headers: si
     const nameless = { id:'new', email:'new@example.test', name:'new@example.test' };
     assert.equal(onboarding.status(storeFixture, contextFor(nameless)).stage, 'identity');
     const named = { id:'named', email:'named@example.test', name:'Dana Ruiz' };
+    assert.equal(onboarding.status(storeFixture, contextFor({ ...named, onboarding:{ completedAt:null } })).stage, 'identity',
+      'a provider-supplied name must not skip new-account setup');
+    assert.equal(onboarding.status(storeFixture, contextFor({ ...named, onboarding:{ completedAt:'2026-09-19', requestedRole:'candidate' } })).stage, 'candidate');
     assert.equal(onboarding.status(storeFixture, contextFor(named)).stage, 'workspace');
     assert.equal(onboarding.status(storeFixture, contextFor(named, { membershipLost:true })).stage, 'membership-lost');
     const inOrg = over => contextFor(named, { orgId:'org_1', organization:{ id:'org_1', name:'Firm' }, ...over });
@@ -112,8 +115,14 @@ const as = (base, email, route = '/api/me') => fetch(base + route, { headers: si
     const setup = body => fetch(base + '/api/me/onboarding', { method:'POST',
       headers:{ ...sign.headers('stranger@example.test'), 'content-type':'application/json' }, body:JSON.stringify(body) });
     assert.equal((await fetch(base + '/api/me/onboarding', { method:'POST' })).status, 401);
-    for (const body of [{ name:'', requestedRole:'committee' }, { name:'Test', requestedRole:'admin' }, { name:'Test', requestedRole:'candidate' }]) {
+    for (const body of [{ name:'', requestedRole:'committee' }, { name:'Test', requestedRole:'admin' }, { name:'Test', requestedRole:'unknown' }]) {
       assert.equal((await setup(body)).status, 400);
+    }
+    for (const requestedRole of ['candidate', 'organization']) {
+      const result = await (await setup({ name:'New Account', requestedRole })).json();
+      assert.equal(result.user.role, 'pending');
+      assert.equal(result.onboarding.stage, requestedRole === 'candidate' ? 'candidate' : 'workspace');
+      assert.equal((await as(base, 'stranger@example.test', '/api/searches')).status, 403);
     }
     const completed = await (await setup({ name:'New Consultant', requestedRole:'consultant', role:'consultant' })).json();
     assert.equal(completed.user.role, 'pending', 'A role preference must never grant consultant access');

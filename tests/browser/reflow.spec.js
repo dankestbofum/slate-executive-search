@@ -126,7 +126,9 @@ test('a committee member is shown their own steps and nothing else', async ({ pa
 
   await member.goto('/#/s/' + search.id);
   await member.waitForLoadState('networkidle');
-  await expect(member.locator('#main h1')).toBeVisible({ timeout: 10000 });
+  await expect(member.getByRole('heading', { name:'Confirm your name' })).toBeVisible();
+  await member.getByRole('button', { name:'Continue', exact:true }).click();
+  await expect(member.getByRole('heading', { name:'City Manager', exact:true })).toBeVisible({ timeout: 10000 });
 
   // The rail carries the destinations they have work in, not the whole
   // workspace. Interviews and Documents are the firm's drafting surfaces, and

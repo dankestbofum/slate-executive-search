@@ -4,7 +4,7 @@
 // offline). Everything dynamic or auth-sensitive (/api, /media, /apply) is
 // intentionally never touched here — it always goes straight to the network.
 
-const CACHE_NAME = 'slate-shell-v5';
+const CACHE_NAME = 'slate-shell-v8';
 const SHELL_ASSETS = [
   '/',
   '/app.js',
@@ -52,6 +52,8 @@ function bypassed(url) {
     || url.pathname.startsWith('/api/')
     || url.pathname.startsWith('/media/')
     || url.pathname.startsWith('/apply/')
+    || /^\/(sign-up|sign-in)(\/|$)/.test(url.pathname)
+    || url.pathname === '/subscriptions'
     || url.pathname === '/careers'
     || url.pathname.startsWith('/careers/')
     || url.pathname === '/careers.html'

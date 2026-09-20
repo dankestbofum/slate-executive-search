@@ -118,18 +118,10 @@ async function run(){
     const cfg = await req('/api/config', { expect:200 });
     record('GET /api/config', cfg.json.auth.provider === 'clerk' && cfg.json.auth.configured === true);
     const pk = cfg.json.packages || [];
-    record('Config lists the three service packages',
-      pk.map(p => p.key).join(',') === 'basic,enhanced,executive' && pk.every(p => p.label && p.fee && Array.isArray(p.services)),
+    record('Config lists operational workflows without commercial prices',
+      pk.map(p => p.key).join(',') === 'basic,enhanced,executive' && pk.every(p => p.label && !Object.hasOwn(p, 'fee') && Array.isArray(p.services)),
       pk.map(p => p.key).join(','));
-    const cmp = cfg.json.compare || [];
-    const bands = cfg.json.compareBands || [];
-    record('Config serves the pay-level breakdown',
-      cmp.length >= 13 && bands.map(b => b.key).join(',') === 'basic,enhanced,executive'
-        && cmp.some(r => r.t==='Position profile' && r.pkg==='basic')
-        && cmp.some(r => r.t==='Active candidate sourcing' && r.pkg==='enhanced')
-        && cmp.some(r => r.t==='Reference checks' && r.pkg==='executive')
-        && cmp.some(r => r.t==='Potential fee') === false,
-      'rows='+cmp.length);
+    record('Config no longer serves a commercial comparison', !Object.hasOwn(cfg.json, 'compare') && !Object.hasOwn(cfg.json, 'compareBands'));
     record('Config steps carry their minimum package', (cfg.json.steps||[]).every(s => ['basic','enhanced','executive'].includes(s.pkg)));
     const views = Object.fromEntries(pk.map(p => [p.key, p.view || {}]));
     record('Each package names its overview layout in the catalog',
@@ -162,11 +154,7 @@ async function run(){
     const basicAds = basic.find(s => s.key === 'ads');
     record('Basic ads wait on the ad plan, not a brochure', basicAds && basicAds.needs.join(',') === 'plan', basicAds && basicAds.needs.join(','));
     record('Unknown package falls back to Executive', steps.packageOf('gold') === 'executive' && steps.packageOf(undefined) === 'executive');
-    record('Compare rows name the cheapest package that includes each service',
-      steps.COMPARE.every(r => ['basic','enhanced','executive'].includes(r.pkg))
-        && steps.COMPARE.filter(r => r.pkg==='basic').length >= 7
-        && steps.includes('basic', { pkg:'basic' }) && !steps.includes('basic', { pkg:'enhanced' })
-        && steps.includes('executive', { pkg:'enhanced' }));
+    record('Workflow membership retains the same step boundaries', steps.includes('basic', { pkg:'basic' }) && !steps.includes('basic', { pkg:'enhanced' }) && steps.includes('executive', { pkg:'enhanced' }));
     record('Package copy keeps candidate decisions explicitly human',
       !JSON.stringify(steps.PACKAGES).match(/AI candidate screening|automated (?:accept|reject|rank)/i)
         && steps.PACKAGES.basic.services.includes('Candidate screening workspace (human decisions)'));
@@ -219,7 +207,7 @@ async function run(){
     });
     search = created.json;
     record('Create a named search', search.client==='Test Town of Bughunt' && search.website==='https://example.com', search.no);
-    record('A search defaults to the Executive package', search.package==='executive' && search.packageInfo?.label==='Executive' && search.progress.total===19,
+    record('A search defaults to the Executive package', search.package==='executive' && search.packageInfo?.label==='Full search' && search.progress.total===19,
       'package='+search.package+' total='+search.progress.total);
   } catch (err) { record('Create a named search', false, err.message); return; }
 
@@ -242,7 +230,7 @@ async function run(){
     record('Basic search still starts on the committee', basicSearch.progress.next?.key==='team', 'next='+basicSearch.progress.next?.key);
     const list = await req('/api/searches', { auth: abe.auth, expect:200 });
     const row = list.json.find(s => s.id===basicSearch.id);
-    record('Search list carries the package label', row && row.package==='basic' && row.packageLabel==='Basic');
+    record('Search list carries the package label', row && row.package==='basic' && row.packageLabel==='Posting and screening');
   } catch (err) { record('Basic package search', false, err.message); }
 
   if (basicSearch) {
@@ -250,11 +238,11 @@ async function run(){
       const put = await req('/api/searches/'+basicSearch.id+'/artifact/brochure', {
         method:'PUT', auth: abe.auth, body:{ body:{ lede:'x' } }
       });
-      record('Basic refuses a brochure save (not in package)', put.status===400 && /Basic package/.test(put.json.error||''), put.json.error);
+      record('Basic refuses a brochure save (not in package)', put.status===400 && /Posting and screening workflow/.test(put.json.error||''), put.json.error);
       const gen = await req('/api/searches/'+basicSearch.id+'/generate', {
         method:'POST', auth: abe.auth, body:{ kind:'contract' }
       });
-      record('Basic refuses a contract draft (not in package)', gen.status===400 && /Executive/.test(gen.json.error||''), gen.json.error);
+      record('Basic refuses a contract draft (not in package)', gen.status===400 && /Full search/.test(gen.json.error||''), gen.json.error);
       const asm = await req('/api/searches/'+basicSearch.id+'/assemble', {
         method:'POST', auth: abe.auth, body:{ kind:'brochure' }
       });
@@ -262,7 +250,7 @@ async function run(){
       const send = await req('/api/searches/'+basicSearch.id+'/send2', {
         method:'POST', auth: abe.auth, body:{}
       });
-      record('Basic refuses the semifinalist send', send.status===400 && /package/.test(send.json.error||''), send.json.error);
+      record('Basic refuses the semifinalist send', send.status===400 && /workflow/.test(send.json.error||''), send.json.error);
       const ok = await req('/api/searches/'+basicSearch.id+'/artifact/plan', {
         method:'PUT', auth: abe.auth, expect:200, body:{ body:{ rows:[] } }
       });
@@ -270,7 +258,7 @@ async function run(){
       const staff = await req('/api/searches/'+basicSearch.id+'/staff/sourcing/log', {
         method:'POST', auth: abe.auth, body:{ text:'Called someone.' }
       });
-      record('Basic refuses a sourcing log (staff step not in package)', staff.status===400 && /Enhanced/.test(staff.json.error||''), staff.json.error);
+      record('Basic refuses a sourcing log (staff step not in package)', staff.status===400 && /Recruited search/.test(staff.json.error||''), staff.json.error);
     } catch (err) { record('Basic package gating', false, err.message); }
 
     try {
@@ -285,7 +273,7 @@ async function run(){
       record('Moving to Enhanced puts the brochure and finalist week on the file',
         up.json.package==='enhanced' && keys.includes('brochure') && keys.includes('schedule') && !keys.includes('contract') && up.json.progress.total===16,
         'total='+up.json.progress.total);
-      record('Changing the package is named in the activity feed', (up.json.activity||[]).some(a => /Enhanced package/.test(a.x)));
+      record('Changing the package is named in the activity feed', (up.json.activity||[]).some(a => /Recruited search workflow/.test(a.x)));
       const ads = up.json.steps.find(s => s.key==='ads');
       record('Enhanced ads wait on the brochure again', ads && ads.needs.includes('brochure'), ads && ads.needs.join(','));
     } catch (err) { record('Package change', false, err.message); }
@@ -342,7 +330,7 @@ async function run(){
       record('Video log entry names the semifinalist', got.json.staff.video.log[0].candidateName==='Pat Finalist');
 
       const refsOnEnhanced = await req('/api/searches/'+sid+'/staff/references/log', { method:'POST', auth: abe.auth, body:{ text:'x' } });
-      record('Enhanced refuses reference checks (Executive only)', refsOnEnhanced.status===400 && /Executive/.test(refsOnEnhanced.json.error||''));
+      record('Enhanced refuses reference checks (Executive only)', refsOnEnhanced.status===400 && /Full search/.test(refsOnEnhanced.json.error||''));
       await req('/api/searches/'+sid, { method:'PATCH', auth: abe.auth, expect:200, body:{ package:'executive' } });
 
       const notFinal = await req('/api/searches/'+sid+'/staff/references/log', { method:'POST', auth: abe.auth, body:{ text:'x', candidateId: cand.id } });
@@ -475,7 +463,7 @@ async function run(){
         const probe = gated[pkg];
         if (probe) {
           const off = await req('/api/searches/'+s.id+probe.path, { method:probe.method, auth: abe.auth, body:probe.body });
-          if (off.status !== 400 || !/package/.test(off.json.error||'')) misses.push(s.no+' gating '+pkg);
+          if (off.status !== 400 || !/workflow/.test(off.json.error||'')) misses.push(s.no+' gating '+pkg);
         }
         await req('/api/searches/'+s.id, { method:'DELETE', auth: abe.auth, expect:200 });
       }
@@ -1321,11 +1309,11 @@ async function run(){
   record('Schema examples do not model the dashes the desk rejects', schemaBlock.length > 0 && !/[\u2013\u2014]/.test(schemaBlock));
   record('Generate route returns the desk review to the client', /desk: out\.desk/.test(fs.readFileSync(path.join(__dirname, '..', 'server', 'index.js'), 'utf8')) && /function deskNote/.test(appJs) && /deskNote\(out\.desk\)/.test(appJs));
 
-  // The landing page says what the product does and offers sign-in. Fees are not
-  // on it; the pay-level breakdown lives in the Packages view, which is where
-  // it is shown to a client deliberately.
+  // The public door explains the product and gives candidates and hiring
+  // organizations their own entry points. Prices are never invented here.
   record('Unsigned home explains the product and offers Clerk sign-in',
-    /function vGate/.test(appJs) && /A guided executive search/.test(appJs)
+    /function vGate/.test(appJs) && /What brings you to Slate/.test(appJs)
+      && appJs.includes('href="/careers"') && appJs.includes('href="/sign-up"')
       && appJs.includes('data-act="sign-in"') && appJs.includes('data-act="sign-up"'));
 
   record('The client carries no sign-in form of its own',
@@ -1367,25 +1355,12 @@ async function run(){
 
   record('New search opens on the search committee', /go\('team'\)/.test(appJs) && /Add the committee first/.test(appJs));
 
-  // Opening a file no longer asks which package was bought. It opens at the
-  // default level and the package is set on Search facts. A search started
-  // from a package sample still carries that choice through.
-  record('The package is chosen on Search facts, not when the file is opened',
+  record('Search facts retains an operational workflow choice',
     /function packageChoice/.test(appJs) && /name="package"/.test(appJs)
-      && /packageChoice\(s\.package\)/.test(appJs)
-      && !/packageChoice\(state\.newPackage/.test(appJs)
-      && /<input type="hidden" name="package" value="\$\{esc\(state\.newPackage\)\}">/.test(appJs)
-      && /act==='new-from-pkg'/.test(appJs));
-  // The choice itself is a compact set of cards; the full pay-level matrix is
-  // still there, behind a disclosure, so it no longer runs ahead of the client
-  // and position fields (D02).
-  record('The package comparison is available without leading the form',
-    /function packageMatrix/.test(appJs) && /Potential fee/.test(appJs) && /What each pay level includes/.test(appJs)
-      && /data-panel="pkgcompare"/.test(appJs) && /Compare what each level includes/.test(appJs)
-      && /\.pkgmx/.test(appCss) && /pkgmx--pick:has/.test(appCss));
-  record('Each pay level has a sample workspace view',
-    /function vPackages/.test(appJs) && /function demoSearch/.test(appJs) && /data-go="packages"/.test(appJs)
-      && /case 'packages'/.test(appJs) && /showtabs/.test(appCss) && /data-act="new-from-pkg"/.test(appJs));
+      && /packageChoice\(s\.package\)/.test(appJs) && /Search workflow/.test(appJs));
+  record('Hardcoded commercial plan comparison and samples are removed',
+    !/function packageMatrix|function demoSearch|What each pay level includes|Potential fee/.test(appJs)
+      && !/data-go="packages"/.test(appJs) && /Plans have moved/.test(appJs));
 
   record('Navigating to a step outside the package lands on the overview', /function offPackage/.test(appJs) && /offPackage\(view\)/.test(appJs));
 

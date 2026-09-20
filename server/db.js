@@ -21,7 +21,7 @@ if (isProd && !process.env.DATA_DIR && !process.env.RAILWAY_VOLUME_MOUNT_PATH) {
   process.exit(1);
 }
 
-const { PHASES, STEPS, STAFF_STEPS, STAFF_STAGES, PACKAGES, PACKAGE_ORDER, DEFAULT_PACKAGE, COMPARE, COMPARE_BANDS, packageOf, stepsFor } = require('./steps');
+const { PHASES, STEPS, STAFF_STEPS, STAFF_STAGES, PACKAGES, PACKAGE_ORDER, DEFAULT_PACKAGE, packageOf, stepsFor } = require('./steps');
 
 // A shared firm sign-in, so day-to-day work does not require remembering which
 // named consultant you are. It is ensured on every boot rather than only at
@@ -1007,7 +1007,7 @@ function createUser({ name, email, title, role }){
 }
 
 module.exports = {
-  PHASES, STEPS, STAFF_STEPS, STAFF_STAGES, PACKAGES, PACKAGE_ORDER, DEFAULT_PACKAGE, COMPARE, COMPARE_BANDS, packageOf, stepsOf,
+  PHASES, STEPS, STAFF_STEPS, STAFF_STAGES, PACKAGES, PACKAGE_ORDER, DEFAULT_PACKAGE, packageOf, stepsOf,
   staffRecord,
   REVIEW_STEPS, reviewed, nid, now, persist, DATA_DIR,
   get db(){ return db; },

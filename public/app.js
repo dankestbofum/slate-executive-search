@@ -244,8 +244,6 @@ const state = {
   newPin:null,
   // Which pay-level sample the Packages page is showing, and the package
   // pre-selected when someone starts a search from that page.
-  showcasePkg:null,
-  newPackage:null,
   // Search ids checked on Home for a bulk delete. Dropped after the delete
   // runs, and ignored if a file is no longer on the book.
   picked:[],
@@ -386,162 +384,9 @@ function stepsLeftOut(key){
   return all.filter(st => (rank[st.pkg] ?? 0) > p.rank);
 }
 
-function compareRows(){
-  return state.health?.compare || [];
-}
-function compareBands(){
-  return state.health?.compareBands || [];
-}
-function packageOffers(pkg, row){
-  const rank = Object.fromEntries(packages().map(p => [p.key, p.rank]));
-  return (rank[pkg] ?? 0) >= (rank[row.pkg] ?? 0);
-}
-
-/**
- * The fee-level breakdown. One column per package, one row per service from
- * the catalog. When `pick` is true the column headers are radios named
- * `package`, so New search and Search facts submit the chosen tier.
- */
-function packageMatrix(selected, { pick=false, plain=false }={}){
-  const list = packages();
-  const rows = compareRows();
-  const bands = compareBands();
-  if (!list.length) return '';
-  if (!rows.length) {
-    const on = list.some(p => p.key === selected) ? selected : (state.health?.defaultPackage || list[list.length-1].key);
-    return `<div class="pkgs"${pick?' role="radiogroup" aria-label="Service package"':''}>${list.map(p => `
-      <${pick?'label':'div'} class="pkg u-default-cursor"${pick?'':''}>
-        ${pick?`<input type="radio" name="package" value="${esc(p.key)}" ${p.key===on?'checked':''}>`:''}
-        <div class="pkg__hd"><span class="pkg__nm">${esc(p.label)}</span><span class="pkg__fee">${esc(p.fee)}</span></div>
-        <div class="t-small">${esc(p.lede)}</div>
-        <ul class="pkg__svc">${(p.services||[]).map(s => `<li>${esc(s)}</li>`).join('')}</ul>
-      </${pick?'label':'div'}>`).join('')}</div>`;
-  }
-  const fallback = state.health?.defaultPackage || list[list.length-1].key;
-  const on = list.some(p => p.key === selected) ? selected : (pick ? fallback : '');
-  const mark = (pkg, row) => packageOffers(pkg, row)
-    ? `<span class="pkgmx__yes" title="Included">Yes</span>`
-    : `<span class="pkgmx__no" title="Not in this package">—</span>`;
-  const colClass = p => `pkgmx__c-${p.key}${!pick && p.key===on ? ' pkgmx--on' : ''}`;
-  const head = p => {
-    const inner = `<span class="pkgmx__nm">${esc(p.label)}</span><span class="pkgmx__fee">${esc(p.fee)}</span>`;
-    if (pick) return `<label class="pkgmx__pick"><input type="radio" name="package" value="${esc(p.key)}" ${p.key===on?'checked':''}>${inner}</label>`;
-    // Inside a form the comparison is reference material only: a header that
-    // navigated to the Packages page would discard what had been typed.
-    if (plain || !state.user) return `<div class="pkgmx__pick">${inner}</div>`;
-    return `<button type="button" class="pkgmx__pick" data-go="packages" data-pkg="${esc(p.key)}">${inner}</button>`;
-  };
-  const bandRows = (bands.length ? bands : [{ key:'', t:'' }]).map(band => {
-    const slice = rows.filter(r => !band.key || r.pkg === band.key);
-    if (!slice.length) return '';
-    const label = band.t
-      ? `<tr class="pkgmx__band"><th scope="colgroup" colspan="${1+list.length}">${esc(band.t)}</th></tr>`
-      : '';
-    return label + slice.map(row => `<tr>
-      <th scope="row">${esc(row.t)}</th>
-      ${list.map(p => `<td class="pkgmx__cell ${colClass(p)}">${mark(p.key, row)}</td>`).join('')}
-    </tr>`).join('');
-  }).join('');
-  return `<div class="tablewrap" tabindex="0"${pick?' role="radiogroup" aria-label="Service package"':' role="region" aria-label="Service package comparison"'}>
-    <table class="pkgmx${pick?' pkgmx--pick':''}">
-      <colgroup>
-        <col>
-        ${list.map(p => `<col class="${colClass(p)}">`).join('')}
-      </colgroup>
-      <thead><tr>
-        <th scope="col">Service</th>
-        ${list.map(p => `<th scope="col" class="pkgmx__col ${colClass(p)}">${head(p)}</th>`).join('')}
-      </tr></thead>
-      <tbody>${bandRows}</tbody>
-      <tfoot><tr>
-        <th scope="row">Potential fee</th>
-        ${list.map(p => `<td class="pkgmx__cell ${colClass(p)}"><span class="pkgmx__fee">${esc(p.fee)}</span></td>`).join('')}
-      </tr></tfoot>
-    </table>
-  </div>`;
-}
-
 function packagePill(key){
   const k = key==='executive' ? 'ok' : key==='enhanced' ? 'info' : 'idle';
-  return pill(k, packageLabel(key)+' package');
-}
-
-function showcasePkg(){
-  const key = state.showcasePkg;
-  return packages().some(p => p.key === key) ? key : (packages()[0]?.key || 'basic');
-}
-
-// A made-up mid-search file so each pay level can be shown without opening
-// a live client. Statuses are assigned by how far that tier's story has run:
-// Basic is screening applicants, Enhanced is sourcing, Executive is on references.
-function demoSearch(pkg){
-  const info = packageInfo(pkg) || { key:pkg, label:packageLabel(pkg), fee:'', lede:'', view:{}, services:[] };
-  const catalog = (state.health?.steps || []).filter(st => packageOffers(pkg, st));
-  const now = pkg === 'basic' ? 'screen' : pkg === 'enhanced' ? 'sourcing' : 'references';
-  const nowN = (catalog.find(st => st.key === now) || {}).n || 99;
-  const steps = catalog.map(st => {
-    if (st.n < nowN) return { ...st, status:'done', blocked:false };
-    if (st.key === now) return { ...st, status:'now', blocked:false };
-    return { ...st, status:'idle', blocked:true };
-  });
-  const next = steps.find(st => st.status === 'now') || null;
-  const people = [
-    { id:'c1', name:'Jordan Hale', stage:'applicant', survey1:{} },
-    { id:'c2', name:'Priya Shah', stage: pkg==='basic' ? 'applicant' : 'semifinalist', survey1:{} },
-    { id:'c3', name:'Marcus Webb', stage: pkg==='executive' ? 'finalist' : pkg==='enhanced' ? 'semifinalist' : 'applicant', survey1:{}, referenceConsentAt: pkg==='executive' ? '2026-09-01' : '' },
-    { id:'c4', name:'Elena Ruiz', stage:'declined', survey1:{} }
-  ];
-  const roster = [
-    { userId:'u1', name:'Abe Macy', init:'AM', searchRole:'manager' },
-    { userId:'u2', name:'Pat Chen', init:'PC', searchRole:'committee' },
-    { userId:'u3', name:'Sam Ortiz', init:'SO', searchRole:'committee' }
-  ];
-  return {
-    id:'demo-'+info.key, no:'SAMPLE', demo:true,
-    client:'Town of Ridgeline', position:'Town Manager', state:'CO',
-    fog:'Council-Manager', population:'18,400', budget:'$34M general fund',
-    salary:'$165,000 to $195,000', firstReview:'14 September 2026',
-    opened:'4 August 2026', website:'https://www.ridgelineco.gov',
-    package: info.key, packageInfo: info,
-    steps, progress: { done: steps.filter(st => st.status==='done').length, total: steps.length, next },
-    roster, accountManager: roster[0],
-    you: { searchRole:'consultant', member:false, consultant:true, canEdit:false, canManage:false },
-    criteria: [
-      { id:'S1', kind:'skill', label:'Financial management', weight:5 },
-      { id:'S2', kind:'skill', label:'Council relations', weight:4 },
-      { id:'T1', kind:'trait', label:'Steady under pressure', weight:4 },
-      { id:'C1', kind:'chall', label:'Structural deficit', weight:5 },
-      { id:'O1', kind:'opp', label:'Downtown redevelopment', weight:3 }
-    ],
-    intake: { status:'closed', answered:{ u1:true, u2:true, u3:true }, responses:{} },
-    consensus: { submitted:3, pending:[] },
-    candidates: people,
-    released: pkg === 'executive',
-    artifacts: {
-      plan: { rows:[{},{},{}] },
-      ads: { full:{ headline:'Town Manager, Ridgeline' } },
-      community: { lede:'A Front Range town of 18,400.' },
-      brochure: { title:'Town Manager' }
-    },
-    reviews: { ads:{ status:'approved' } },
-    staff: {
-      sourcing: { log:[{ text:'Called sitting managers along the I-25 corridor. Two asked for the brochure.', at:'2026-08-20', byName:'Abe Macy' }] },
-      video: { log:[{ candidateId:'c2', text:'45 minutes. Strong on finance.', at:'2026-08-28', byName:'Abe Macy' }] }
-    },
-    activity: [
-      { who:'Abe Macy', x:'opened the sample file', at:'2026-08-04' },
-      { who:'Abe Macy', x:'adopted the candidate profile', at:'2026-08-11' },
-      { who:'Abe Macy', x:'posted the announcement', at:'2026-08-18' }
-    ]
-  };
-}
-
-function withPreview(search, fn){
-  const prev = state.search, was = state.preview;
-  state.search = search;
-  state.preview = true;
-  try { return fn(); }
-  finally { state.search = prev; state.preview = was; }
+  return pill(k, packageLabel(key)+' workflow');
 }
 
 /* --- who the signed-in person is on this search --------------------------- */
@@ -1690,7 +1535,7 @@ function orgPrefix(orgId = state.org?.id){
 function routeFor(view = state.view, opts = {}){
   const sel = opts.sel !== undefined ? opts.sel : state.sel;
   const at = orgPrefix(opts.orgId);
-  if (view === 'packages') return at + '/packages/' + encodeURIComponent(opts.pkg || state.showcasePkg || '');
+  if (view === 'packages') return at + '/packages/' + encodeURIComponent(opts.pkg || '');
   if (WORKSPACE_VIEWS.includes(view) && view !== 'packages') return at + '/' + view;
   const id = opts.searchId || state.search?.id;
   if (!id) return at + '/home';
@@ -1808,7 +1653,6 @@ async function applyRoute(route, { push=false }={}){
     if (ticket !== navSeq) return;
   }
   if (!route.searchId && !WORKSPACE_VIEWS.includes(route.view)) route = { view:'home' };
-  if (route.pkg) state.showcasePkg = route.pkg;
   const extra = route.sel ? { sel:route.sel } : {};
   await go(route.view, extra, { push, replace:!push, fromHistory:true, ticket });
 }
@@ -1840,7 +1684,7 @@ async function go(view, extra={}, opts={}){
   if (view === 'home') { state.search = null; state.sel = null; }
   if (offPackage(view)) {
     const st = (state.health?.steps || []).find(x => x.key === view);
-    toast((st ? STEP_NAME[view] || st.t : 'That step')+' is not part of the '+packageLabel(state.search.package)+' package.');
+    toast((st ? STEP_NAME[view] || st.t : 'That step')+' is not part of the '+packageLabel(state.search.package)+' workflow.');
     view = 'overview';
   }
   // A deep link can name a step a committee member does not take part in.
@@ -2238,25 +2082,15 @@ function ratingGroup(name, buttons, ends=''){
   </div>`;
 }
 
-// A compact package choice with the full comparison behind a disclosure. The
-// matrix used to run ahead of the client and position fields (D02).
+// Search workflow selection does not purchase or change a subscription.
 function packageChoice(selected){
   const list = packages();
   if (!list.length) return '';
-  const fallback = state.health?.defaultPackage || list[list.length-1].key;
-  const on = list.some(p => p.key === selected) ? selected : fallback;
-  const open = Boolean(state.open.pkgcompare);
-  const cards = `<div class="pkgs" role="radiogroup" aria-label="Service package">${list.map(p => `
-    <label class="pkg">
-      <input type="radio" name="package" value="${esc(p.key)}" ${p.key===on?'checked':''}>
-      <span class="pkg__hd"><span class="pkg__nm">${esc(p.label)}</span><span class="pkg__fee">${esc(p.fee)}</span></span>
-      <span class="t-small">${esc(p.lede||'')}</span>
-    </label>`).join('')}</div>`;
-  return `<div class="stack stack--tight">
-    ${cards}
-    <div><button type="button" class="btn btn--ghost btn--sm" data-panel="pkgcompare" aria-expanded="${open}" aria-controls="pkgcompare" data-open-label="Compare what each level includes" data-close-label="Hide the comparison">${open?'Hide the comparison':'Compare what each level includes'}</button></div>
-    <div id="pkgcompare"${open?'':' hidden'}>${packageMatrix(on, { plain:true })}</div>
-  </div>`;
+  const on = list.some(p => p.key === selected) ? selected : state.health?.defaultPackage;
+  return '<div class="stack stack--tight"><p class="t-small">Choose the steps this search needs. Organization plans and payments are managed on <a href="/subscriptions">Subscriptions</a>.</p>' +
+    '<label for="search-workflow">Search workflow</label><select id="search-workflow" class="input" name="package">' +
+    list.map(p => '<option value="'+esc(p.key)+'"'+(p.key===on?' selected':'')+'>'+esc(p.label)+'</option>').join('') +
+    '</select></div>';
 }
 /**
  * The workspace page header.
@@ -2374,6 +2208,7 @@ async function loadMe(){
  * thing this feature could do.
  */
 function clearWorkspaceState(){
+  state.billing = null; state.billingActionError = null;
   // A research operation belongs to one firm's search. It stops before
   // anything else, so no late status or result can land in the next workspace.
   stopResearch();
@@ -2541,7 +2376,7 @@ function railPhaseGroups(search){
 // What the compact mobile bar says you are looking at, so the current search
 // and destination stay visible with the drawer closed.
 function shellContext(s){
-  if (state.view === 'packages') return 'Sample · '+packageLabel(showcasePkg());
+  if (state.view === 'packages') return 'Subscriptions';
   if (!s) return state.view === 'new' ? 'New search' : state.view === 'archives' ? 'Archived searches' : 'Home';
   const dest = destOf();
   return (s.client || 'Search') + (dest ? ' · '+destLabel(dest) : '');
@@ -2588,7 +2423,7 @@ function railWorkspace(){
 // working area is destinations rather than identity.
 function railAccount(u, s){
   const searchRole = s && you().searchRole ? SEARCH_ROLE[you().searchRole]?.label || '' : '';
-  const title = String(u.title || '').trim();
+  const title = String(state.onboarding?.roleLabel || u.title || '').trim();
   const detail = title && searchRole && title.toLowerCase() !== searchRole.toLowerCase() ? title + ' · ' + searchRole : title || searchRole;
   return `<div class="acct">
     <div class="acct__avatar" data-clerk-user></div>
@@ -2633,7 +2468,7 @@ function shell(body){
         ${state.caps?.manageMembers ? '<button class="rail__link" data-go="team-access" '+(state.view==='team-access'?'aria-current="page"':'')+'>Team &amp; access</button>' : ''}
         ${state.caps?.createSearch ? '<button class="rail__link" data-go="new" '+(state.view==='new'?'aria-current="page"':'')+'>New search</button>' : ''}
         ${state.caps?.viewArchives ? '<button class="rail__link" data-go="archives" '+(state.view==='archives'?'aria-current="page"':'')+'>Archived searches</button>' : ''}
-        ${isStaff() && packages().length ? `<button class="rail__link" data-go="packages" ${state.view==='packages'?'aria-current="page"':''}>Packages</button>` : ''}
+        <a class="rail__link" href="/subscriptions">Subscriptions</a>
         <button class="rail__link" data-go="help" ${state.view==='help'?'aria-current="page"':''}>Help &amp; user guide</button>
       </div>
       ${s?`<div class="rail__group rail__group--dests">
@@ -2682,7 +2517,7 @@ function shell(body){
     <main class="page" id="main" tabindex="-1">
       <div class="masthead"><div class="wrap"><div class="masthead__in">
         <nav class="crumbs" id="crumbs" aria-label="Breadcrumb"></nav>
-        <span class="mono mast__id">${state.view==='packages'?'SAMPLE · '+esc(packageLabel(showcasePkg())):(s?esc(s.no)+' · '+esc(s.position)+(s.package?' · '+esc(packageLabel(s.package)):''):'Slate')}</span>
+        <span class="mono mast__id">${state.view==='packages'?'Subscriptions':(s?esc(s.no)+' · '+esc(s.position)+(s.package?' · '+esc(packageLabel(s.package)):''):'Slate')}</span>
       </div></div></div>
       ${body}
     </main>
@@ -2694,7 +2529,7 @@ function shell(body){
 // name the actual step rather than the product.
 function viewLabel(){
   const v = state.view;
-  if (v === 'packages') return 'Packages · '+packageLabel(showcasePkg());
+  if (v === 'packages') return 'Subscriptions';
   if (v === 'home') return 'Home';
   if (v === 'help') return 'Help & user guide';
   if (v === 'posting') return 'Public posting';
@@ -2732,7 +2567,7 @@ function crumbs(){
   const destCrumb = dest && dest !== 'overview' && destLabel(dest) !== viewLabel()
     ? `<span class="dot"></span><button type="button" data-go="${DEST_HOME[dest]}">${esc(destLabel(dest))}</button>` : '';
   el.innerHTML = `<button type="button" data-go="home">Home</button>` +
-    (state.view==='packages' ? `<span class="dot"></span><span>Packages</span>` :
+    (state.view==='packages' ? `<span class="dot"></span><span>Subscriptions</span>` :
     (s ? `<span class="dot"></span><button type="button" data-go="overview">${esc(s.client||'Search')}</button>` : '')) +
     destCrumb + tail;
   document.title = state.user
@@ -2740,29 +2575,108 @@ function crumbs(){
     : 'Slate — Executive Search';
 }
 
-function vGate(){
+function publicFrame(body){
   const controls = window.SlateAuth.signedIn
-    ? '<div class="auth-profile"><div data-clerk-user></div><button class="btn btn--ghost" data-act="logout">Sign out</button></div>'
+    ? '<div class="row"><a class="btn btn--secondary" href="/">My workspace</a><button class="btn btn--ghost" data-act="logout">Sign out</button></div>'
     : `<div class="row"><button class="btn btn--ghost" data-act="sign-in" ${state.authError?'disabled':''}>Sign in</button><button class="btn btn--primary" data-act="sign-up" ${state.authError?'disabled':''}>Sign up</button></div>`;
-  return `<div class="gate">
-    <header class="gate__bar">
-      <div class="login__brand">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="u-accent" aria-hidden="true"><path d="M4 20h16M6 20V9l6-4 6 4v11M10 20v-5h4v5"/></svg>
-        <span class="rail__name">Slate</span>
-      </div>
-      ${controls}
-    </header>
-    <div class="wrap gate__hero">
-      <h1 class="t-title">A guided executive search</h1>
-      <p class="t-body">Every engagement assembles the search committee, asks each member what they are looking for, and builds the candidate profile from their answers. Recruiting, screening, and interviews all run against that profile.</p>
-    </div>
-    <div class="wrap gate__table stack">
-      <p class="t-body">Sign in to work with your search team. New here? Create an account, tell us your role, and we will guide you through getting started. If you were invited, use the email on your invitation.</p>${state.authError ? `<p role="alert">${esc(state.authError)}</p><button class="btn" data-act="auth-retry">Try again</button>` : ''}
-    </div>
-  </div>`;
+  return `<div class="gate welcome"><a class="skip" href="#main">Skip to content</a>
+    <header class="gate__bar"><a class="rail__name" href="/" aria-label="Slate home">Slate</a>
+      <nav class="row" aria-label="Welcome navigation"><a href="/careers">Find a position</a><a href="/subscriptions">Subscriptions</a>${controls}</nav></header>
+    <main id="main" class="wrap welcome__main stack" tabindex="-1">${body}</main>
+    <footer class="wrap welcome__footer">Slate · Executive search for local government</footer></div>`;
+}
+
+function subscriptionInfo(){
+  return `<p>Organization subscriptions cover your shared workspace. A workspace administrator can review available plans and manage billing on the Subscriptions page.</p>
+    <p>Creating an account or workspace does not purchase a subscription. If your organization already uses Slate, ask its administrator about your access and agreement.</p>
+    <p class="t-small">Your search workflow controls which tasks appear on a search. Subscription plans and prices come from Clerk.</p>`;
+}
+
+async function loadBilling(){
+  state.billing = { loading: true };
+  state.billingActionError = null;
+  render();
+  try {
+    const catalog = await api('/api/public/billing/plans');
+    let account = null;
+    if (catalog.status === 'ready' && state.org && isAdmin()) account = await api('/api/billing/subscription');
+    state.billing = { ...catalog, account };
+  } catch (error) { state.billing = { error: error.message }; }
+  render();
+}
+
+function billingContent(){
+  const b = state.billing;
+  if (!b || b.loading) return '<p role="status">Loading subscriptions...</p>';
+  if (b.error) return `<p role="alert">${esc(b.error)}</p><button class="btn btn--secondary" data-act="refresh-billing">Try again</button>`;
+  const test = b.mode === 'test' ? '<p class="notice" role="status"><strong>Test billing.</strong> This checkout is for testing; no real payment will be collected.</p>' : '';
+  if (b.status !== 'ready') return test + '<p>Subscriptions are not available for purchase yet. Creating an account or workspace does not charge you.</p>';
+  const account = b.account;
+  if (account && account.status !== 'ready') return test + '<p role="alert">Workspace billing is unavailable. Please try again shortly.</p><button class="btn btn--secondary" data-act="refresh-billing">Try again</button>';
+  const canBuy = state.org && isAdmin() && account?.organizationId === state.org.id;
+  const summary = canBuy ? `<section class="stack"><h2 class="t-section">Billing for ${esc(state.org.name)}</h2>
+    ${account.subscription ? `<ul>${account.subscription.items.map(item => `<li>${esc(item.name)}: ${esc(item.status.replaceAll('_', ' '))}${item.isFreeTrial ? ' (free trial)' : ''}</li>`).join('')}</ul>
+    <button class="btn btn--secondary" data-act="manage-billing">Manage subscription</button>` : '<p>No subscription is recorded for this workspace.</p>'}
+    <button class="btn btn--ghost" data-act="refresh-billing">Refresh billing status</button></section>` : '';
+  const access = canBuy ? '' : state.org
+    ? '<p>Ask your workspace administrator to purchase or manage its subscription.</p>'
+    : `<p>Create or select an organization workspace before choosing a paid plan.</p><a class="btn btn--primary" href="${state.user ? '/' : '/sign-up'}">${state.user ? 'Continue setup or open workspace' : 'Create an organization account'}</a>`;
+  const plans = !b.plans.length ? '<p>Plans and prices have not been published yet.</p>' : canBuy
+    ? `<div data-clerk-pricing data-organization="${esc(state.org.id)}"><p>Loading secure checkout...</p></div>`
+    : `<div class="welcome__grid">${b.plans.map(p => `<section class="welcome__card stack"><h2 class="t-section">${esc(p.name)}</h2><p>${esc(p.description)}</p>
+      ${p.fee ? `<p><strong>${esc(p.fee.currency)} ${esc(p.fee.amountFormatted)}</strong> per month</p>` : ''}
+      ${p.annualFee ? `<p>${esc(p.annualFee.currency)} ${esc(p.annualFee.amountFormatted)} billed annually</p>` : ''}
+      ${p.freeTrialDays ? `<p>${esc(p.freeTrialDays)}-day free trial</p>` : ''}
+      ${p.features.length ? `<ul>${p.features.map(f => `<li>${esc(f.name)}</li>`).join('')}</ul>` : ''}</section>`).join('')}</div>`;
+  return test + summary + access + plans + (state.billingActionError ? `<p role="alert">${esc(state.billingActionError)}</p>` : '');
+}
+
+function vSubscriptions(){
+  document.title = 'Subscriptions · Slate';
+  return publicFrame(`<div><p class="t-label">Plans &amp; access</p><h1 class="t-title">Subscriptions</h1>
+    <p class="t-body">Choose a plan for your organization. Candidates can browse and apply for free.</p></div>
+    <section class="stack" aria-label="Organization subscriptions">${billingContent()}</section>
+    <div class="welcome__grid"><section class="welcome__card stack"><h2 class="t-section">Organizations &amp; search firms</h2>${subscriptionInfo()}
+      <a class="btn btn--primary" href="${state.user ? '/' : '/sign-up'}">${state.user ? 'Continue setup or open workspace' : 'Create an organization account'}</a></section>
+    <section class="welcome__card stack"><h2 class="t-section">Candidates</h2><p>Browse published openings without a staff account or an organization subscription. To apply, open a position and verify your email. Your application is saved separately from staff workspace access.</p>
+      <a class="btn btn--secondary" href="/careers">Browse openings</a></section></div>`);
+}
+
+function vGate(){
+  const authPage = /^\/(sign-up|sign-in)(?:\/|$)/.exec(location.pathname)?.[1];
+  const failure = state.authError ? `<p role="alert">${esc(state.authError)}</p><button class="btn" data-act="auth-retry">Try again</button>` : '';
+  if (authPage) {
+    const signup = authPage === 'sign-up';
+    document.title = (signup ? 'Sign up' : 'Sign in') + ' · Slate';
+    return publicFrame(`<div class="welcome__grid"><section class="stack"><p class="t-label">${signup ? 'Start your search workspace' : 'Welcome back'}</p>
+      <h1 class="t-title">${signup ? 'Create your Slate account' : 'Sign in to Slate'}</h1>
+      <p class="t-body">${signup ? 'For organizations, search consultants, and invited committee members. After creating your account, confirm your name, choose how you will use Slate, and create or join a workspace.' : 'Use the email your search team knows to open your workspace and assignments.'}</p>
+      <p>Looking for your next position? <a href="/careers">Browse openings and apply as a candidate</a>. You do not need a staff workspace.</p>
+      <p class="t-small">${signup ? 'Account creation does not purchase a subscription. ' : ''}<a href="/subscriptions">Subscription information</a></p></section>
+      <section aria-label="${signup ? 'Sign up' : 'Sign in'} form" class="welcome__auth">${failure || '<div data-clerk-auth="'+authPage+'"></div>'}</section></div>`);
+  }
+  document.title = 'Slate · Guided executive search';
+  return publicFrame(`<section class="welcome__hero stack"><p class="t-label">From search priorities to your next hire</p>
+    <h1 class="t-title">A clear next step.<br>For every executive search.</h1>
+    <p class="t-body">Slate helps local governments and search firms define the role, bring their committee together, recruit candidates, and organize evaluations and interviews in one shared workspace.</p></section>
+    ${failure}
+    <section aria-labelledby="welcome-paths"><h2 id="welcome-paths" class="t-section">What brings you to Slate?</h2>
+      <div class="welcome__grid">
+        <article class="welcome__card stack"><p class="t-label">For hiring teams</p><h3 class="t-section">I’m conducting a search</h3>
+          <p>Set up your organization, choose a search workflow, invite your team, and follow a guided process from planning through selection.</p>
+          <a class="btn btn--primary" href="/sign-up">Set up an organization</a><p class="t-small">Already invited? Sign in with the email on your invitation.</p></article>
+        <article class="welcome__card stack"><p class="t-label">For candidates</p><h3 class="t-section">I’m looking for a position</h3>
+          <p>Explore published openings, review requirements, and apply with your verified email. Save a draft and return to finish it.</p>
+          <a class="btn btn--secondary" href="/careers">Browse openings</a><p class="t-small">Have a questionnaire invitation? Open the private link your search team sent you.</p></article>
+      </div></section>
+    <section class="stack" aria-labelledby="welcome-how"><h2 id="welcome-how" class="t-section">How your team gets started</h2>
+      <ol class="welcome__steps"><li><strong>Create your account</strong><span>Confirm your name and tell us how you will use Slate.</span></li><li><strong>Set up your workspace</strong><span>Create a space for your organization, or accept your team’s invitation.</span></li><li><strong>Start your first search</strong><span>Enter the position, choose a workflow, and assemble the committee.</span></li></ol></section>
+    <section class="welcome__card stack"><h2 class="t-section">Subscriptions</h2>${subscriptionInfo()}<a href="/subscriptions">View subscription information</a></section>`);
 }
 
 const ACCOUNT_PATHS = {
+  organization: { label:'Organization conducting a search', description:'I am hiring for my organization.', tasks:'Create a workspace, invite the team, and start an executive search.', next:'Create a workspace for your organization if this deployment allows it, or join by invitation. Then enter your first position and choose a search package.' },
+  candidate: { label:'Candidate looking for a position', description:'I want to find and apply for opportunities.', tasks:'Browse openings, verify your email, and save or submit an application.', next:'Open the candidate portal and choose a position. You do not need to create or join a staff workspace. Each application uses its own email verification.' },
   consultant: { label:'Search consultant', description:'I organize and manage executive searches.', tasks:'Set up searches, manage the committee, review candidates, and prepare search documents.', next:'A workspace administrator must authorize consultant access. Once approved, you can work across the firm’s searches.' },
   committee: { label:'Committee member', description:'I help evaluate candidates for a search.', tasks:'Share what you are looking for, review assigned search materials, and score candidates.', next:'Your search consultant adds you to the committee using your sign-in email. Only your assigned searches will appear.' }
 };
@@ -2787,18 +2701,18 @@ function vOnboarding(){
   const assigned = state.onboarding?.role || null;
   const selected = draft.requestedRole || state.onboarding?.requestedRole || '';
   const path = ACCOUNT_PATHS[selected];
-  return accountFrame(`<div><p class="t-label">Welcome to Slate · Step 1 of 3</p>
+  return accountFrame(`<div><p class="t-label">Welcome to Slate · Account setup</p>
     <h1 class="t-title">${assigned ? 'Confirm your name' : 'How will you use Slate?'}</h1>
     <p class="t-body">${assigned
       ? 'This is the name your colleagues see on the roster and against your scores.'
-      : 'Tell us who you are so we can show you the right tools and next steps.'}</p></div>
+      : 'Slate guides hiring teams through executive searches and helps candidates find and apply for published positions. Choose your path to get started.'}</p></div>
     <form id="onboardingform" class="stack">
       <div class="onboarding__identity"><label class="stack stack--tight" for="onboarding-name"><span>Your name</span><input class="input" id="onboarding-name" name="name" autocomplete="name" required maxlength="120" value="${esc(draft.name ?? state.user.name)}"></label>
         <p class="t-small">Signed in as <strong>${esc(state.user.email)}</strong>. Use the email your search team knows.</p></div>
       ${assigned ? `<div class="onboarding__next"><h2 class="t-section">You have joined ${esc(state.onboarding.organization?.name || 'a workspace')}</h2>
         <p>Your role there is <strong>${esc(state.onboarding.roleLabel)}</strong>. ${esc(state.onboarding.roleSummary || '')}</p>
         <p class="t-small">An administrator of that workspace sets this role. You do not choose it here.</p></div>`
-      : `<fieldset class="onboarding__choices"><legend>Choose your role</legend><div class="onboarding__grid">${Object.entries(ACCOUNT_PATHS).map(([key, option]) => `<label class="onboarding__choice">
+      : `<fieldset class="onboarding__choices"><legend>Choose how you will use Slate</legend><div class="onboarding__grid">${Object.entries(ACCOUNT_PATHS).map(([key, option]) => `<label class="onboarding__choice">
         <input type="radio" id="onboarding-role-${key}" name="requestedRole" value="${key}" required ${selected===key?'checked':''}>
         <span><strong>${option.label}</strong><span>${option.description}</span><span class="t-small">${option.tasks}</span></span></label>`).join('')}</div></fieldset>
       <div class="onboarding__next" aria-live="polite"><h2 class="t-section">${path ? 'What happens next' : 'A workspace built around your role'}</h2><p>${path ? path.next : 'Choose a role to see how you will get started.'}</p>
@@ -2839,21 +2753,28 @@ const ROLE_LABEL = {
  * they are working in. All three are on the page, ordered by which is most
  * likely given what we already know about this account.
  */
+function vCandidateStart(){
+  return accountFrame(`<div><p class="t-label">Candidate setup complete</p><h1 class="t-title">Find your next position</h1><p class="t-body">Welcome, ${esc(state.user.name)}. Your next step is to choose an opening in the candidate portal.</p></div>
+    <ol class="welcome__steps"><li><strong>Browse openings</strong><span>Read the position, requirements, deadline, and contact details.</span></li><li><strong>Verify your email</strong><span>Open Apply on a position and verify your email to access that application.</span></li><li><strong>Apply and keep your receipt</strong><span>Save a draft, add the required materials, review, and submit. Return through the same posting.</span></li></ol>
+    <div class="row"><a class="btn btn--primary" href="/careers">Browse openings</a><button class="btn btn--secondary" data-act="edit-account-setup">Change how I use Slate</button></div>
+    <section class="onboarding__next stack"><h2 class="t-section">Already started an application?</h2><p>Open the same job posting and verify the email you used to apply. This account does not automatically link or display applications.</p><p>If you received a private questionnaire invitation, use that original link. Contact the search team listed on the posting if you need help.</p></section>`);
+}
+
 function vWorkspaceChooser(){
   const list = (state.workspaces || []).filter(w => w.role);
   const unusable = (state.workspaces || []).filter(w => !w.role);
   const mayCreate = state.canCreateWorkspace;
-  const wantsToOwn = mayCreate && state.onboarding?.requestedRole === 'consultant';
+  const wantsToOwn = mayCreate && ['organization', 'consultant'].includes(state.onboarding?.requestedRole);
   const draft = state.orgDraft || {};
   const createForm = `<form id="createworkspace" class="stack stack--tight">
     <label class="stack stack--tight" for="ws-name"><span>Workspace name</span>
-      <input class="input" id="ws-name" name="name" maxlength="100" required placeholder="Your firm's name" value="${esc(draft.name || '')}"></label>
-    <p class="t-small">This creates a separate workspace for your firm. You become its administrator and can invite colleagues. It does not join an existing firm, and it does not bring any existing searches with it.</p>
+      <input class="input" id="ws-name" name="name" maxlength="100" required placeholder="Organization or search firm name" value="${esc(draft.name || '')}"></label>
+    <p class="t-small">This creates a separate workspace for your organization or search firm. You become its administrator and can invite colleagues. To work with an existing team, join by invitation instead.</p>
     <div class="row"><button class="btn btn--primary" type="submit" ${state.orgBusy?'disabled':''}>${state.orgBusy?'Creating…':'Create a workspace'}</button></div>
   </form>`;
 
   const joinBlock = `<section class="onboarding__next stack stack--tight"><h2 class="t-section">Join an existing workspace</h2>
-    <p>An administrator at your firm invites <strong>${esc(state.user.email)}</strong>. When they do, the invitation appears here.</p>
+    <p>An administrator at your organization invites <strong>${esc(state.user.email)}</strong>. When they do, the invitation appears here.</p>
     <div class="row"><button class="btn btn--secondary" data-act="check-invites" ${state.orgBusy?'disabled':''}>Check invitations</button>
       <button class="btn btn--ghost" data-act="logout">Use a different account</button></div>
     ${inviteList()}</section>`;
@@ -2869,12 +2790,13 @@ function vWorkspaceChooser(){
   return accountFrame(`<div><p class="t-label">Step 2 of 3 · Choose workspace</p>
     <h1 class="t-title">${list.length ? 'Where are you working?' : 'You are not in a workspace yet'}</h1>
     <p class="t-body">${list.length
-      ? 'Each workspace is one firm. Searches, staff, and committees never cross between them.'
+      ? 'Each workspace belongs to one organization or search firm. Its searches, staff, and committees are kept separate.'
       : mayCreate
-        ? 'A workspace is one firm\u2019s shared space. Create your own, or join one you have been invited to.'
-        : 'A workspace is one firm\u2019s shared space. You join one by invitation from a firm already using Slate.'}</p></div>
+        ? 'A workspace is your organization\u2019s shared space. Create your own, or join one you have been invited to.'
+        : 'A workspace is your organization\u2019s shared space. You join one by invitation from an organization already using Slate.'}</p></div>
     ${state.workspacesError ? `<p role="alert">${esc(state.workspacesError)} <button class="btn btn--ghost btn--sm" data-act="check-account-access">Try again</button></p>` : ''}
     ${state.orgError ? `<p role="alert">${esc(state.orgError)}</p>` : ''}
+    <div class="row"><button class="btn btn--ghost" data-act="edit-account-setup">Change how I use Slate</button><a href="/subscriptions">Subscription information</a></div>
     ${chooseBlock}
     ${blocked}
     ${!mayCreate
@@ -3062,6 +2984,13 @@ function matchesHomeQuery(s){
     .some(v => String(v||'').toLowerCase().includes(q));
 }
 
+function workspaceQuickStart(){
+  return `<section class="spec" aria-labelledby="workspace-start"><div class="spec__body stack"><h2 class="t-section" id="workspace-start">Get started with Slate</h2>
+    <p>Plan the search, gather committee priorities, prepare recruiting materials, and evaluate candidates in one workspace. Your workspace is ready; start with the position you need to fill.</p>
+    <ol class="welcome__steps"><li><strong>Open a search</strong><span>Enter the employer and position, then choose the workflow that fits the search.</span></li><li><strong>Assemble your team</strong><span>Invite colleagues to the workspace and add the committee to the search.</span></li><li><strong>Follow the next task</strong><span>Open the search overview for the next step and instructions.</span></li></ol>
+    <div class="row">${state.caps?.createSearch ? '<button class="btn btn--primary" data-go="new">Start your first search</button>' : ''}<button class="btn btn--secondary" data-go="help">Read the getting-started guide</button><a href="/subscriptions">Subscriptions</a></div></div></section>`;
+}
+
 function vHome(){
   if (isCommittee()) return vHomeCommittee();
   const u = state.user;
@@ -3117,11 +3046,12 @@ function vHome(){
   const cols = 5 + (manage ? 2 : 0);
   return shell(`
     ${head(state.onboarding?.roleLabel || 'Workspace', orgName() + ' searches',
-      list.length ? esc(live)+' in progress, '+esc(complete)+' complete.' : 'Nothing on the book yet.',
+      list.length ? esc(live)+' in progress, '+esc(complete)+' complete.' : 'Your workspace is ready. Set up your first search.',
       state.caps?.createSearch ? `<button class="btn btn--primary" data-go="new">Open a new search</button>` : '')}
     <div class="band"><div class="wrap stack">
       ${crossWorkspaceNotice()}
       ${searchesNotice()}
+      ${!list.length ? workspaceQuickStart() : ''}
       ${state.caps?.manageMembers && state.team?.invitations?.length ? `<div class="notice notice--info" role="status"><div>
         <div class="notice__t">${state.team.invitations.length} invitation${state.team.invitations.length===1?'':'s'} waiting to be accepted</div>
         <div class="notice__b">They are not in the workspace until they accept.</div></div>
@@ -3196,11 +3126,6 @@ function vNew(){
   return shell(`
     ${head('New search','Who is hiring, and for what','Open the file, then add the search committee. The profile comes after the committee has told you what they are looking for.')}
     <div class="band"><div class="wrap"><form id="newsearch" class="stack">
-      ${/* The service package is not asked for here. A new file opens on the
-            default level and the package is set on Search facts, except when
-            the search was started from a package sample, which carries its
-            choice through on this hidden field. */
-        state.newPackage ? `<input type="hidden" name="package" value="${esc(state.newPackage)}">` : ''}
       ${sectionHead('The client', 'Required')}
       <div class="formgrid">
         ${field('Client jurisdiction','Official county, city, or town name.', `<input class="input" name="client" required placeholder="${esc(jurisdiction.clientPlaceholder)}">`, { req:true })}
@@ -3225,7 +3150,7 @@ function vNew(){
         `<button class="btn btn--primary" type="submit" form="newsearch">Create search</button>`,
         `<button type="button" class="btn btn--secondary" data-go="home">Cancel</button>`,
         packages().length
-          ? 'Opens at the '+esc(packageLabel(state.newPackage || state.health?.defaultPackage))+' level. Change that on Search facts.'
+          ? 'Opens at the '+esc(packageLabel(state.health?.defaultPackage))+' workflow. Change that on Search facts.'
           : 'Opens the file and takes you to the search committee.')}
     </form></div></div>`);
 }
@@ -3347,11 +3272,11 @@ function rosterPanel(s){
 function packagePanel(s){
   if (!s.packageInfo || isCommittee()) return '';
   const left = stepsLeftOut(s.package);
-  return `<div class="spec"><div class="spec__bar">${esc(s.packageInfo.label)} package · ${esc(s.packageInfo.fee)}</div>
+  return `<div class="spec"><div class="spec__bar">${esc(s.packageInfo.label)} workflow</div>
     <div class="spec__body">
       <p class="t-small u-mb-3">${esc(s.packageInfo.lede)}</p>
       <ul class="svcs">${(s.packageInfo.services||[]).map(x => `<li>${esc(x)}</li>`).join('')}</ul>
-      ${left.length ? `<p class="t-small u-mt-3">Not on this file: ${left.map(st => esc(STEP_NAME[st.key]||st.t)).join(', ')}.${canEdit() && !state.preview?' Change the package on <button class="btn btn--ghost btn--sm" data-go="facts">Search facts</button> if the engagement changed.':''}</p>` : ''}
+      ${left.length ? `<p class="t-small u-mt-3">Not on this file: ${left.map(st => esc(STEP_NAME[st.key]||st.t)).join(', ')}.${canEdit() && !state.preview?' Change the workflow on <button class="btn btn--ghost btn--sm" data-go="facts">Search facts</button> if the engagement changed.':''}</p>` : ''}
     </div></div>`;
 }
 
@@ -3837,7 +3762,7 @@ function vProcess(){
           <div class="spec__body"><p class="t-small u-mb-4">${esc(p.lede)}</p>${stepsList(phase, s)}</div></div>`;
       }).join('')}
       ${left.length ? `<div class="spec"><div class="spec__bar">Not on this file</div>
-        <div class="spec__body"><p class="t-small">The ${esc(packageLabel(s.package))} package does not include ${left.map(st => esc(STEP_NAME[st.key]||st.t)).join(', ')}.${canEdit()?' Change the package on Search facts if the engagement changed.':''}</p>
+        <div class="spec__body"><p class="t-small">The ${esc(packageLabel(s.package))} package does not include ${left.map(st => esc(STEP_NAME[st.key]||st.t)).join(', ')}.${canEdit()?' Change the workflow on Search facts if the engagement changed.':''}</p>
         ${canEdit()?`<div class="row u-mt-3"><button class="btn btn--secondary btn--sm" data-go="facts">Open Search facts</button></div>`:''}</div></div>` : ''}
     </div></div>`);
 }
@@ -3990,31 +3915,11 @@ function vDocuments(){
     </div></div>`);
 }
 
+// Old package bookmarks lead to the provider-backed subscription page.
 function vPackages(){
-  const list = packages();
-  const pkg = showcasePkg();
-  const info = packageInfo(pkg);
-  const view = info?.view || {};
-  const demo = demoSearch(pkg);
-  const inner = withPreview(demo, () => overviewInner(demo, { preview:true }));
-  const tabs = `<div class="showtabs" role="tablist" aria-label="Pay level">${list.map(p => `
-    <button type="button" class="showtab" role="tab" data-go="packages" data-pkg="${esc(p.key)}" aria-selected="${p.key===pkg}">
-      <span class="showtab__nm">${esc(p.label)}</span>
-      <span class="showtab__fee">${esc(p.fee)}</span>
-    </button>`).join('')}
-  </div>`;
-  return shell(`
-    ${head('Sample file', (info?.label || 'Package')+' · '+(info?.fee || ''),
-      `${esc(view.kicker || packageLabel(pkg)+' search')} for <b>${esc(demo.client)}</b>. ${esc(demo.fog)}. ${packagePill(pkg)}${view.lede?`<br><span class="t-small">${esc(view.lede)}</span>`:''}<br><span class="t-small">This is a sample. Nothing here is saved. Use it to show a client what this pay level looks like in the workspace.</span>`,
-      `${!isCommittee() ? `<button class="btn btn--primary" data-act="new-from-pkg" data-pkg="${esc(pkg)}">Open ${/^[aeiou]/i.test(info?.label || '')?'an':'a'} ${esc(info?.label || '')} search</button>` : ''}
-       <button class="btn btn--secondary" data-go="home">Back to Home</button>`)}
-    <div class="band"><div class="wrap stack">
-      ${tabs}
-      <div class="spec"><div class="spec__bar">What each pay level includes</div>
-        <div class="spec__body spec__body--flush">${packageMatrix(pkg)}</div>
-      </div>
-      <div class="showcase">${inner}</div>
-    </div></div>`);
+  return shell(head('Subscriptions', 'Plans have moved',
+    'View current organization plans and manage billing on the Subscriptions page.',
+    '<a class="btn btn--primary" href="/subscriptions">View subscriptions</a>'));
 }
 
 function vFacts(){
@@ -4042,9 +3947,9 @@ function vFacts(){
         ${field('Working notes','Not published. Used when you ask Claude to draft.', `<textarea class="input ed" name="notes">${esc(s.notes||'')}</textarea>`, { span:true })}
       </div>
       ${packages().length ? `
-      ${sectionHead('Service package', packageLabel(s.package), `<button type="button" class="btn btn--ghost btn--sm" data-panel="factspkg" aria-expanded="${pkgOpen}" aria-controls="factspkg" data-open-label="Change the package" data-close-label="Hide package options">${pkgOpen?'Hide package options':'Change the package'}</button>`)}
+      ${sectionHead('Search workflow', packageLabel(s.package), `<button type="button" class="btn btn--ghost btn--sm" data-panel="factspkg" aria-expanded="${pkgOpen}" aria-controls="factspkg" data-open-label="Change the workflow" data-close-label="Hide workflow options">${pkgOpen?'Hide workflow options':'Change the workflow'}</button>`)}
       <div id="factspkg"${pkgOpen?'':' hidden'}>
-        <p class="t-small u-mb-3">Moving down a level hides the steps that fee does not include. Anything already drafted on them stays on file and comes back if you move up again.</p>
+        <p class="t-small u-mb-3">Choosing a shorter workflow removes steps from this search. Anything already drafted on them stays on file and comes back if you move up again.</p>
         ${packageChoice(s.package)}
       </div>` : ''}
       ${actionBar(
@@ -7439,11 +7344,13 @@ function vTeamAccess(){
  */
 function page(){
   if (location.pathname.startsWith('/apply/')) return vApply();
+  if (location.pathname === '/subscriptions') return vSubscriptions();
   if (!state.user) return vGate();
   if (state.myAccess) return vMyAccess();
   if (state.onboarding?.required || state.editAccountSetup) return vOnboarding();
   if (state.chooseWorkspace) return vWorkspaceChooser();
   switch (state.onboarding?.stage){
+    case 'candidate': return vCandidateStart();
     case 'membership-lost': return vMembershipLost();
     case 'workspace': return vWorkspaceChooser();
     case 'role-pending': return vRolePending();
@@ -7921,11 +7828,6 @@ window.addEventListener('slate:help-open-guide', () => { go('help'); });
 
 document.addEventListener('click', async e => {
   closeMenusExcept(e.target);
-  const hit = e.target.closest('.pkgmx tbody td, .pkgmx tfoot td');
-  if (hit) {
-    const radio = hit.closest('.pkgmx')?.querySelector(`thead th:nth-child(${hit.cellIndex + 1}) input[name="package"]`);
-    if (radio) radio.checked = true;
-  }
   const t = e.target.closest('[data-go],[data-open],[data-act],[data-add],[data-del],[data-w],button[data-theme],[data-cand],[data-score],[data-pick],[data-ipick],[data-iadd],[data-idel],[data-iw],[data-phase],[data-panel],[data-personadd],[data-persondel],[data-mode],[data-artadd],[data-artdel],[data-tab],[data-col]');
   if (!t) return;
 
@@ -8019,7 +7921,6 @@ document.addEventListener('click', async e => {
     return;
   }
   if (t.dataset.go){
-    if (t.dataset.pkg) state.showcasePkg = t.dataset.pkg;
     if (t.dataset.go==='home'){ await go('home'); return; }
     await go(t.dataset.go); return;
   }
@@ -8138,6 +8039,17 @@ document.addEventListener('click', async e => {
   }
 
   const act = t.dataset.act;
+  if (act === 'refresh-billing') { await loadBilling(); return; }
+  if (act === 'manage-billing') {
+    try {
+      if (!state.org || !isAdmin()) throw new Error('A workspace administrator must manage this subscription.');
+      // Recheck membership and active organization before opening Clerk's UI.
+      const account = await api('/api/billing/subscription');
+      if (account.status !== 'ready' || account.organizationId !== state.org.id) throw new Error('Workspace billing is unavailable. Please refresh and try again.');
+      await window.SlateAuth.manageSubscription(account.organizationId);
+    } catch (error) { state.billingActionError = error.message; render(); }
+    return;
+  }
   // Handled by the guide's own listener above, which deliberately does not
   // re-render the page.
   if (act==='help-page') return;
@@ -8375,7 +8287,7 @@ document.addEventListener('click', async e => {
     if (state.dirty && !confirm('Leave this page and discard unsaved edits?')) return;
     state.dirty = false;
     state.onboardingDraft = null; state.onboardingError = null;
-    state.editAccountSetup = true; render();
+    state.myAccess = false; state.editAccountSetup = true; render();
     $('#main')?.focus(); return;
   }
   if (act==='cancel-account-setup') {
@@ -8636,13 +8548,6 @@ document.addEventListener('click', async e => {
     await createSearch();
     return;
   }
-  if (act==='new-from-pkg'){
-    state.newPackage = t.dataset.pkg || showcasePkg();
-    state.search = null;
-    await go('new');
-    return;
-  }
-
   /* --- Step 1, the roster ------------------------------------------------- */
   if (act==='confirm-team'){
     const confirmed = !state.search.team?.confirmedAt;
@@ -9345,9 +9250,12 @@ document.addEventListener('submit', async e => {
       const result = await api('/api/me/onboarding', { method:'POST', body });
       state.user = result.user; state.onboarding = result.onboarding;
       state.editAccountSetup = false; state.onboardingDraft = null; state.dirty = false;
-      await refreshSearches();
+      if (!state.onboarding.blocked) await refreshSearches();
       state.search = null;
-      await go('home');
+      // A first-time member may have opened a link to an assigned search.
+      // Confirming their name must not lose that destination.
+      if (!state.onboarding.blocked) await applyRoute(parseRoute(location.hash), { push:false });
+      else await go('home');
     } catch (error) { state.onboardingError = error.message; }
     finally { state.onboardingSaving = false; render(); $('#main')?.focus(); }
     return;
@@ -9431,7 +9339,6 @@ async function createSearch(){
       // new file the moment the user goes back to it (D03).
       await refreshSearches();
     });
-    state.newPackage = null;
     state.newJurisdiction = null;
     if (!state.search) return;
     // A search now opens on the roster, not the profile. Adding the committee
@@ -9525,10 +9432,14 @@ $('#lookup-cancel')?.addEventListener('click', () => { if (showWait._cancel) sho
       });
   } catch (error) {
     state.authError = error.message;
+    if (location.pathname === '/subscriptions') { await loadBilling(); return; }
     render();
     return;
   }
-  if (await loadMe()){
+  const signedIn = await loadMe();
+  if (location.pathname === '/subscriptions') { await loadBilling(); return; }
+  if (signedIn){
+    if (/^\/(sign-up|sign-in)(?:\/|$)/.test(location.pathname)) history.replaceState(null, '', '/' + location.hash);
     navDepth = Number(history.state?.slateDepth) || 0;
     if (state.onboarding?.blocked){
       // Nowhere to work yet. The onboarding screens are their own thing and do

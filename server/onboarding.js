@@ -6,15 +6,16 @@ const organizations = require('./organizations');
 // guidance they are shown and nothing else: an administrator assigns the role
 // that actually grants access, and accepting an invitation adopts the role
 // that invitation carried.
-const ROLES = ['consultant', 'committee'];
+const ROLES = ['organization', 'consultant', 'committee', 'candidate'];
 
 /**
  * Do we know what to call this person?
  *
  * A new Clerk account often arrives with no name at all, and Slate falls back
  * to the email address so there is something to show. That fallback is what
- * account setup exists to replace — but an account that already has a real
- * name, whether seeded, migrated, or confirmed earlier, is not asked again.
+ * account setup exists to replace. New accounts also confirm their intended
+ * use, even when the provider supplied a name. Named legacy accounts retain
+ * access without being forced through setup again.
  */
 function hasName(user) {
   const name = String(user.name || '').trim();
@@ -25,6 +26,7 @@ function hasName(user) {
  * Where this person is in getting to work, in one word.
  *
  *   identity            — has not confirmed who they are yet
+ *   candidate           — uses the public portal, no staff workspace needed
  *   workspace           — signed in, but no organization is active
  *   membership-lost     — the session names a workspace they are no longer in
  *   role-pending        — in the workspace, holding a role Slate does not act on
@@ -36,7 +38,10 @@ function hasName(user) {
  * "no access" covers four situations that need four different answers.
  */
 function stageOf(store, access, assigned) {
-  if (!hasName(access.user)) return 'identity';
+  // New provider accounts have an explicit incomplete setup record, even when
+  // the provider supplied a name. Preserve named legacy accounts without one.
+  if (!hasName(access.user) || (access.user.onboarding && !access.user.onboarding.completedAt)) return 'identity';
+  if (access.user.onboarding?.requestedRole === 'candidate' && !access.orgId) return 'candidate';
   if (access.membershipLost) return 'membership-lost';
   if (!access.orgId) return 'workspace';
   if (!access.role) return 'role-pending';

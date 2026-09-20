@@ -1,0 +1,400 @@
+{
+  "source": "server/steps.js (original interface catalog)",
+  "status": "extracted; not created in Clerk",
+  "pricingNote": "Original fees were ranges with no billing interval. Do not use them as recurring prices without a decision.",
+  "plans": [
+    {
+      "name": "Basic",
+      "slug": "basic",
+      "payerType": "org",
+      "description": "Post, track, screen, recommend. The committee still writes the profile; the firm runs the announcement and the applicant file.",
+      "originalPriceRange": "$3,500 to $5,000",
+      "amount": null,
+      "currency": "USD",
+      "billingInterval": null,
+      "publish": false,
+      "originalServices": [
+        "Position profile",
+        "Job announcement",
+        "Online advertising",
+        "Applicant tracking",
+        "Resume screening",
+        "Candidate screening workspace (human decisions)",
+        "Candidate recommendation"
+      ],
+      "features": [
+        {
+          "name": "Position profile",
+          "slug": "position_profile"
+        },
+        {
+          "name": "Job announcement",
+          "slug": "job_announcement"
+        },
+        {
+          "name": "Online advertising",
+          "slug": "online_advertising"
+        },
+        {
+          "name": "Applicant tracking",
+          "slug": "applicant_tracking"
+        },
+        {
+          "name": "Resume screening",
+          "slug": "resume_screening"
+        },
+        {
+          "name": "Candidate screening workspace (human decisions)",
+          "slug": "candidate_screening_workspace_human_decisions"
+        },
+        {
+          "name": "Candidate recommendation",
+          "slug": "candidate_recommendation"
+        }
+      ],
+      "legacyWorkflowKey": "basic",
+      "includedSteps": [
+        {
+          "key": "team",
+          "name": "Add the search committee and name the account manager"
+        },
+        {
+          "key": "intake",
+          "name": "Collect what each member is looking for"
+        },
+        {
+          "key": "profile",
+          "name": "Adopt the candidate profile"
+        },
+        {
+          "key": "survey1",
+          "name": "Develop initial candidate survey"
+        },
+        {
+          "key": "plan",
+          "name": "Develop recruitment and advertising locations"
+        },
+        {
+          "key": "ads",
+          "name": "Develop recruitment advertisement"
+        },
+        {
+          "key": "screen",
+          "name": "Screen candidate surveys"
+        },
+        {
+          "key": "finalists",
+          "name": "Select finalists"
+        }
+      ]
+    },
+    {
+      "name": "Enhanced",
+      "slug": "enhanced",
+      "payerType": "org",
+      "description": "Basic plus active sourcing, a recruitment packet, an assessment process, and interviews.",
+      "originalPriceRange": "$7,500 to $12,500",
+      "amount": null,
+      "currency": "USD",
+      "billingInterval": null,
+      "publish": false,
+      "originalServices": [
+        "Everything in Basic",
+        "Active candidate sourcing",
+        "Passive candidate recruitment",
+        "Community profile and brochure",
+        "Online assessment",
+        "Video interviews",
+        "Finalist interview and assessment center"
+      ],
+      "features": [
+        {
+          "name": "Position profile",
+          "slug": "position_profile"
+        },
+        {
+          "name": "Job announcement",
+          "slug": "job_announcement"
+        },
+        {
+          "name": "Online advertising",
+          "slug": "online_advertising"
+        },
+        {
+          "name": "Applicant tracking",
+          "slug": "applicant_tracking"
+        },
+        {
+          "name": "Resume screening",
+          "slug": "resume_screening"
+        },
+        {
+          "name": "Candidate screening workspace (human decisions)",
+          "slug": "candidate_screening_workspace_human_decisions"
+        },
+        {
+          "name": "Candidate recommendation",
+          "slug": "candidate_recommendation"
+        },
+        {
+          "name": "Active candidate sourcing",
+          "slug": "active_candidate_sourcing"
+        },
+        {
+          "name": "Passive candidate recruitment",
+          "slug": "passive_candidate_recruitment"
+        },
+        {
+          "name": "Community profile and brochure",
+          "slug": "community_profile_and_brochure"
+        },
+        {
+          "name": "Online assessment",
+          "slug": "online_assessment"
+        },
+        {
+          "name": "Video interviews",
+          "slug": "video_interviews"
+        },
+        {
+          "name": "Finalist interview and assessment center",
+          "slug": "finalist_interview_and_assessment_center"
+        }
+      ],
+      "legacyWorkflowKey": "enhanced",
+      "includedSteps": [
+        {
+          "key": "team",
+          "name": "Add the search committee and name the account manager"
+        },
+        {
+          "key": "intake",
+          "name": "Collect what each member is looking for"
+        },
+        {
+          "key": "profile",
+          "name": "Adopt the candidate profile"
+        },
+        {
+          "key": "community",
+          "name": "Develop community and form-of-government profile"
+        },
+        {
+          "key": "survey1",
+          "name": "Develop initial candidate survey"
+        },
+        {
+          "key": "guide",
+          "name": "Develop interview questions and assessment scenarios"
+        },
+        {
+          "key": "survey2",
+          "name": "Develop semifinalist survey"
+        },
+        {
+          "key": "plan",
+          "name": "Develop recruitment and advertising locations"
+        },
+        {
+          "key": "brochure",
+          "name": "Develop recruitment brochure"
+        },
+        {
+          "key": "ads",
+          "name": "Develop recruitment advertisement"
+        },
+        {
+          "key": "sourcing",
+          "name": "Source and recruit candidates"
+        },
+        {
+          "key": "screen",
+          "name": "Screen candidate surveys"
+        },
+        {
+          "key": "send2",
+          "name": "Send semifinalist survey"
+        },
+        {
+          "key": "video",
+          "name": "Hold video interviews with semifinalists"
+        },
+        {
+          "key": "finalists",
+          "name": "Select finalists"
+        },
+        {
+          "key": "schedule",
+          "name": "Develop finalist interview and assessment center process"
+        }
+      ]
+    },
+    {
+      "name": "Executive",
+      "slug": "executive",
+      "payerType": "org",
+      "description": "The full retained search: everything in Enhanced, plus reference checks, the employment agreement, and the first-year evaluation.",
+      "originalPriceRange": "$15,000 to $25,000+",
+      "amount": null,
+      "currency": "USD",
+      "billingInterval": null,
+      "publish": false,
+      "originalServices": [
+        "Everything in Enhanced",
+        "Reference checks",
+        "Executive recruitment",
+        "Model employment contract",
+        "Annual executive performance evaluation"
+      ],
+      "features": [
+        {
+          "name": "Position profile",
+          "slug": "position_profile"
+        },
+        {
+          "name": "Job announcement",
+          "slug": "job_announcement"
+        },
+        {
+          "name": "Online advertising",
+          "slug": "online_advertising"
+        },
+        {
+          "name": "Applicant tracking",
+          "slug": "applicant_tracking"
+        },
+        {
+          "name": "Resume screening",
+          "slug": "resume_screening"
+        },
+        {
+          "name": "Candidate screening workspace (human decisions)",
+          "slug": "candidate_screening_workspace_human_decisions"
+        },
+        {
+          "name": "Candidate recommendation",
+          "slug": "candidate_recommendation"
+        },
+        {
+          "name": "Active candidate sourcing",
+          "slug": "active_candidate_sourcing"
+        },
+        {
+          "name": "Passive candidate recruitment",
+          "slug": "passive_candidate_recruitment"
+        },
+        {
+          "name": "Community profile and brochure",
+          "slug": "community_profile_and_brochure"
+        },
+        {
+          "name": "Online assessment",
+          "slug": "online_assessment"
+        },
+        {
+          "name": "Video interviews",
+          "slug": "video_interviews"
+        },
+        {
+          "name": "Finalist interview and assessment center",
+          "slug": "finalist_interview_and_assessment_center"
+        },
+        {
+          "name": "Reference checks",
+          "slug": "reference_checks"
+        },
+        {
+          "name": "Executive recruitment",
+          "slug": "executive_recruitment"
+        },
+        {
+          "name": "Model employment contract",
+          "slug": "model_employment_contract"
+        },
+        {
+          "name": "Annual executive performance evaluation",
+          "slug": "annual_executive_performance_evaluation"
+        }
+      ],
+      "legacyWorkflowKey": "executive",
+      "includedSteps": [
+        {
+          "key": "team",
+          "name": "Add the search committee and name the account manager"
+        },
+        {
+          "key": "intake",
+          "name": "Collect what each member is looking for"
+        },
+        {
+          "key": "profile",
+          "name": "Adopt the candidate profile"
+        },
+        {
+          "key": "community",
+          "name": "Develop community and form-of-government profile"
+        },
+        {
+          "key": "survey1",
+          "name": "Develop initial candidate survey"
+        },
+        {
+          "key": "guide",
+          "name": "Develop interview questions and assessment scenarios"
+        },
+        {
+          "key": "survey2",
+          "name": "Develop semifinalist survey"
+        },
+        {
+          "key": "plan",
+          "name": "Develop recruitment and advertising locations"
+        },
+        {
+          "key": "brochure",
+          "name": "Develop recruitment brochure"
+        },
+        {
+          "key": "ads",
+          "name": "Develop recruitment advertisement"
+        },
+        {
+          "key": "sourcing",
+          "name": "Source and recruit candidates"
+        },
+        {
+          "key": "screen",
+          "name": "Screen candidate surveys"
+        },
+        {
+          "key": "send2",
+          "name": "Send semifinalist survey"
+        },
+        {
+          "key": "video",
+          "name": "Hold video interviews with semifinalists"
+        },
+        {
+          "key": "finalists",
+          "name": "Select finalists"
+        },
+        {
+          "key": "schedule",
+          "name": "Develop finalist interview and assessment center process"
+        },
+        {
+          "key": "references",
+          "name": "Check finalist references"
+        },
+        {
+          "key": "contract",
+          "name": "Develop model employment contract"
+        },
+        {
+          "key": "bar",
+          "name": "Develop annual executive performance evaluation process"
+        }
+      ]
+    }
+  ]
+}

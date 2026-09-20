@@ -10,7 +10,7 @@ const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'slate-tests-'));
 // against this key pair, so the tests exercise the only sign-in Slate has.
 const fixture = identity.serverEnv();
 const env = { ...process.env, NODE_ENV:'test', PORT:'0', HOST:'127.0.0.1', DATA_DIR:path.join(directory, 'server'),
-  TRUST_PROXY:'', ANTHROPIC_API_KEY:'', ...fixture.server,
+  TRUST_PROXY:'', ANTHROPIC_API_KEY:'', SLATE_BILLING_MODE:'off', ...fixture.server,
   SLATE_EMAIL_TEAM:'team@slate.local', SLATE_EMAIL_ABE:'abe@slate.local', SLATE_EMAIL_MIKE:'mike@slate.local',
   // The portal needs the three capabilities it refuses to pretend to have.
   // `echo` returns the verification message to the caller so a test can finish
@@ -49,6 +49,7 @@ async function suite(file, suiteEnv) {
       SLATE_TEST_ORG_ID:orgId };
     const organizationsSuite = await suite('organizations.js', suiteEnv);
     const auth = await suite('auth.js', suiteEnv);
+    const billing = await suite('billing.js', suiteEnv);
     const clerkAuth = await suite('clerk-auth.js', suiteEnv);
     const baseline = await suite('bughunt.js', suiteEnv);
     const counties = await suite('jurisdictions.js', suiteEnv);
@@ -75,7 +76,7 @@ async function suite(file, suiteEnv) {
     // (docs/audits/2026-09-19-user-guidance-candidate-portal).
     const helpChecks = await suite('help.js', suiteEnv);
     const portalChecks = await suite('portal.js', suiteEnv);
-    process.exitCode = organizationsSuite || auth || clerkAuth || baseline || counties || regression || security || roles || authority || storage || recover || monitoring || exports_ || cands || dispo || aichecks || researchChecks || researchUi || committeeChecks || helpChecks || portalChecks;
+    process.exitCode = organizationsSuite || auth || billing || clerkAuth || baseline || counties || regression || security || roles || authority || storage || recover || monitoring || exports_ || cands || dispo || aichecks || researchChecks || researchUi || committeeChecks || helpChecks || portalChecks;
     console.log('Isolated test data: ' + directory);
   } catch (error) { console.error(error); process.exitCode = 1; }
   finally { server.kill(); }

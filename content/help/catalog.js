@@ -34,22 +34,24 @@ const articles = [
     audience: ['admin', 'consultant', 'committee'],
     screens: ['home'],
     checklist: [
-      'Sign in with the address your invitation was sent to.',
-      'Accept the workspace invitation if one is waiting.',
-      'Check the workspace name at the top of the page is the firm you meant.',
-      'Open the search named on Home.'
+      'Create an account, or sign in with the address your invitation was sent to.',
+      'Confirm your name and choose how you will use Slate.',
+      'Create or join the right organization workspace.',
+      'Open your assigned search, or start your first search on Home.'
     ],
     who: 'Anyone opening Slate for the first time, in any role.',
     before: [
-      'An invitation email from the firm. Slate has no self-service sign-up: somebody has to invite your address first.',
+      'An email address for your account. Select **Sign up** if you are new. Creating an account does not buy a subscription or grant access to another organization.',
       'The address the invitation was sent to. Signing in with a different one puts you in an account with no workspace.'
     ],
     doThis: [
       { do: 'Open the link in the invitation, or go to the application and select **Sign in**.' },
       { do: 'Sign in with the invited email address.', note: 'If you already have an account on another address, use **Sign out** and try again, or select **Use a different account** on the invitation screen.' },
+      { do: 'Complete account setup with your name and how you will use Slate, then select **Continue**.', note: 'Organizations and consultants create or join a workspace. Committee members join their invited workspace. Candidates choose **Browse openings** and verify their email on a job posting; no staff workspace is needed.' },
       { do: 'If an invitation is waiting, select **Accept and open**.', note: 'If none appears, select **Check invitations**. An invitation that has not been accepted is not membership.' },
+      { do: 'For a new organization, enter a **Workspace name** and select **Create a workspace** when available.', note: 'Some deployments require an invitation. Creating a workspace makes you its administrator. Subscription prices and checkout are not yet available in the app; see **Subscriptions** for details.' },
       { do: 'Read the workspace name in the bar at the top of the page.', note: 'Firms are separate. A search you expect to see is not missing if you are in the wrong workspace — it is simply somewhere else.' },
-      { do: 'On Home, select the search you were added to.' }
+      { do: 'On Home, select the search you were added to, or select **Start your first search** if you can create searches and the workspace is empty.' }
     ],
     worked: [
       'The top bar shows the firm name, and the left navigation lists Home.',
@@ -121,19 +123,19 @@ const articles = [
     checklist: [
       'Select New search.',
       'Enter the client, the position, and the jurisdiction type.',
-      'Choose the service package the client actually bought.',
+      'Open Search facts to choose the search workflow.',
       'Save, then fill in the search facts.'
     ],
     who: 'A consultant or administrator in a workspace that allows creating searches. Committee members do not see this screen.',
     before: [
-      'The signed engagement, so the package is the one that was sold. The package decides which steps are on the file at all.',
+      'The scope of work, so the search workflow includes the steps your team needs. Organization subscriptions are managed separately.',
       'The jurisdiction name, its type (city, county, town, district), and its official website.'
     ],
     doThis: [
       { do: 'Select **New search** in the left navigation.' },
       { do: 'Enter the client and the position being filled.' },
       { do: 'Choose the jurisdiction type.', note: 'This sets the vocabulary the rest of the file uses — council or board, manager or administrator.' },
-      { do: 'Choose the package: Basic, Enhanced, or Executive.', note: 'Steps a package leaves out are not hidden, they are not on the file. Changing it later on **Search facts** adds or removes steps, so choose from the engagement rather than from habit.' },
+      { do: 'After saving, choose the search workflow on **Search facts**: Posting and screening, Recruited search, or Full search.', note: 'Steps a package leaves out are not hidden, they are not on the file. Changing it later on **Search facts** adds or removes steps, so choose from the engagement rather than from habit.' },
       { do: 'Save the search.' },
       { do: 'Open **Search facts** from Search settings in the left navigation and fill in population, budget, salary, and the official website.', note: 'Select **Save facts** when you are done.' }
     ],
@@ -337,7 +339,7 @@ const articles = [
       'Review each fact against its source.',
       'Save the facts you have checked.'
     ],
-    who: 'A consultant on the file. This step is on Enhanced and Executive searches; Basic searches do not include it.',
+    who: 'A consultant on the file. This step is on Recruited search and Full search workflows; Posting and screening does not include it.',
     before: [
       'The jurisdiction\'s official website. Research without it reads whatever it can find, which is how a neighbouring town ends up in the brochure.',
       'Time to check the result. Nothing here is authoritative until a person has read it against a source.'
@@ -775,7 +777,7 @@ const articles = [
 const glossary = [
   { term: 'Workspace', meaning: 'One recruiting firm. Searches, members, and postings belong to exactly one workspace and never move between them.', article: 'first-sign-in' },
   { term: 'Search', meaning: 'One engagement: a client, a position, and the process the package includes.', article: 'create-a-search' },
-  { term: 'Package', meaning: 'What the client bought — Basic, Enhanced, or Executive. It decides which steps are on the file. A step a package leaves out does not exist on that search.', article: 'create-a-search' },
+  { term: 'Package', meaning: 'The saved search workflow: Posting and screening, Recruited search, or Full search. It decides which steps are on the file. Subscription plans and payments are managed on Subscriptions.', article: 'create-a-search' },
   { term: 'Account manager', meaning: 'The one person who runs a search. Rostering, closing the intake window, adopting the profile, releasing scores, closing, and archiving are theirs.', article: 'assemble-a-committee' },
   { term: 'Roster', meaning: 'Everyone on a search, including the account manager. A place held against an email address is not a roster member yet.', article: 'assemble-a-committee' },
   { term: 'Held place', meaning: 'A seat reserved for somebody who has been invited but has not accepted and signed in. It grants no access.', article: 'invite-and-roles' },

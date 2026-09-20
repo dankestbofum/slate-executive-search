@@ -2,6 +2,32 @@
 
 Guided executive-search workspace. Node 24 LTS, Express, JSON file store.
 
+## First visit and account setup
+
+The public home explains Slate and separates hiring teams from candidates.
+`/sign-up` and `/sign-in` render Clerk's account forms. New accounts confirm
+their name and choose organization, candidate, consultant, or committee use,
+including accounts whose name was supplied by Clerk. This preference never
+grants workspace permissions. Existing named accounts without a setup record
+retain their existing access.
+
+Organizations create a workspace when permitted or join by invitation. An
+empty workspace shows the first-search instructions and links to the guide.
+Candidates continue to `/careers`; applications still require their existing
+posting-specific email verification and are not automatically linked to the
+staff account. `/subscriptions` reads published organization plans from Clerk
+Billing and offers checkout and subscription management to verified workspace
+administrators. Candidates remain free; search packages are separate.
+
+Billing defaults to `SLATE_BILLING_MODE=off`. Use `test` with development Clerk
+keys after enabling organization Billing in Clerk; `live` requires matching
+production keys and a configured Stripe connection. No prices or paid-feature
+restrictions are supplied by this change. Follow the
+[billing activation and validation record](docs/audits/2026-09-19-user-guidance-candidate-portal/BILLING_IMPLEMENTATION.md)
+before launching paid plans.
+
+See the [first-use implementation record](docs/audits/2026-09-19-user-guidance-candidate-portal/FIRST_USE_IMPLEMENTATION.md).
+
 ## How a search runs
 
 Nineteen steps in three phases. The catalog lives in `server/steps.js`; both the
@@ -42,49 +68,30 @@ council they are looking should not be named to the room.
 Routes: `POST /staff/:key/log`, `DELETE /staff/:key/log/:lid`,
 `PUT /staff/:key` (notes), `POST /staff/:key/complete` (`{ done }`).
 
-## Service packages
+## Search workflows and Clerk plans
 
-A search carries one of three packages, picked when the file is opened and
-changeable on Search facts. The package decides how many of the nineteen steps
-are on the file. The committee is on every one: each package puts the people
-who will hire and builds the profile from their answers. What a cheaper package
-leaves out is the later work, not the room.
+The original commercial plans were **Basic**, **Enhanced**, and **Executive**.
+Their descriptions, original price ranges, included services and workflow mappings
+are preserved in [CLERK_PLAN_MIGRATION.json](docs/audits/2026-09-19-user-guidance-candidate-portal/CLERK_PLAN_MIGRATION.json).
+The price ranges do not specify an exact checkout amount or billing interval; those
+must be decided before publishing paid plans in Clerk.
 
-| Step | Basic | Enhanced | Executive |
-|---|---|---|---|
-| Committee, intake, profile | yes | yes | yes |
-| Initial survey, ad plan, advertisement | yes | yes | yes |
-| Screening, finalists | yes | yes | yes |
-| Community profile, brochure | | yes | yes |
-| Sourcing, video interviews (staff) | | yes | yes |
-| Interview guide, semifinalist survey and send, finalist week | | yes | yes |
-| Reference checks (staff) | | | yes |
-| Model contract, annual evaluation | | | yes |
-| Fee | $3,500 to $5,000 | $7,500 to $12,500 | $15,000 to $25,000+ |
+The hardcoded pricing cards, comparison matrix and package-sales samples have
+been removed. Subscriptions reads published organization plans from Clerk.
+No commercial plan names or prices are supplied by the search workflow catalog.
 
-Home, New search, and Search facts draw the same comparison matrix
-(`COMPARE` in `server/steps.js`): service rows, one column per pay level,
-potential fee in the footer. Picking a column on New search or Search facts
-sets `package` on the file. **Packages** in the rail (and the column headers
-on Home) opens a sample workspace for that pay level so a consultant can
-show a client the Basic dashboard, the Enhanced recruited view, or the
-Executive spec without opening a live file.
+Existing searches keep their saved internal package keys and step boundaries:
 
-The overview reads differently by package, and the layout is part of the
-catalog (`PACKAGES[key].view`): Basic opens on an applicant dashboard (committee
-and profile, announcement, applicants, recommendation) with the process as one
-row of chips; Enhanced adds sourcing and interview panels over the full phase
-list; Executive keeps the step-by-step spec. `layout`, `panels`, `steps`,
-`kicker`, and `lede` are served through `/api/config` and read by
-`vOverview` in `public/app.js`, so changing what a tier looks like is a
-catalog edit.
+| Stored key | Workflow shown in the app | Scope |
+|---|---|---|
+| basic | Posting and screening | Committee, profile, announcements, screening and recommendations |
+| enhanced | Recruited search | Adds community research, sourcing, assessments and interviews |
+| executive | Full search | Adds references, contract and annual evaluation |
 
-Each step in `server/steps.js` names the smallest package that includes it
-(`pkg`). `stepsFor(package)` returns the steps on a file with `needs` trimmed to
-steps that are also on it, so a Basic search's advertisement waits on the ad
-plan rather than on a brochure it does not have. The API refuses drafts, saves,
-reviews, photos, and the semifinalist send for steps outside the package
-(`400`). Searches written before packages existed are treated as Executive.
+New searches still default to the full workflow. Search facts allows an authorized
+search editor to choose its workflow. This is not a billing entitlement: checkout
+and plan-based feature enforcement must be connected deliberately before paid launch.
+No existing search records, work, permissions or audit history are deleted.
 
 ## Workspaces and roles
 

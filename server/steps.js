@@ -16,117 +16,107 @@ const PHASES = [
   { id:2, key:'people', t:'Once there are candidates', lede:'Screening is where applicants enter the file. Everything after that waits until someone is on it.' }
 ];
 
-// The three service packages the firm sells. A search carries one, chosen when
-// the file is opened, and it decides how much of the process runs. The
-// committee is never the thing that scales: every package adds the people who
-// will hire and builds the profile from their answers. What a cheaper package
-// leaves out is the later work (community research, brochure, assessment
-// center, contract, evaluation), not the room.
-//
-// `services` is the proposal language, including work the app does not model
-// as a step yet (sourcing, video interviews, reference checks). It is shown to
-// the consultant so the file matches what the client was sold.
-const PACKAGE_ORDER = ['basic', 'enhanced', 'executive'];
+// Operational workflows retain the persisted package keys for existing searches.
+// Commercial plans and pricing are owned by Clerk; the original catalog is
+// preserved in docs/audits/2026-09-19-user-guidance-candidate-portal/CLERK_PLAN_MIGRATION.json.
+const PACKAGE_ORDER = ["basic","enhanced","executive"];
 const PACKAGES = {
-  basic: {
-    key: 'basic',
-    rank: 0,
-    label: 'Basic',
-    fee: '$3,500 to $5,000',
-    lede: 'Post, track, screen, recommend. The committee still writes the profile; the firm runs the announcement and the applicant file.',
-    services: [
-      'Position profile', 'Job announcement', 'Online advertising', 'Applicant tracking',
-      'Resume screening', 'Candidate screening workspace (human decisions)', 'Candidate recommendation'
+  "basic": {
+    "key": "basic",
+    "rank": 0,
+    "label": "Posting and screening",
+    "lede": "Committee input, position profile, advertising, applicant screening and recommendations.",
+    "services": [
+      "Position profile",
+      "Job announcement",
+      "Online advertising",
+      "Applicant tracking",
+      "Resume screening",
+      "Candidate screening workspace (human decisions)",
+      "Candidate recommendation"
     ],
-    // How the search reads on its overview. A Basic file is a posting and a
-    // screen, so it opens on an applicant dashboard rather than a nineteen-step
-    // production plan. Panels are drawn by the client in this order; the step
-    // list underneath is a one-line strip.
-    view: {
-      layout: 'dashboard',
-      kicker: 'Posting and screen',
-      lede: 'Announce the job, track who applies, screen them against the profile the committee adopted, and hand the client a recommendation.',
-      panels: ['committee', 'posting', 'applicants', 'recommendation'],
-      steps: 'strip'
+    "view": {
+      "layout": "dashboard",
+      "kicker": "Posting and screen",
+      "lede": "Announce the job, track who applies, screen them against the profile the committee adopted, and hand the client a recommendation.",
+      "panels": [
+        "committee",
+        "posting",
+        "applicants",
+        "recommendation"
+      ],
+      "steps": "strip"
     }
   },
-  enhanced: {
-    key: 'enhanced',
-    rank: 1,
-    label: 'Enhanced',
-    fee: '$7,500 to $12,500',
-    lede: 'Basic plus active sourcing, a recruitment packet, an assessment process, and interviews.',
-    services: [
-      'Everything in Basic',
-      'Active candidate sourcing', 'Passive candidate recruitment', 'Community profile and brochure',
-      'Online assessment', 'Video interviews', 'Finalist interview and assessment center'
+  "enhanced": {
+    "key": "enhanced",
+    "rank": 1,
+    "label": "Recruited search",
+    "lede": "Posting and screening with community research, sourcing, assessments and interviews.",
+    "services": [
+      "Position profile",
+      "Job announcement",
+      "Online advertising",
+      "Applicant tracking",
+      "Resume screening",
+      "Candidate screening workspace (human decisions)",
+      "Candidate recommendation",
+      "Active candidate sourcing",
+      "Passive candidate recruitment",
+      "Community profile and brochure",
+      "Online assessment",
+      "Video interviews",
+      "Finalist interview and assessment center"
     ],
-    // Recruited, not just posted: the dashboard adds outreach and interviews,
-    // and the full phase list sits underneath because there is more to run.
-    view: {
-      layout: 'dashboard',
-      kicker: 'Recruited search',
-      lede: 'Post and recruit. Work the market by hand, screen and interview on video, then put finalists through an assessment day.',
-      panels: ['committee', 'posting', 'sourcing', 'applicants', 'interviews', 'recommendation'],
-      steps: 'phases'
+    "view": {
+      "layout": "dashboard",
+      "kicker": "Recruited search",
+      "lede": "Post and recruit. Work the market by hand, screen and interview on video, then put finalists through an assessment day.",
+      "panels": [
+        "committee",
+        "posting",
+        "sourcing",
+        "applicants",
+        "interviews",
+        "recommendation"
+      ],
+      "steps": "phases"
     }
   },
-  executive: {
-    key: 'executive',
-    rank: 2,
-    label: 'Executive',
-    fee: '$15,000 to $25,000+',
-    lede: 'The full retained search: everything in Enhanced, plus reference checks, the employment agreement, and the first-year evaluation.',
-    services: [
-      'Everything in Enhanced',
-      'Reference checks', 'Executive recruitment', 'Model employment contract',
-      'Annual executive performance evaluation'
+  "executive": {
+    "key": "executive",
+    "rank": 2,
+    "label": "Full search",
+    "lede": "The complete search workflow, including references, contract and first-year evaluation.",
+    "services": [
+      "Position profile",
+      "Job announcement",
+      "Online advertising",
+      "Applicant tracking",
+      "Resume screening",
+      "Candidate screening workspace (human decisions)",
+      "Candidate recommendation",
+      "Active candidate sourcing",
+      "Passive candidate recruitment",
+      "Community profile and brochure",
+      "Online assessment",
+      "Video interviews",
+      "Finalist interview and assessment center",
+      "Reference checks",
+      "Executive recruitment",
+      "Model employment contract",
+      "Annual executive performance evaluation"
     ],
-    // Reference checks, sourcing, and video interviews are staff steps in the
-    // catalog below. "Executive recruitment" is the whole retained process, not
-    // a step of its own.
-    //
-    // The retained search keeps the step-by-step spec: every phase, every
-    // step, the roster, and the packet. It is the process the client bought.
-    view: {
-      layout: 'spec',
-      kicker: 'Retained executive search',
-      lede: 'The full process. Assemble the committee, build the profile from their answers, research and post, recruit, screen, interview, check references, and hand over a contract and a first-year evaluation.',
-      panels: [],
-      steps: 'phases'
+    "view": {
+      "layout": "spec",
+      "kicker": "Retained executive search",
+      "lede": "The full process. Assemble the committee, build the profile from their answers, research and post, recruit, screen, interview, check references, and hand over a contract and a first-year evaluation.",
+      "panels": [],
+      "steps": "phases"
     }
   }
 };
 const DEFAULT_PACKAGE = 'executive';
-
-// The proposal table: one row per service, `pkg` is the cheapest engagement
-// that includes it. The UI draws this as a comparison matrix so a consultant
-// can see, at each fee, what the client actually bought. Keep the wording
-// aligned with `services` above; the cards and the matrix are the same offer.
-const COMPARE_BANDS = [
-  { key: 'basic', t: 'On every engagement' },
-  { key: 'enhanced', t: 'Enhanced and Executive add' },
-  { key: 'executive', t: 'Executive only' }
-];
-const COMPARE = [
-  { t: 'Position profile', pkg: 'basic' },
-  { t: 'Job announcement', pkg: 'basic' },
-  { t: 'Online advertising', pkg: 'basic' },
-  { t: 'Applicant tracking', pkg: 'basic' },
-  { t: 'Resume screening', pkg: 'basic' },
-  { t: 'Candidate screening workspace (human decisions)', pkg: 'basic' },
-  { t: 'Candidate recommendation', pkg: 'basic' },
-  { t: 'Active candidate sourcing', pkg: 'enhanced' },
-  { t: 'Passive candidate recruitment', pkg: 'enhanced' },
-  { t: 'Community profile and brochure', pkg: 'enhanced' },
-  { t: 'Online assessment', pkg: 'enhanced' },
-  { t: 'Video interviews', pkg: 'enhanced' },
-  { t: 'Finalist interview and assessment center', pkg: 'enhanced' },
-  { t: 'Reference checks', pkg: 'executive' },
-  { t: 'Executive recruitment', pkg: 'executive' },
-  { t: 'Model employment contract', pkg: 'executive' },
-  { t: 'Annual executive performance evaluation', pkg: 'executive' }
-];
 
 // `pkg` is the smallest package that includes the step. Steps a package leaves
 // out are not "optional" there; they are not on the file at all.
@@ -185,4 +175,4 @@ function stepsFor(pkg){
   return list.map(s => ({ ...s, needs: (s.needs || []).filter(k => keys.has(k)) }));
 }
 
-module.exports = { PHASES, STEPS, STAFF_STEPS, STAFF_STAGES, PACKAGES, PACKAGE_ORDER, DEFAULT_PACKAGE, COMPARE, COMPARE_BANDS, packageOf, includes, stepsFor };
+module.exports = { PHASES, STEPS, STAFF_STEPS, STAFF_STAGES, PACKAGES, PACKAGE_ORDER, DEFAULT_PACKAGE, packageOf, includes, stepsFor };

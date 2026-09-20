@@ -25,8 +25,8 @@ test('a new account confirms who it is, then has to join a workspace before anyt
 
   // Step 1: who you are.
   await expect(page.getByRole('heading', { name:'How will you use Slate?' })).toBeVisible();
-  await expect(page.getByRole('radio')).toHaveCount(2);
-  await expect(page.getByRole('radio', { name:/^Candidate\b/i })).toHaveCount(0);
+  await expect(page.getByRole('radio')).toHaveCount(4);
+  await expect(page.getByRole('radio', { name:/^Candidate\b/i })).toHaveCount(1);
   await page.getByLabel('Your name').fill('Jordan Rivera');
   await page.getByRole('radio', { name:/Search consultant/ }).check();
   // Focused explicitly: the inputs sit inside their labels, and WebKit leaves
@@ -146,7 +146,7 @@ test('a deployment that does not offer workspace creation says so instead of sho
   await page.getByRole('button', { name:'Continue', exact:true }).click();
 
   await expect(page.getByRole('heading', { name:'You are not in a workspace yet' })).toBeVisible();
-  await expect(page.getByText(/join one by invitation from a firm already using Slate/)).toBeVisible();
+  await expect(page.getByText(/join one by invitation from an organization already using Slate/)).toBeVisible();
   await expect(page.getByRole('button', { name:'Create a workspace' })).toHaveCount(0);
   await expect(page.getByLabel('Workspace name')).toHaveCount(0);
   // The way in that is on offer is still there, and still names the address.
@@ -179,7 +179,7 @@ test('creating a workspace makes the creator its administrator and claims nothin
   await page.getByRole('radio', { name:/Search consultant/ }).check();
   await page.getByRole('button', { name:'Continue', exact:true }).click();
 
-  await expect(page.getByText(/creates a separate workspace for your firm/)).toBeVisible();
+  await expect(page.getByText(/creates a separate workspace for your organization or search firm/)).toBeVisible();
   await page.getByLabel('Workspace name').fill(`Founder Partners ${testInfo.project.name}`);
   await page.getByRole('button', { name:'Create a workspace' }).click();
 

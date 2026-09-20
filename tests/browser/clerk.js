@@ -162,6 +162,20 @@ function clerkStub(tokens, workspaces, email, signedInByDefault, startingOrg) {
     // is what a real instance does with an account that has one.
     openSignIn() { remember(true); if (!orgId) rememberOrg(${JSON.stringify(startingOrg)}); emit(); },
     openSignUp() { remember(true); if (!orgId) rememberOrg(${JSON.stringify(startingOrg)}); emit(); },
+    mountSignUp(element) {
+      const button = document.createElement('button');
+      button.textContent = 'Create test account';
+      button.onclick = () => window.Clerk.openSignUp();
+      element.append(button);
+    },
+    unmountSignUp(element) { element.replaceChildren(); },
+    mountSignIn(element) {
+      const button = document.createElement('button');
+      button.textContent = 'Sign in to test account';
+      button.onclick = () => window.Clerk.openSignIn();
+      element.append(button);
+    },
+    unmountSignIn(element) { element.replaceChildren(); },
     async signOut() { remember(false); rememberOrg(null); emit(); },
     mountUserButton(element) {
       const account = document.createElement('button');
@@ -182,7 +196,20 @@ function clerkStub(tokens, workspaces, email, signedInByDefault, startingOrg) {
       signOut.onclick = () => window.Clerk.signOut();
       element.replaceChildren(account, signOut);
     },
-    unmountUserButton() {}
+    unmountUserButton() {},
+    mountPricingTable(element, props) {
+      if (props.for !== 'organization') throw new Error('Expected organization checkout');
+      element.textContent = 'Organization checkout fixture';
+      window.__billingMounts = (window.__billingMounts || 0) + 1;
+    },
+    unmountPricingTable(element) {
+      element.replaceChildren();
+      window.__billingUnmounts = (window.__billingUnmounts || 0) + 1;
+    },
+    __internal_openSubscriptionDetails(props) {
+      if (props.for !== 'organization') throw new Error('Expected organization subscription management');
+      window.__billingManaged = true;
+    }
   };
 })();`;
 }
