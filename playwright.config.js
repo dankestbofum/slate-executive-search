@@ -81,6 +81,7 @@ module.exports = defineConfig({
     gracefulShutdown: { signal: 'SIGTERM', timeout: 5000 },
     env: {
       NODE_ENV: 'test',
+      SLATE_BILLING_MODE: 'off',
       ...fixture.server,
       PORT: String(PORT),
       HOST: '127.0.0.1',

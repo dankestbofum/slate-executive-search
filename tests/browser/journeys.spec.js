@@ -55,8 +55,11 @@ test('a session opens the workspace, survives reload, and ends on sign-out', asy
 
 test('signing in is reachable with the keyboard alone', async ({ page }) => {
   await openLanding(page);
-  await page.keyboard.press('Tab');
-  await expect(page.getByRole('button', { name: 'Sign in', exact: true }).first()).toBeFocused();
+  const signIn = page.getByRole('button', { name: 'Sign in', exact: true }).first();
+  // The public navigation and skip link precede authentication now. Traverse
+  // them with real Tab presses rather than assuming sign-in is the first stop.
+  for (let n = 0; n < 8 && !await signIn.evaluate(el => el === document.activeElement); n++) await page.keyboard.press('Tab');
+  await expect(signIn).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(page.getByRole('button', { name: /open a new search/i }).first()).toBeVisible({ timeout: 10000 });
 });

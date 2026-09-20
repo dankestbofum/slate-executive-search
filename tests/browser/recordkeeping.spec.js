@@ -262,6 +262,13 @@ test('a committee member is not offered outcomes, verification or closeout', asy
   const theirs = await page.context().browser().newContext();
   const them = await theirs.newPage();
   await installClerk(them, { email: member });
+  // A new account confirms its name before it reaches any search, even though
+  // the invitation already carried one. Clearing that step first is what keeps
+  // the assertions below about the search rather than about account setup.
+  await them.goto('/#/s/' + search.id);
+  await expect(them.getByRole('heading', { name: 'Confirm your name' })).toBeVisible();
+  await them.getByRole('button', { name: 'Continue', exact: true }).click();
+  await expect(them.locator('#main h1')).toBeVisible({ timeout: 10000 });
   // These are consultant screens. A committee member who follows a link to one
   // lands on the search rather than on an empty or half-usable page.
   for (const view of ['verify', 'closeout']) {

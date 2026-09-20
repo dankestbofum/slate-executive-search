@@ -1,4 +1,18 @@
 .field--wide,.field--wide .input{max-width:none}
+.welcome__main{padding-top:48px;padding-bottom:56px;gap:40px}
+.welcome .gate__bar{display:flex;justify-content:space-between;align-items:center;gap:20px;padding:24px max(24px,calc((100vw - 1120px)/2));border-bottom:1px solid var(--line)}
+.welcome .gate__bar nav{flex-wrap:wrap;gap:20px}
+.welcome__hero{max-width:800px;padding:16px 0}
+.welcome__hero .t-title{font-size:clamp(36px,5.5vw,64px);line-height:1.08}
+.welcome__grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px;margin-top:20px}
+.welcome__card{padding:28px;border:1px solid var(--line-strong);border-radius:12px;background:var(--paper)}
+.welcome__card .btn{align-self:start}
+.welcome__steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:24px;list-style-position:inside;padding:0;margin:0}
+.welcome__steps li{line-height:1.6;padding:20px;background:var(--paper);border-top:3px solid var(--accent)}
+.welcome__steps li strong{display:inline}.welcome__steps li span{display:block;margin-top:10px}
+.welcome__auth{min-width:0;display:flex;justify-content:center}
+.welcome__footer{padding-bottom:28px;color:var(--ink-2);font-size:13px}
+@media(max-width:700px){.welcome__grid,.welcome__steps{grid-template-columns:1fr}.welcome__main{padding-top:24px;gap:28px}.welcome .gate__bar{align-items:flex-start;flex-direction:column;padding:20px}.welcome .gate__bar nav{gap:16px}.welcome__card{padding:20px}}
 .onboarding__main{max-width:850px;margin:0 auto;padding:40px 24px 64px}
 .onboarding .t-title{font-family:"Public Sans",sans-serif;font-size:clamp(26px,4vw,34px);line-height:1.2;margin:12px 0}
 .onboarding__identity{max-width:480px;display:grid;gap:12px}
@@ -108,94 +122,8 @@
 /* Client, search number, who runs it, progress. The account-manager column is
    why this is four wide; a stale count here wraps every row onto two lines. */
 /* A committee member's row has no manager or progress column. */
-/* Service packages: one card per tier, picked when the search is opened. */
-.pkgs{display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:var(--s-3)}
-.pkg{
-  position:relative; display:flex; flex-direction:column; gap:6px; padding:var(--s-4);
-  border:1px solid var(--line-strong); border-radius:var(--r-3); background:var(--paper); cursor:pointer;
-}
-.pkg:hover{background:var(--sunken)}
-.pkg input{position:absolute; inset:0; opacity:0; margin:0; cursor:pointer}
-.pkg:has(input:checked){border-color:var(--accent); background:var(--accent-tint); box-shadow:inset 0 0 0 1px var(--accent)}
-.pkg:has(input:focus-visible){outline:2px solid var(--accent); outline-offset:2px}
-.pkg__hd{display:flex; justify-content:space-between; align-items:baseline; gap:var(--s-3)}
-.pkg__nm{font-weight:700; color:var(--ink)}
-/* --ink-2, not --ink-3: a selected card sits on --accent-tint, where the
-   lighter value measures 4.32:1 (D07). */
-.pkg__fee{font-family:"IBM Plex Mono",monospace; font-size:11.5px; color:var(--ink-2); white-space:nowrap}
-.pkg__svc{margin:4px 0 0; padding:0; list-style:none; display:flex; flex-direction:column; gap:2px; font-size:13px; color:var(--ink-2)}
-.pkg__svc li::before{content:"\2713\00a0"; color:var(--ok)}
 .svcs{display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:6px var(--s-5); margin:0; padding:0; list-style:none; font-size:14px}
 .svcs li::before{content:"\2713\00a0"; color:var(--ok)}
-
-/* Pay-level breakdown: service rows, one column per fee. */
-.pkgmx{border-collapse:separate; border-spacing:0; width:100%; font-size:14px}
-.pkgmx th,.pkgmx td{border-bottom:1px solid var(--line); padding:10px var(--s-3); vertical-align:middle}
-.pkgmx thead th{
-  background:var(--chrome); font-size:12px; font-weight:700; letter-spacing:.04em;
-  text-transform:uppercase; color:var(--ink-3); text-align:center;
-}
-.pkgmx thead th:first-child,.pkgmx tbody th,.pkgmx tfoot th{
-  text-align:left; text-transform:none; letter-spacing:0; font-weight:600;
-  color:var(--ink); background:var(--paper); position:sticky; left:0; z-index:1;
-  border-right:1px solid var(--line); min-width:12em;
-}
-.pkgmx thead th:first-child{text-transform:uppercase; letter-spacing:.04em; font-size:12px; color:var(--ink-3); font-weight:700}
-.pkgmx tbody th{font-size:14px; font-weight:500}
-.pkgmx__col{min-width:8.5em}
-.pkgmx__pick{
-  display:flex; flex-direction:column; align-items:center; gap:4px;
-  cursor:pointer; padding:4px 2px; position:relative;
-  width:100%; border:0; background:none; font:inherit; color:inherit;
-}
-.pkgmx__pick input{position:absolute; opacity:0; inset:0; margin:0; cursor:pointer}
-.pkgmx__nm{font-size:15px; font-weight:700; letter-spacing:0; text-transform:none; color:var(--ink)}
-.pkgmx__fee{font-family:"IBM Plex Mono",monospace; font-size:11.5px; font-weight:500; letter-spacing:0; text-transform:none; color:var(--ink-2); white-space:nowrap}
-.pkgmx__cell{text-align:center}
-.pkgmx__yes{font-weight:700; color:var(--ok)}
-.pkgmx__no{color:var(--ink-3)}
-.pkgmx__band th{
-  background:var(--sunken); color:var(--ink-3); font-size:11px; font-weight:700;
-  letter-spacing:.13em; text-transform:uppercase; padding:8px var(--s-3);
-  position:static; border-right:0;
-}
-.pkgmx tfoot th,.pkgmx tfoot td{background:var(--chrome); border-bottom:0; font-weight:700}
-.pkgmx tfoot .pkgmx__fee{color:var(--ink); font-weight:700}
-.pkgmx col.pkgmx--on,.pkgmx th.pkgmx--on,.pkgmx td.pkgmx--on{background:var(--accent-tint)}
-.pkgmx--pick:has(input[value="basic"]:checked) .pkgmx__c-basic,
-.pkgmx--pick:has(input[value="enhanced"]:checked) .pkgmx__c-enhanced,
-.pkgmx--pick:has(input[value="executive"]:checked) .pkgmx__c-executive{
-  background:var(--accent-tint);
-}
-.pkgmx--pick:has(input[value="basic"]:checked) th.pkgmx__c-basic .pkgmx__nm,
-.pkgmx--pick:has(input[value="enhanced"]:checked) th.pkgmx__c-enhanced .pkgmx__nm,
-.pkgmx--pick:has(input[value="executive"]:checked) th.pkgmx__c-executive .pkgmx__nm{color:var(--accent)}
-.pkgmx--pick tbody td,.pkgmx--pick tfoot td{cursor:pointer}
-.pkgmx--pick .pkgmx__pick:has(input:focus-visible){outline:2px solid var(--accent); outline-offset:3px; border-radius:var(--r-1)}
-@media (max-width:720px){
-  .pkgmx thead th:first-child,.pkgmx tbody th,.pkgmx tfoot th{min-width:9em}
-  .pkgmx__col{min-width:7em}
-  .pkgmx__fee{white-space:normal}
-}
-
-.showtabs{
-  display:grid; grid-template-columns:repeat(3,minmax(0,1fr));
-  gap:var(--s-2); padding:4px; background:var(--sunken); border-radius:var(--r-3);
-}
-.showtab{
-  display:flex; flex-direction:column; align-items:center; gap:2px;
-  padding:var(--s-3) var(--s-2); border:0; border-radius:var(--r-2);
-  background:transparent; color:var(--ink-2); font:inherit; cursor:pointer;
-}
-.showtab:hover{background:var(--paper); color:var(--ink)}
-.showtab[aria-selected="true"]{background:var(--paper); color:var(--accent); box-shadow:var(--shadow)}
-.showtab__nm{font-weight:700}
-.showtab__fee{font-family:"IBM Plex Mono",monospace; font-size:11.5px; color:var(--ink-2)}
-.showtab[aria-selected="true"] .showtab__fee{color:var(--accent)}
-.showcase{display:flex; flex-direction:column; gap:var(--s-4)}
-@media (max-width:720px){
-  .showtabs{grid-template-columns:1fr}
-}
 
 /* Overview dashboard (Basic and Enhanced packages). Panels in a two-up grid,
    each a spec card with label/value rows. */

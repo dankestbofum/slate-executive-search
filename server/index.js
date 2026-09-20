@@ -13,6 +13,7 @@ const express = require('express');
 const crypto = require('crypto');
 const db = require('./db');
 const auth = require('./auth').createAuth(db);
+const billing = require('./billing').create({ provider: require('@clerk/express').clerkClient.billing });
 const ai = require('./ai');
 const committee = require('./committee');
 const integrity = require('./integrity');
@@ -107,7 +108,7 @@ function outsidePackage(search, key){
   const step = db.STEPS.find(s => s.key === key);
   const label = db.PACKAGES[db.packageOf(search.package)].label;
   const needs = step ? db.PACKAGES[step.pkg || 'basic'].label : '';
-  return 'That step is not part of the ' + label + ' package.' + (needs ? ' It starts at ' + needs + '. Change the package on Search facts if the engagement changed.' : '');
+  return 'That step is not part of the ' + label + ' workflow.' + (needs ? ' It starts at ' + needs + '. Change the workflow on Search facts if the engagement changed.' : '');
 }
 
 function requireStepOnFile(pick){
@@ -884,8 +885,6 @@ app.get('/api/config', (_req, res) => {
     steps: db.STEPS.map(s => ({ n:s.n, key:s.key, t:s.t, phase:s.phase, opt:Boolean(s.opt), pkg:s.pkg || 'basic', kind:s.kind || 'desk' })),
     packages: db.PACKAGE_ORDER.map(k => db.PACKAGES[k]),
     defaultPackage: db.DEFAULT_PACKAGE,
-    compare: db.COMPARE,
-    compareBands: db.COMPARE_BANDS
   };
   res.json(body);
 });
@@ -1010,7 +1009,7 @@ app.post('/api/me/onboarding', requireUser, (req, res) => {
     requestedRole: assigned ? (user.onboarding?.requestedRole || null) : requestedRole,
     completedAt: db.now()
   };
-  user.title = req.access.role ? organizations.ROLE_LABEL[req.access.role] : 'Awaiting access';
+  user.title = req.access.role ? organizations.ROLE_LABEL[req.access.role] : requestedRole === 'candidate' ? 'Candidate' : 'Awaiting access';
   db.persist();
   res.json({ user: db.publicUser(user), onboarding: onboarding.status(db, req.access) });
 });
@@ -1250,7 +1249,7 @@ app.post('/api/searches', ...requireWorkspace, (req, res) => {
     return res.status(400).json({ error:'Client and position are required.' });
   }
   if (body.package !== undefined && body.package !== '' && !Object.hasOwn(db.PACKAGES, body.package)) {
-    return res.status(400).json({ error:'Pick a package: Basic, Enhanced, or Executive.' });
+    return res.status(400).json({ error:'Choose a search workflow on Search facts.' });
   }
   // Ownership comes from the verified session, never from the submitted body.
   const s = db.blankSearch(body, req.user, req.access.orgId);
@@ -2190,7 +2189,7 @@ const PATCH_FIELDS = [
 app.patch('/api/searches/:id', ...requireWorkspace, requireSearch, requireEditor, (req, res) => {
   const body = req.body || {};
   if ('jurisdictionType' in body && (typeof body.jurisdictionType !== 'string' || !Object.hasOwn(jurisdictions.TYPES, body.jurisdictionType))) return res.status(400).json({ error:'Choose City or town, or County.' });
-  if ('package' in body && !Object.hasOwn(db.PACKAGES, body.package)) return res.status(400).json({ error:'Pick a package: Basic, Enhanced, or Executive.' });
+  if ('package' in body && !Object.hasOwn(db.PACKAGES, body.package)) return res.status(400).json({ error:'Choose a search workflow on Search facts.' });
   for (const key of PATCH_FIELDS.filter(f => typeof f === 'string')) {
     if (key in body && (typeof body[key] !== 'string' || body[key].length > 20000)) return res.status(400).json({ error:'Search facts must be text, no longer than 20,000 characters.' });
   }
@@ -2213,11 +2212,11 @@ app.patch('/api/searches/:id', ...requireWorkspace, requireSearch, requireEditor
   // up in the activity feed by name rather than folded into "updated facts".
   if ('package' in body) {
     if (!db.PACKAGES[body.package]) {
-      return res.status(400).json({ error:'Pick a package: Basic, Enhanced, or Executive.' });
+      return res.status(400).json({ error:'Choose a search workflow on Search facts.' });
     }
     if (body.package !== req.search.package) {
       req.search.package = body.package;
-      db.touch(req.search, req.user, 'moved the engagement to the ' + db.PACKAGES[body.package].label + ' package');
+      db.touch(req.search, req.user, 'moved the engagement to the ' + db.PACKAGES[body.package].label + ' workflow');
     }
   }
   db.touch(req.search, req.user, 'updated search facts');
@@ -4060,6 +4059,25 @@ app.get('/careers/:firmSlug/:postingSlug/apply', portalReadLimit, (_req, res) =>
   res.set('Cache-Control', 'no-store, private');
   res.set('X-Robots-Tag', 'noindex, nofollow');
   res.sendFile(path.join(__dirname, '..', 'public', 'careers.html'));
+});
+
+// Real authentication paths let Clerk keep verification and callback steps on
+// the same page. They never enter the offline shell cache.
+app.get(['/sign-up', '/sign-up/*path', '/sign-in', '/sign-in/*path', '/subscriptions'], (_req, res) => {
+  res.set('Cache-Control', 'no-store, private');
+  res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
+});
+
+const billingReadLimit = http.limiter({ windowMs: 60000, max: 60, key: req => req.ip,
+  message: 'Too many billing requests. Please try again shortly.' });
+app.get('/api/public/billing/plans', billingReadLimit, async (_req, res) => {
+  try { res.json(await billing.catalog()); }
+  catch (error) { res.status(503).json({ error: error.message }); }
+});
+app.get('/api/billing/subscription', requireOrgAdmin, billingReadLimit, async (req, res) => {
+  // Never accept a payer or organization id from a query string or request body.
+  try { res.json(await billing.subscription(req.access.orgId)); }
+  catch (error) { res.status(503).json({ error: error.message }); }
 });
 
 app.get('/apply/:token', candidateLimit, (_req, res) => {
