@@ -238,6 +238,9 @@ button.strip__s:hover{background:var(--sunken)}
   display:grid; grid-template-columns:3.2em minmax(0,1fr) auto auto;
   gap:var(--s-3); align-items:start; padding:var(--s-3) 0; border-bottom:1px solid var(--line);
 }
+/* What the committee actually said about this line, under the controls rather
+   than in a fifth column: opposing reasons are prose, not a field. */
+.crit-evid{grid-column:1/-1; color:var(--ink-2); border-left:2px solid var(--line-strong); padding-left:var(--s-3)}
 .apply-shell{max-width:760px; margin:0 auto; padding:var(--s-8) var(--s-5)}
 .lede{max-width:62ch; color:var(--ink-2); font-size:1.05rem; line-height:1.6}
 .band{padding:var(--s-6) 0}

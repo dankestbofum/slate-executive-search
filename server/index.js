@@ -211,9 +211,62 @@ function consensusFor(search, access){
   });
 }
 
+/**
+ * Is the profile something the committee may read yet?
+ *
+ * Adoption before closure used to hand one member another member's private
+ * note through a criterion (CA-02). Publication is now the boundary: while the
+ * window is open there is nothing to publish, and a profile whose provenance
+ * predates adoption records has to be reviewed by staff before the room reads
+ * support claims nothing on file establishes.
+ */
+function profilePublished(search){
+  const intake = search.intake || {};
+  if (intake.status === 'open') return false;
+  if (search.adoptionProvenance === 'unverified') return false;
+  return true;
+}
+
 function painted(req, search){
   const out = db.decorate(search, req.access);
   out.consensus = consensusFor(search, req.access);
+  const staff = db.isStaff(req.access);
+  // Both data paths, not just the page: hiding the profile screen while the
+  // criteria still ride along on the search response would move the disclosure
+  // rather than close it.
+  if (!staff && !profilePublished(search)) {
+    out.criteria = [];
+    out.profileWithheld = {
+      reason: (search.intake || {}).status === 'open'
+        ? 'The committee input window is open. The profile is published once the account manager closes it.'
+        : 'This profile is being reviewed by the search team before it is shared.'
+    };
+  }
+  // What the adopted profile rests on, and whether that has moved since. The
+  // profile is never rewritten in response: a changed answer is a prompt for
+  // the manager to look again, not an edit to a published record (CA-03).
+  const adoption = (search.adoptions || [])[(search.adoptions || []).length - 1] || null;
+  if (staff || (out.criteria || []).length) {
+    out.adoption = adoption
+      ? {
+        id: adoption.id, at: adoption.at, by: adoption.byName || null,
+        respondents: adoption.respondents, participants: adoption.participants,
+        groups: adoption.groups || [], retained: adoption.retained || [],
+        removed: adoption.removed || [], excluded: adoption.excluded || [],
+        discussion: adoption.discussion || []
+      }
+      : null;
+    out.sourceChanged = Boolean(adoption && committee.sourceFingerprint(search) !== adoption.fingerprint);
+    out.adoptionProvenance = search.adoptionProvenance || (adoption ? 'recorded' : 'none');
+    out.publication = search.publication
+      ? { at: search.publication.at, by: search.publication.byName || null,
+        profileRevision: search.publication.profileRevision, source: search.publication.source || null,
+        reopenedAt: search.publication.reopenedAt || null }
+      : null;
+    // Gaps in the profile as it stands, which is a different question from how
+    // much of it the committee covered (CA-06).
+    out.profileGaps = committee.profileGaps(out.criteria || []);
+  }
   // Which workspace this record belongs to, so the client can refuse to paint
   // it under a different one after a switch.
   out.organization = req.access?.organization || null;
@@ -407,6 +460,13 @@ const CRIT_SOURCES = new Set(['committee', 'draft', 'consultant']);
 // revision precondition and the frozen-search refusal; see requireSearch.
 const STOP_WORK_PATH = /\/research-jobs\/[^/]+\/cancel\/?$/;
 
+// A member writing their own intake answer. The search-wide revision is the
+// wrong precondition for it: two members answering independently change the
+// same search, and one submitting must not make the other's answer unsaveable
+// (CA-12). These routes carry their own per-member precondition instead, and
+// re-check membership and the window themselves. Nothing else is relaxed.
+const PERSONAL_INTAKE_PATH = /^\/api\/searches\/[^/]+\/intake(\/withdraw)?\/?$/;
+
 function requireSearch(req, res, next){
   const s = db.findSearch(req.params.id);
   if (!s) return res.status(404).json({ error:'Search not found.' });
@@ -422,10 +482,11 @@ function requireSearch(req, res, next){
   // been closed, without first reloading to collect a fresh revision — the
   // alternative is a paid operation nobody can stop.
   const stopsWork = STOP_WORK_PATH.test(req.path);
-  if (!reads && !stopsWork && req.headers['if-match'] === undefined) {
+  const personal = req.method !== 'GET' && PERSONAL_INTAKE_PATH.test(req.path);
+  if (!reads && !stopsWork && !personal && req.headers['if-match'] === undefined) {
     return res.status(428).json({ error:'Reload this search before saving.', code:'REVISION_REQUIRED' });
   }
-  if (!reads && !stopsWork && req.headers['if-match'] !== undefined
+  if (!reads && !stopsWork && !personal && req.headers['if-match'] !== undefined
       && req.headers['if-match'] !== String(s.revision)) {
     return res.status(409).json({ error:'This search changed since you opened it. Your edits were not saved. Copy your edits, then reload the search and try again.', code:'STALE_SEARCH' });
   }
@@ -958,7 +1019,7 @@ app.delete('/api/organization/members/:clerkUserId', ...requireOrgAdmin, async (
     for (const search of db.db.searches.filter(s => s.organizationId === req.access.orgId)) {
       if (!db.memberOf(search, local.id)) continue;
       search.members = search.members.filter(m => m.userId !== local.id);
-      if (search.intake?.submissions) delete search.intake.submissions[local.id];
+      if (search.intake?.responses) delete search.intake.responses[local.id];
       db.touch(search, req.user, 'removed ' + local.name + ' from the search with their workspace access');
       releasedPlaces += 1;
     }
@@ -995,7 +1056,7 @@ app.get('/api/searches', ...requireWorkspace, (req, res) => {
       // have to open every search to find the one waiting on them.
       intakeOpen: intake.status === 'open',
       intakeDue: intake.dueBy || '',
-      intakeMine: Boolean(((intake.submissions || {})[req.user.id] || {}).submitted)
+      intakeMine: Boolean((intake.responses || {})[req.user.id]?.submitted)
     };
   }).sort((a,b)=> (b.updatedAt||'').localeCompare(a.updatedAt||'')));
 });
@@ -1110,9 +1171,7 @@ app.post('/api/searches/:id/members', ...requireWorkspace, requireSearch, requir
     // is the same path every other account takes.
     const person = existing || db.createUser({ name, email, title: b.title, role: 'committee' }).user;
     req.search.members.push({ userId: person.id, searchRole, addedAt: db.now(), addedBy: req.user.id });
-    // The roster changed, so a confirmation given before this person joined no
-    // longer describes the committee. Ask for it again.
-    req.search.team = { confirmedAt: null, confirmedBy: null };
+    db.rosterChanged(req.search);
     db.touch(req.search, req.user, 'added ' + name + ' as ' + committee.SEARCH_ROLE_LABEL[searchRole].toLowerCase());
     db.persist();
     return res.json({ search: painted(req, req.search), ...rosterOnly(req.search), email, added: true });
@@ -1142,6 +1201,10 @@ app.post('/api/searches/:id/members', ...requireWorkspace, requireSearch, requir
     orgId, searchId: req.search.id, email, name, searchRole,
     invitedBy: req.user.id, invitationId: invitation?.id || null
   });
+  // The manager has decided this person belongs on the committee. The place is
+  // held rather than filled, but the confirmation that said who the committee
+  // was is already out of date, and so is a window that was opened under it.
+  db.rosterChanged(req.search);
   db.touch(req.search, req.user, invitation
     ? 'invited ' + name + ' to the workspace and held a committee place'
     : 'held a committee place for ' + name + ', pending a workspace invitation');
@@ -1256,7 +1319,7 @@ app.delete('/api/searches/:id/members/:uid', ...requireWorkspace, requireSearch,
   req.search.members = req.search.members.filter(x => x.userId !== m.userId);
   // Their answers leave with them. Consensus counts people who are still on
   // the committee, so a departed member cannot keep voting.
-  if (req.search.intake?.submissions) delete req.search.intake.submissions[m.userId];
+  if (req.search.intake?.responses) delete req.search.intake.responses[m.userId];
   db.touch(req.search, req.user, 'removed ' + (user ? user.name : 'a member') + ' from the search');
   // If this was their only assignment, their sign-in goes with it.
   db.pruneOrphanCommittee();
@@ -1279,8 +1342,31 @@ app.post('/api/searches/:id/team/confirm', ...requireWorkspace, requireSearch, r
  *
  * Everyone on the search answers privately. The manager opens the window, watches
  * who has answered (never what they said), and closes it when the committee
- * has spoken. Closing is what publishes consensus to the room.
+ * has spoken. Closing is what publishes consensus to the room, and nothing is
+ * adopted into the profile before it.
  * ------------------------------------------------------------------------- */
+
+/** The tally, named, as every publication decision reads it. */
+function tallyOf(search){
+  return committee.aggregate(search, id => db.findUserById(id)?.name || '');
+}
+
+// The one rule every profile write path answers to (server/committee.js).
+const publicationBlock = committee.publicationBlock;
+
+/** The profile that was published, and the state it was published against. */
+function recordPublication(search, req, extra){
+  search.publication = {
+    at: db.now(),
+    by: req.user.id,
+    byName: req.user.name,
+    // Stamped by integrity.reconcile once it knows which revision this became.
+    profileRevision: null,
+    fingerprint: committee.sourceFingerprint(search),
+    criteria: integrity.clone(search.criteria || []),
+    ...extra
+  };
+}
 
 app.post('/api/searches/:id/intake/status', ...requireWorkspace, requireSearch, requireManager, (req, res) => {
   const want = String(req.body?.status || '');
@@ -1291,18 +1377,67 @@ app.post('/api/searches/:id/intake/status', ...requireWorkspace, requireSearch, 
     return res.status(400).json({ error:'Confirm the roster first. People added later would miss the window.' });
   }
   const intake = req.search.intake;
+  const agg = tallyOf(req.search);
+  if (want === 'closed' && intake.status !== 'closed') {
+    // A roster that moved mid-window means the denominator moved. The manager
+    // says out loud that this is still the right committee before the answers
+    // become the room's, and before anything is built from them.
+    if (!req.search.team?.confirmedAt) {
+      return res.status(409).json({
+        error: 'The roster changed while the window was open. Confirm the roster again before closing intake.',
+        code: 'ROSTER_UNCONFIRMED'
+      });
+    }
+    // Finishing with nothing on file is allowed and sometimes right. It is a
+    // decision the manager makes and signs, not a step that quietly completes.
+    if (!agg.submitted) {
+      const reason = String(req.body?.emptyReason || '').trim().slice(0, 400);
+      if (!reason) {
+        return res.status(409).json({
+          error: 'Nobody submitted committee input. Closing now completes this step without it — say why, and it will be recorded as a decision.',
+          code: 'EMPTY_INTAKE'
+        });
+      }
+      intake.completedEmpty = { at: db.now(), by: req.user.id, byName: req.user.name, reason };
+    } else {
+      intake.completedEmpty = null;
+    }
+  }
   intake.status = want;
   if ('dueBy' in (req.body || {})) intake.dueBy = String(req.body.dueBy || '').slice(0, 120);
   if ('prompt' in (req.body || {})) intake.prompt = String(req.body.prompt || '').slice(0, 2000);
-  if (want === 'open') { intake.openedAt = db.now(); intake.closedAt = null; }
+  if (want === 'open') {
+    intake.openedAt = db.now();
+    intake.closedAt = null;
+    intake.rosterChangedAt = null;
+    // Reopening collects new input under the normal rules: private until the
+    // window closes again. It does not retract the profile already published,
+    // and it does not republish through a derived field either — `publication`
+    // is the dated snapshot, and the live profile stops being publishable
+    // until the window closes.
+    if (req.search.publication) req.search.publication.reopenedAt = db.now();
+  }
   if (want === 'closed') intake.closedAt = db.now();
   db.touch(req.search, req.user,
     want === 'open' ? 'opened committee intake' :
-    want === 'closed' ? 'closed committee intake' : 'put committee intake back in draft');
+    want === 'closed' ? (agg.submitted ? 'closed committee intake' : 'completed committee intake without input') :
+    'put committee intake back in draft');
   db.persist();
   res.json(painted(req, req.search));
 });
 
+/**
+ * One member's own intake write.
+ *
+ * Two different things arrive here. `submitted: false` saves the private
+ * working copy and leaves the last committed answer exactly where it is, in
+ * the tally (CA-04). `submitted: true` replaces the committed answer.
+ *
+ * The precondition is this member's own response revision, not the whole
+ * search's, so another member submitting does not make an independent answer
+ * unsaveable (CA-12). Everything else the search-wide check was doing —
+ * workspace, membership, the window being open — is checked here explicitly.
+ */
 app.put('/api/searches/:id/intake', ...requireWorkspace, requireSearch, (req, res) => {
   const searchRole = db.memberOf(req.search, req.user.id);
   if (!searchRole) return res.status(403).json({ error:'You are not on this search.' });
@@ -1313,36 +1448,184 @@ app.put('/api/searches/:id/intake', ...requireWorkspace, requireSearch, (req, re
   if (intake.status !== 'open') {
     return res.status(400).json({
       error: intake.status === 'closed'
-        ? 'Intake is closed. Ask the account manager to reopen it.'
-        : 'Intake has not opened yet.'
+        ? 'Intake is closed. Ask the account manager to reopen it. Your answers are still on this page — copy anything you need before leaving.'
+        : 'Intake has not opened yet.',
+      code: 'INTAKE_SHUT'
     });
   }
-  const prev = intake.submissions[req.user.id] || null;
-  const next = committee.normalizeSubmission(req.body, prev, db.now());
-  if (next.submitted && !next.items.length) {
+  intake.responses ||= {};
+  const record = intake.responses[req.user.id] || committee.emptyResponse();
+  const claimed = req.body?.responseRevision;
+  if (claimed === undefined) {
+    // An older client that would write the pre-draft shape back over this
+    // record. Refuse it in a way that says what to do about it.
+    return res.status(428).json({
+      error: 'Reload this page before saving your answers. Slate now keeps your draft and your submitted answers separately.',
+      code: 'RESPONSE_REVISION_REQUIRED'
+    });
+  }
+  if (Number(claimed) !== Number(record.revision || 1)) {
+    return res.status(409).json({
+      error: 'Your answers were changed somewhere else — another tab, or another device. Nothing here was overwritten. '
+        + 'Compare the two versions and keep the one you want.',
+      code: 'STALE_RESPONSE',
+      response: { revision: record.revision || 1, draft: record.draft || null, submitted: record.submitted || null }
+    });
+  }
+  const submitting = Boolean(req.body?.submitted);
+  const now = db.now();
+  const answer = committee.normalizeAnswer(req.body, submitting ? record.submitted : record.draft, now);
+  if (submitting && !answer.items.length) {
     return res.status(400).json({ error:'Name at least one quality before you submit.' });
   }
-  intake.submissions[req.user.id] = next;
-  const first = !prev || !prev.submitted;
-  if (next.submitted) {
+  const first = !record.submitted;
+  if (submitting) {
+    record.submitted = { ...answer, submittedAt: now };
+    // The draft has become the submission. Clearing it is what makes the
+    // "you have unpublished changes" notice honest afterwards.
+    record.draft = null;
+    record.withdrawnAt = null;
+  } else {
+    // An empty draft is a draft, not a withdrawal. Withdrawing is its own
+    // action, below.
+    record.draft = answer;
+  }
+  record.revision = Number(record.revision || 1) + 1;
+  intake.responses[req.user.id] = record;
+  if (submitting) {
     db.touch(req.search, req.user, first ? 'submitted committee input' : 'revised their committee input');
   } else {
-    req.search.updatedAt = db.now();
+    req.search.updatedAt = now;
   }
   db.persist();
   res.json(painted(req, req.search));
 });
 
+/**
+ * Take a submitted answer back out of the tally, deliberately.
+ *
+ * Separate from saving a draft, separately explained, and separately
+ * recorded — and it marks every profile adopted from that answer as resting on
+ * input that has since changed.
+ */
+app.post('/api/searches/:id/intake/withdraw', ...requireWorkspace, requireSearch, (req, res) => {
+  const searchRole = db.memberOf(req.search, req.user.id);
+  if (!searchRole) return res.status(403).json({ error:'You are not on this search.' });
+  const intake = req.search.intake;
+  if (intake.status !== 'open') {
+    return res.status(400).json({ error:'Answers can only be withdrawn while the window is open.', code:'INTAKE_SHUT' });
+  }
+  const record = (intake.responses || {})[req.user.id];
+  if (!record || !record.submitted) {
+    return res.status(400).json({ error:'You have no submitted answers to withdraw.' });
+  }
+  // The answer becomes the member's own draft again rather than disappearing:
+  // withdrawing is leaving the tally, not destroying what they wrote.
+  record.draft = record.draft || { ...record.submitted };
+  record.submitted = null;
+  record.withdrawnAt = db.now();
+  record.revision = Number(record.revision || 1) + 1;
+  // Deliberately says nothing about what the answer contained.
+  db.touch(req.search, req.user, 'withdrew their committee input from the tally');
+  db.persist();
+  res.json(painted(req, req.search));
+});
+
+/**
+ * Build the profile from committee input.
+ *
+ * `preview: true` returns the decision without making it: what arrives, what
+ * changes, what no longer has support, what a consultant wrote and is being
+ * kept, and what the five-item cap excludes. Applying requires the fingerprint
+ * and profile revision the preview was built from, so a selection cannot be
+ * confirmed against input that has moved underneath it (CA-03, CA-06).
+ */
 app.post('/api/searches/:id/intake/adopt', ...requireWorkspace, requireSearch, requireManager, (req, res) => {
-  const agg = committee.aggregate(req.search, id => db.findUserById(id)?.name || '');
+  const blocked = publicationBlock(req.search);
+  if (blocked) return res.status(blocked.status).json({ error: blocked.error, code: blocked.code });
+  const agg = tallyOf(req.search);
   if (!agg.submitted) {
     return res.status(400).json({ error:'No committee input on file yet. Nothing to adopt.' });
   }
-  req.search.criteria = committee.mergeIntoCriteria(req.search.criteria, agg);
+  const fingerprint = committee.sourceFingerprint(req.search);
+  const preview = Boolean(req.body?.preview);
+  const retain = Array.isArray(req.body?.retain) ? req.body.retain.filter(id => typeof id === 'string').slice(0, 100) : [];
+  const retainReasons = (req.body?.retainReasons && typeof req.body.retainReasons === 'object') ? req.body.retainReasons : {};
+  const adoptionId = 'ADOPT-' + ((req.search.adoptions || []).length + 1);
+  const plan = committee.adoptionPreview(req.search.criteria, agg, {
+    retain, retainReasons, adoptionId, at: db.now(), actor: req.user.id
+  });
+
+  if (preview) {
+    return res.json({
+      preview: true,
+      fingerprint,
+      profileRevision: req.search.profileRevision,
+      respondents: agg.submitted,
+      participants: agg.asked,
+      criteria: plan.criteria,
+      changes: plan.changes,
+      discussion: plan.discussion,
+      // Gaps in the finished profile, and gaps in what the committee covered.
+      // "Only one opportunity was nominated" is not "your profile needs two
+      // more opportunities" (CA-06).
+      gaps: committee.profileGaps(plan.criteria),
+      coverage: committee.coverageGaps(agg)
+    });
+  }
+
+  if (req.body?.fingerprint !== undefined && req.body.fingerprint !== fingerprint) {
+    return res.status(409).json({
+      error: 'Committee input changed since this preview was built. Review the proposal again before applying it.',
+      code: 'STALE_SOURCE', fingerprint
+    });
+  }
+  if (req.body?.profileRevision !== undefined && Number(req.body.profileRevision) !== Number(req.search.profileRevision)) {
+    return res.status(409).json({
+      error: 'The profile changed since this preview was built. Review the proposal again before applying it.',
+      code: 'STALE_PROFILE', profileRevision: req.search.profileRevision
+    });
+  }
+  const invalid = integrity.validateCriteria(plan.criteria);
+  if (invalid) return res.status(422).json({ error: 'The profile was not saved: ' + invalid });
+
+  req.search.criteria = plan.criteria;
+  req.search.adoptions ||= [];
+  req.search.adoptions.push({
+    id: adoptionId,
+    at: db.now(),
+    by: req.user.id,
+    byName: req.user.name,
+    fingerprint,
+    respondents: agg.submitted,
+    participants: agg.asked,
+    // The evidence each adopted line rested on, frozen here, so renaming or
+    // reweighting a criterion later cannot rewrite what the committee said.
+    groups: plan.groups,
+    selected: plan.criteria.filter(c => c.source?.adoptionId === adoptionId).map(c => ({ id: c.id, key: c.source.key })),
+    retained: plan.changes.retained,
+    removed: plan.changes.removed,
+    excluded: plan.changes.excluded,
+    discussion: plan.discussion
+  });
+  // Superseded adoption records stay: they are the dated evidence for the
+  // profile revisions scored against them. Bound the list so one search cannot
+  // grow without limit.
+  if (req.search.adoptions.length > 25) req.search.adoptions = req.search.adoptions.slice(-25);
+  delete req.search.adoptionProvenance;
+  recordPublication(req.search, req, { adoptionId, source: 'committee' });
   db.touch(req.search, req.user, 'built the profile from ' + agg.submitted + ' committee submissions');
   db.persist();
-  res.json({ search: painted(req, req.search), gaps: committee.adoptionGaps(agg) });
+  res.json({
+    search: painted(req, req.search),
+    adoptionId,
+    changes: plan.changes,
+    discussion: plan.discussion,
+    gaps: committee.profileGaps(req.search.criteria),
+    coverage: committee.coverageGaps(agg)
+  });
 });
+
 
 function removeSearch(search){
   search.archivedAt = db.now();
@@ -1756,21 +2039,40 @@ app.patch('/api/searches/:id', ...requireWorkspace, requireSearch, requireEditor
 });
 
 app.put('/api/searches/:id/profile', ...requireWorkspace, requireSearch, requireEditor, (req, res) => {
+  // The same boundary direct adoption answers to. Saving the profile by hand
+  // publishes it to the committee just as surely as adopting does (CA-02).
+  const blocked = publicationBlock(req.search);
+  if (blocked) return res.status(blocked.status).json({ error: blocked.error, code: blocked.code });
   const criteria = Array.isArray(req.body?.criteria) ? req.body.criteria : [];
   if (criteria.some(c => !c || typeof c !== 'object')) return res.status(400).json({ error:'Invalid profile criterion.' });
-  const next = criteria.map((c,i) => ({
-    id: c.id || ('X'+(i+1)),
-    kind: c.kind || 'skill',
-    label: String(c.label||'').trim(),
-    weight: clampWeight(c.weight),
-    note: String(c.note||''),
-    // Kept so the profile page can still show which lines came out of the
-    // committee's own words after the consultant has edited around them.
-    from: CRIT_SOURCES.has(c.from) ? c.from : 'consultant'
-  })).filter(c=>c.label);
+  const prior = new Map((req.search.criteria || []).map(c => [c.id, c]));
+  const next = criteria.map((c,i) => {
+    const was = prior.get(c.id);
+    const row = {
+      id: c.id || ('X'+(i+1)),
+      kind: c.kind || 'skill',
+      label: String(c.label||'').trim(),
+      weight: clampWeight(c.weight),
+      note: String(c.note||''),
+      // Kept so the profile page can still show which lines came out of the
+      // committee's own words after the consultant has edited around them.
+      from: CRIT_SOURCES.has(c.from) ? c.from : 'consultant'
+    };
+    // Where a line came from is the record's, not the form's. A criterion the
+    // consultant renamed keeps the adoption it was created by; a hand-written
+    // one cannot acquire provenance by being posted with a source on it
+    // (CA-08).
+    if (was?.source && was.kind === row.kind) row.source = was.source;
+    else if (!was) row.from = row.from === 'committee' ? 'consultant' : row.from;
+    return row;
+  }).filter(c=>c.label);
   const error = integrity.validateCriteria(next);
   if (error) return res.status(400).json({ error });
   req.search.criteria = next;
+  // Saving the profile by hand is the staff review a legacy, unverified
+  // provenance was waiting for.
+  delete req.search.adoptionProvenance;
+  recordPublication(req.search, req, { source: 'consultant' });
   db.touch(req.search, req.user, 'saved the candidate profile');
   db.persist();
   res.json(painted(req, req.search));
@@ -1942,13 +2244,19 @@ app.post('/api/searches/:id/generate', ...requireWorkspace, requireSearch, requi
   const premium = Boolean(req.body?.premium);
   const revision = req.search.revision;
   const snapshot = integrity.clone(req.search);
+  // Refused before any provider work, not after paying for it: a draft that
+  // could not be applied must not be bought.
+  const blockedNow = kind === 'profile' ? publicationBlock(req.search) : null;
+  if (blockedNow) return res.status(blockedNow.status).json({ error: blockedNow.error, code: blockedNow.code });
+  const sourceAtStart = kind === 'profile' ? committee.sourceFingerprint(req.search) : null;
   try {
     // The profile draft writes from what the committee said, not from one
     // person's recollection of the workshop. Everything else inherits the
     // profile, so this is the only prompt that needs the room.
-    const room = kind === 'profile'
-      ? committee.packForPrompt(committee.aggregate(req.search, id => db.findUserById(id)?.name || ''))
+    const agg = kind === 'profile'
+      ? committee.aggregate(req.search, id => db.findUserById(id)?.name || '')
       : null;
+    const room = agg ? committee.packForPrompt(agg) : null;
     const aiStartedAt = Date.now();
     aibudget.begin();
     let out;
@@ -1968,18 +2276,43 @@ app.post('/api/searches/:id/generate', ...requireWorkspace, requireSearch, requi
       return res.status(409).json({ error:'This search was closed to you while the draft was generating. Nothing was saved.' });
     }
     if (req.search.revision !== revision) return res.status(409).json({ error:'This search changed while the draft was generating. The newer work was kept. Reload the search before drafting again.', code:'STALE_SEARCH' });
+    if (kind === 'profile') {
+      // The window can have reopened, or the roster changed, while the model
+      // was writing. Authority, publication status and the input the draft was
+      // built from are all rechecked against the record as it is now, not as
+      // it was when the request started.
+      const blockedNow2 = publicationBlock(req.search);
+      if (blockedNow2) return res.status(blockedNow2.status).json({ error: blockedNow2.error, code: blockedNow2.code });
+      if (committee.sourceFingerprint(req.search) !== sourceAtStart) {
+        return res.status(409).json({
+          error: 'Committee input changed while the draft was generating. Nothing was saved. Draft again from the current answers.',
+          code: 'STALE_SOURCE'
+        });
+      }
+    }
     const invalid = kind === 'profile' ? integrity.validateCriteria(out.json.criteria)
       : ['survey1', 'survey2'].includes(kind) ? integrity.validateSurvey(out.json) : null;
     if (invalid) return res.status(422).json({ error:'The generated draft was not saved: ' + invalid });
     if (kind === 'profile') {
-      req.search.criteria = (out.json.criteria||[]).map((c,i)=>({
-        id: c.id || ('X'+(i+1)),
-        kind: c.kind,
-        label: c.label,
-        weight: clampWeight(c.weight),
-        note: c.note||'',
-        from: 'draft'
-      }));
+      // Provenance comes from the tally, never from the model. A `sourceKey`
+      // it returns is honoured only when it names a group the committee
+      // actually produced; an invented or mismatched one leaves the line
+      // marked as a draft with no support claim behind it.
+      const bySourceKey = new Map((agg ? committee.KINDS.flatMap(k => agg.byKind[k] || []) : []).map(e => [e.key, e]));
+      req.search.criteria = (out.json.criteria||[]).map((c,i)=>{
+        const entry = typeof c.sourceKey === 'string' ? bySourceKey.get(c.sourceKey) : null;
+        const matches = entry && entry.kind === c.kind;
+        return {
+          id: c.id || ('X'+(i+1)),
+          kind: c.kind,
+          label: c.label,
+          weight: clampWeight(c.weight),
+          note: c.note||'',
+          from: matches ? 'committee' : 'draft',
+          ...(matches ? { source: { key: entry.key, adoptionId: null, at: db.now(), support: 'current', via: 'draft' } } : {})
+        };
+      });
+      recordPublication(req.search, req, { source: 'draft', model: out.model });
       db.touch(req.search, req.user, 'drafted the profile with '+out.model);
     } else {
       const prev = req.search.artifacts[kind] || {};

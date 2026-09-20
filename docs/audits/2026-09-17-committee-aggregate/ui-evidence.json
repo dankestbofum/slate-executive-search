@@ -1,0 +1,48 @@
+{
+  "recordedAt": "2026-09-18T00:38:15.148Z",
+  "runtime": "v22.18.0",
+  "method": "Real public/app.js helpers extracted into node:vm; synthetic state and presentation-only stubs; no browser or network.",
+  "checks": [
+    {
+      "id": "UI-01",
+      "name": "Renaming committee criterion loses support/contested badges and displays Yours",
+      "before": "<span class=\"crit-src\"><span class=\"stop\">3 of 3</span><span class=\"stop\">Contested</span></span>",
+      "renamed": "<span class=\"crit-src\"><span class=\"idle\">Yours</span></span>",
+      "punctuation": "<span class=\"crit-src\"><span class=\"idle\">Yours</span></span>",
+      "result": "reproduced"
+    },
+    {
+      "id": "UI-02",
+      "name": "Matching manual criterion receives committee support badge by label, regardless of from",
+      "manual": "<span class=\"crit-src\"><span class=\"stop\">3 of 3</span><span class=\"stop\">Contested</span></span>",
+      "result": "observed; label support is not provenance"
+    },
+    {
+      "id": "UI-03",
+      "name": "Weight buttons repeat numeric names without item-specific accessible labels",
+      "weightButtons": [
+        {
+          "weight": "1",
+          "markup": "<button type=\"button\" data-iw=\"1\" aria-pressed=\"false\">1</button>"
+        },
+        {
+          "weight": "2",
+          "markup": "<button type=\"button\" data-iw=\"2\" aria-pressed=\"false\">2</button>"
+        },
+        {
+          "weight": "3",
+          "markup": "<button type=\"button\" data-iw=\"3\" aria-pressed=\"true\">3</button>"
+        },
+        {
+          "weight": "4",
+          "markup": "<button type=\"button\" data-iw=\"4\" aria-pressed=\"false\">4</button>"
+        },
+        {
+          "weight": "5",
+          "markup": "<button type=\"button\" data-iw=\"5\" aria-pressed=\"false\">5</button>"
+        }
+      ],
+      "result": "markup confirmed; not a screen-reader usability test"
+    }
+  ]
+}

@@ -301,6 +301,27 @@ named but weighted 3 or more apart is flagged **contested** rather than
 averaged into the middle. Adoption merges consensus into the profile ahead of
 anything written by hand, capped at five per category.
 
+Each member's record holds a **private draft** and their **committed answer**,
+and they are not the same thing. Saving a draft changes only the draft; the
+answer already in the tally stays there until the member submits again, and
+withdrawing is its own action with its own event. A draft goes to its author
+and nobody else — not to the search team, not to the rest of the committee when
+the window closes, and not into an export. A submitted answer is readable by
+workspace staff while they facilitate, and by everyone on the search once the
+window closes. That boundary is where publication sits too: adoption, saving
+the profile by hand, and drafting it with Claude all wait for the window to
+close, so nothing published to the committee can contain input somebody is
+still giving.
+
+Adopting records what it was adopting: who did it, when, the fingerprint of the
+input, and the counts, ranges and every reason behind each line. The criteria
+carry a durable link to that record, so renaming one does not change where it
+came from, and support that describes earlier answers is dated as such.
+Rebuilding is a preview first — what arrives, what changes, what no longer has
+support, and what the five-item cap excludes — and keeping an unsupported line
+is an explicit decision with a reason. Contested nominations past the cap go to
+a discussion list rather than being forced into a slot.
+
 ## Local
 
 Requires **Node 24 LTS** (24.20.0 or newer), matching the container and CI.
@@ -816,6 +837,14 @@ and a pre-migration snapshot. A store written by a *newer* release is refused
 outright rather than downgraded: rolling the app back onto a store it does not
 understand is how a rollback becomes data loss. Roll back the application and
 its matching snapshot together.
+
+Schema 7 split committee intake into per-member response records: a private
+draft and a committed answer, where there had been one record with a
+`submitted` flag. A legacy record is read for what it was — flagged means the
+member sent it, unflagged means they never did — and nothing invents a
+submitted version the old schema had already overwritten. Refusing a downgrade
+matters here because an older build writes the one-record shape back, which
+would publish somebody's unsent draft as their answer.
 
 Schema 4 introduced workspace ownership. It is the migration where refusing a
 downgrade matters most: rolling an organization-aware store back onto a build

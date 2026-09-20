@@ -210,21 +210,11 @@ const state = {
   // previous workspace, or an attempt that was cancelled. `error` and `review`
   // outlive the dialog on purpose: a failure has to stay on the page long
   // enough to be read and acted on. See startResearch.
-  // "dismissed" is keyed by job id: saying "fill the facts by hand" is a
-  // decision about one operation, not a standing preference, so re-opening a
-  // search restores a failure the consultant has not dealt with and stays quiet
-  // about one they have. "draft" holds the jurisdiction and website last typed
-  // into the lookup form, so a failed attempt does not take them with it.
-  research:{ token:0, active:null, error:null, review:null, key:null, dismissed:{}, draft:null },
+  research:{ token:0, active:null, error:null, review:null, key:null },
   // The intake answers being edited, held here rather than read back off the
   // DOM so a re-render never drops what somebody typed. Cleared when the
   // search changes or the answers are saved.
   intake:null,
-  // A save that collided with the same member's other tab: the version the
-  // server holds, shown beside the local one so neither is thrown away.
-  intakeConflict:null,
-  // A proposed profile the manager is reviewing before it is applied.
-  adoptPlan:null,
   // The people being typed into the add-people form, held here rather than
   // read back off the DOM only at submit, so a re-render never drops a row.
   newPeople:null,
@@ -501,7 +491,7 @@ function demoSearch(pkg){
       { id:'C1', kind:'chall', label:'Structural deficit', weight:5 },
       { id:'O1', kind:'opp', label:'Downtown redevelopment', weight:3 }
     ],
-    intake: { status:'closed', answered:{ u1:true, u2:true, u3:true }, responses:{} },
+    intake: { status:'closed', submissions:{ u1:{submitted:true}, u2:{submitted:true}, u3:{submitted:true} } },
     consensus: { submitted:3, pending:[] },
     candidates: people,
     released: pkg === 'executive',
@@ -731,14 +721,6 @@ const RESEARCH_POLL_TIMEOUT_MS = 10000;
 // rather than the browser inventing a verdict first.
 const RESEARCH_GRACE_MS = 20000;
 const RESEARCH_POLL_FAILURES = 10;
-// Deadlines for the requests that surround an operation, as distinct from the
-// operation's own deadline. These bound a network round trip; the research is
-// bounded by the server. Keeping them separate is what stops "the request did
-// not answer" from being reported as "the research did not happen" (D05).
-const RESEARCH_START_TIMEOUT_MS = 20000;
-const RESEARCH_SAVE_TIMEOUT_MS = 20000;
-const RESEARCH_CANCEL_TIMEOUT_MS = 10000;
-const RESEARCH_LOOKUP_TIMEOUT_MS = 10000;
 
 const RESEARCH_STAGE_TEXT = {
   queued: 'Waiting for a free slot',
@@ -799,46 +781,7 @@ function researchProblem(error){
     retry: !fatal.includes(error.code),
     // Only set when the outcome is genuinely unknown. Never claim nothing was
     // saved when we cannot tell.
-    reload: false,
-    // Offers "Check what happened": an authorized read that reconciles the key
-    // this tab is holding. Set only where the outcome is genuinely unknown.
-    reconcile: false
-  };
-}
-
-/**
- * The start request was never answered inside its bound.
- *
- * Deliberately offers reconciliation rather than Retry. The server may have
- * recorded the operation and begun paying for it under an id this tab never
- * learned, and a retry that looks like a fresh start is how the same research
- * gets billed twice.
- */
-function researchUnsureStart(){
-  return {
-    code: 'RESEARCH_UNSURE',
-    error: 'Slate did not hear back about starting this research, so whether it started is not known here. Check what happened before trying again.',
-    missing: [], retry: false, reload: false, reconcile: true
-  };
-}
-
-/** The facts save failed outright, so research was never started. */
-function factsSaveProblem(error){
-  return {
-    code: error.code || 'FACTS_SAVE_FAILED',
-    error: 'Slate could not save the facts on this form, so research was not started. ' + (error.message || ''),
-    missing: [], retry: true, reload: false, reconcile: false
-  };
-}
-
-/** The facts save was not answered, so whether it landed is unknown. */
-function factsSaveUnsure(){
-  return {
-    code: 'FACTS_SAVE_UNSURE',
-    // Scoped to the facts rather than to the research: the research definitely
-    // did not start, and the facts may well have been saved.
-    error: 'Slate did not hear back about saving these facts, so research was not started. Reload this search to see what was saved, then research again.',
-    missing: [], retry: false, reload: true, reconcile: false
+    reload: false
   };
 }
 
@@ -880,59 +823,37 @@ async function startResearch({ city, website, premium, patch }){
   state.research.review = null;
   researchWait(active);
 
-  // Held so a failure does not take the consultant's typing with it: a
-  // re-render draws the lookup form from state, not from the DOM it replaced.
-  state.research.draft = { city, website };
-
-  // The facts save and the research are two writes, and they are reported
-  // separately. A message about research is not a message about whether the
-  // form was saved.
-  if (patch) {
-    try {
-      const saved = await api('/api/searches/' + s.id, {
-        method: 'PATCH', body: patch,
-        signal: active.controller.signal,
-        timeoutMs: RESEARCH_SAVE_TIMEOUT_MS
-      });
+  try {
+    if (patch) {
+      const saved = await api('/api/searches/' + s.id, { method: 'PATCH', body: patch, signal: active.controller.signal });
       if (researchStale(active)) return;
       state.search = saved;
-    } catch (error) {
-      if (error.aborted) return;
-      endResearch(active, { error: error.timedOut ? factsSaveUnsure() : factsSaveProblem(error) });
-      return;
     }
-  }
-
-  let started;
-  try {
-    started = await api('/api/searches/' + active.searchId + '/research-jobs', {
-      method: 'POST',
-      signal: active.controller.signal,
-      // A bound on the acknowledgement, not on the research. The operation's
-      // deadline is the server's and is learned from this response, which is
-      // exactly why waiting for the response cannot itself be unbounded (D05).
-      timeoutMs: RESEARCH_START_TIMEOUT_MS,
-      headers: { 'idempotency-key': active.key },
-      body: { city, website, premium }
-    });
+    let started;
+    try {
+      started = await api('/api/searches/' + active.searchId + '/research-jobs', {
+        method: 'POST',
+        signal: active.controller.signal,
+        headers: { 'idempotency-key': active.key },
+        body: { city, website, premium }
+      });
+    } catch (error) {
+      // The job contract can be switched off for rollback. An already-open
+      // client falls back to holding the connection itself.
+      if (error.code === 'RESEARCH_JOBS_OFF') { await researchInline(active, { city, website, premium }); return; }
+      throw error;
+    }
+    if (researchStale(active)) return;
+    active.jobId = started.job.id;
+    if (started.job.createdAt) active.startedAt = Date.parse(started.job.createdAt);
+    if (started.job.deadlineAt) active.deadlineAt = Date.parse(started.job.deadlineAt);
+    if (started.reused) setWaitStage(stageText(started.job.stage) + ' · already running');
+    if (researchStatus(active, started.job)) return;
   } catch (error) {
     if (error.aborted) return;
-    // The job contract can be switched off for rollback. An already-open
-    // client falls back to holding the connection itself.
-    if (error.code === 'RESEARCH_JOBS_OFF') { await researchInline(active, { city, website, premium }); return; }
-    // No acknowledgement inside the bound. The operation may be running under
-    // an id this tab never learned, so the key is kept and the outcome is
-    // reconciled rather than guessed at.
-    if (error.timedOut || error.code === 'AUTH_TIMEOUT') { endResearch(active, { error: researchUnsureStart() }); return; }
     endResearch(active, { error: researchProblem(error) });
     return;
   }
-  if (researchStale(active)) return;
-  active.jobId = started.job.id;
-  if (started.job.createdAt) active.startedAt = Date.parse(started.job.createdAt);
-  if (started.job.deadlineAt) active.deadlineAt = Date.parse(started.job.deadlineAt);
-  if (started.reused) setWaitStage(stageText(started.job.stage) + ' · already running');
-  if (researchStatus(active, started.job)) return;
   pollResearch(active);
 }
 
@@ -1036,21 +957,21 @@ async function checkResearch(active){
   pollResearch(active);
 }
 
-/**
- * What a finished job means, in one place.
- *
- * Polling and re-opening a search both need this answer and used to derive it
- * separately: polling built a failure panel, and re-opening restored only
- * reviewable findings, so a failure that happened while the tab was away
- * disappeared on the way back (D04). One mapper, two callers.
- *
- * Findings worth a decision and the reason the job did not apply them itself
- * are separate: a stale-search conflict has both, because the work is good and
- * the file moved under it; a plain partial has only the first; and a cancelled
- * job that still produced findings has no failure to report at all.
- */
-function researchTerminal(job){
-  if (job.state === 'succeeded') return { saved: true, job };
+/** Read one status. Returns true when the operation is over. */
+function researchStatus(active, job){
+  active.stage = job.stage || active.stage;
+  if (job.deadlineAt) active.deadlineAt = Date.parse(job.deadlineAt);
+  if (!RESEARCH_TERMINAL.has(job.state)) {
+    setWaitStage(stageText(job.stage));
+    return false;
+  }
+  if (job.state === 'succeeded') { endResearch(active, { saved: true, job }); return true; }
+  if (job.state === 'cancelled' && !job.reviewable) { endResearch(active, { cancelled: true, job }); return true; }
+
+  // Findings worth a decision, and separately the reason the job did not apply
+  // them itself. A stale-search conflict has both: the work is good and the
+  // file moved under it. A plain partial has only the first, and a cancelled
+  // job that still produced findings has no failure to report at all.
   const review = job.reviewable ? job : null;
   const noFailureToReport = job.state === 'partial' || job.state === 'cancelled';
   const failure = job.failure
@@ -1060,27 +981,13 @@ function researchTerminal(job){
       missing: job.failure.missing || job.missing || [],
       operation: job.id,
       retry: !['AI_AUTH_ERROR','NO_KEY','AUTH_ERROR','BAD_URL','MODEL_UNAVAILABLE'].includes(job.failure.code),
-      reload: false,
-      reconcile: false
+      reload: false
     }
     : (noFailureToReport ? null : {
       code: 'RESEARCH_FAILED',
-      error: 'Research did not finish.', missing: job.missing || [], operation: job.id,
-      retry: true, reload: false, reconcile: false
+      error: 'Research did not finish.', missing: job.missing || [], operation: job.id, retry: true, reload: false
     });
-  if (job.state === 'cancelled' && !review) return { cancelled: true, job };
-  return { review, error: failure, job };
-}
-
-/** Read one status. Returns true when the operation is over. */
-function researchStatus(active, job){
-  active.stage = job.stage || active.stage;
-  if (job.deadlineAt) active.deadlineAt = Date.parse(job.deadlineAt);
-  if (!RESEARCH_TERMINAL.has(job.state)) {
-    setWaitStage(stageText(job.stage));
-    return false;
-  }
-  endResearch(active, researchTerminal(job));
+  endResearch(active, { review, error: failure });
   return true;
 }
 
@@ -1101,18 +1008,10 @@ function endResearch(active, outcome = {}){
   if (!mine) return;
   if (state.search?.id !== active.searchId || (state.org?.id || null) !== active.orgId) return;
 
-  if (outcome.requested) {
-    // Control is back and nothing is claimed. The server has not answered yet,
-    // so "nothing was saved" would be a guess about a client's file (D03).
-    toast('Cancellation requested. Waiting for the server to confirm.');
-    render();
-    return;
-  }
   if (outcome.saved) {
     state.research.key = null;
     state.research.error = null;
     state.research.review = null;
-    state.research.draft = null;
     const held = outcome.held || [];
     toast(held.length
       ? 'Filled from public sources. Kept what you had already entered for: ' + held.join(', ') + '.'
@@ -1138,101 +1037,8 @@ function endResearch(active, outcome = {}){
   // recorded the operation: the retry must carry the same key so it finds the
   // one operation rather than paying for a second. Once a job id is known the
   // operation is identified and finished, and a retry is a new one.
-  // ...and while the outcome is unknown, whether or not an id is known: a
-  // cancellation that was never acknowledged has to be reconciled before a
-  // retry, for the same reason.
-  if (outcome.error && active.jobId && !outcome.error.reconcile) state.research.key = null;
+  if (outcome.error && active.jobId) state.research.key = null;
   render();
-}
-
-/* --- reconciliation ------------------------------------------------------- *
- *
- * The one question this tab cannot answer on its own: an operation was started,
- * or possibly started, and no answer arrived. Retrying the start would find out
- * by risking a second paid run, so that is not how it is asked. The key is
- * looked up through a read-only route that never creates work.
- * ------------------------------------------------------------------------- */
-
-/**
- * Ask the server what became of the key this tab is holding.
- *
- * The cancelling flag is set when the consultant asked to stop: an operation
- * found still running is then told to stop, because that is what they asked
- * for and this is the first moment it could be delivered.
- */
-async function reconcileResearch({ searchId, key, cancelling = false } = {}){
-  const id = searchId || state.search?.id;
-  if (!id) return;
-  if (!key) {
-    if (cancelling) toast('Research cancelled. Nothing was started, so nothing was saved.');
-    return;
-  }
-  let out;
-  try {
-    out = await api('/api/searches/' + id + '/research-jobs?key=' + encodeURIComponent(key),
-      { timeoutMs: RESEARCH_LOOKUP_TIMEOUT_MS });
-  } catch (error) {
-    if (error.aborted) return;
-    if (state.search?.id !== id) return;
-    // Still unknown. The panel keeps the key and the offer to check again,
-    // rather than resolving into a claim in either direction.
-    state.research.error = {
-      code: 'RESEARCH_UNSURE',
-      error: 'Slate still could not reach the server to check on this research, so nothing about its outcome is known here. Try checking again in a moment.',
-      missing: [], retry: false, reload: true, reconcile: true
-    };
-    render();
-    return;
-  }
-  if (state.search?.id !== id) return;
-
-  const job = out.job || null;
-  if (!job) {
-    // The key names no operation, which is a real answer: nothing was recorded
-    // under it, so nothing was started and nothing was billed for it.
-    state.research.key = null;
-    state.research.error = null;
-    toast(cancelling
-      ? 'Research cancelled. It had not started, so nothing was saved.'
-      : 'That research was never started. Nothing was saved and nothing was billed.');
-    render();
-    return;
-  }
-
-  state.research.key = null;
-  if (!RESEARCH_TERMINAL.has(job.state)) {
-    if (cancelling) {
-      // Now there is an id to cancel with. This is the deferred half of the
-      // Cancel that could not be delivered when it was pressed.
-      await requestCancel(id, job.id);
-      return;
-    }
-    // Still running: reconnect to it rather than starting anything.
-    state.research.error = null;
-    state.search = { ...state.search, researchJob: job };
-    adoptResearchJob();
-    return;
-  }
-  applyTerminalResearch(job);
-  render();
-}
-
-/**
- * Put a finished job's outcome on the page.
- *
- * Shared by reconciliation and by re-opening a search, so one job produces one
- * explanation however it was arrived at.
- */
-function applyTerminalResearch(job){
-  const outcome = researchTerminal(job);
-  if (outcome.saved) {
-    toast('That research had already finished and been saved.');
-    void refreshAfterResearch(job.searchId || state.search?.id, 'community');
-    return;
-  }
-  if (outcome.cancelled) { toast('That research was cancelled. Nothing was saved.'); return; }
-  if (outcome.review) state.research.review = outcome.review;
-  if (outcome.error) state.research.error = outcome.error;
 }
 
 async function refreshAfterResearch(searchId, view){
@@ -1256,63 +1062,25 @@ async function cancelResearch(active){
   active.cancelling = true;
   const button = $('#lookup-cancel');
   if (button) { button.disabled = true; button.textContent = 'Cancelling…'; }
-  const { jobId, searchId, key } = active;
+  const { jobId, searchId } = active;
   clearTimeout(active.pollTimer);
   active.controller.abort();
-  // The page comes back straight away and says what is actually known: that
-  // cancellation was requested. It does not say nothing was saved, because at
-  // this instant nobody here knows whether the save had already happened (D03).
-  endResearch(active, { requested: true });
-  // No id means the start was never acknowledged. The key is the only handle on
-  // the operation, so it is reconciled rather than abandoned, because
-  // abandoning it is what let a retry pay for the same work twice.
-  if (!jobId) { await reconcileResearch({ searchId, key, cancelling: true }); return; }
-  await requestCancel(searchId, jobId);
-}
-
-/**
- * Deliver a cancellation and report what the server said.
- *
- * Separate from cancelResearch because reconciliation reaches this point too,
- * with an id it has only just learned.
- */
-async function requestCancel(searchId, jobId){
-  let out;
+  endResearch(active, { cancelled: true });
+  if (!jobId) return;
   try {
-    out = await api('/api/searches/' + searchId + '/research-jobs/' + jobId + '/cancel',
-      { method: 'POST', body: {}, timeoutMs: RESEARCH_CANCEL_TIMEOUT_MS });
+    const out = await api('/api/searches/' + searchId + '/research-jobs/' + jobId + '/cancel', { method: 'POST', body: {} });
+    if (out.alreadyCompleted) {
+      toast('That research had already finished and been saved.');
+      if (state.search?.id === searchId) void refreshAfterResearch(searchId, 'community');
+    } else if (out.job && out.job.reviewable && state.search?.id === searchId) {
+      state.research.review = out.job;
+      render();
+    }
   } catch (error) {
-    if (error.aborted) return;
-    if (state.search?.id !== searchId) return;
-    // The request was not delivered, or its answer was lost. The operation is
-    // bounded by its own deadline on the server either way, so the honest
-    // report is that the outcome is not known here yet.
-    state.research.error = {
-      code: 'RESEARCH_CANCEL_UNSURE',
-      error: 'Slate could not confirm the cancellation. The research stops on its own deadline, but whether it saved first is not known here. Reload this search to see.',
-      missing: [], operation: jobId, retry: false, reload: true, reconcile: false
-    };
-    render();
-    return;
+    // The work is bounded by its own deadline on the server, so a cancel that
+    // could not be delivered is worth saying plainly rather than hiding.
+    if (!error.aborted) toast('Slate could not tell the server to stop; it will stop on its own deadline.');
   }
-  if (state.search?.id !== searchId) return;
-  state.research.key = null;
-  if (out.alreadyCompleted) {
-    toast('That research had already finished and been saved.');
-    void refreshAfterResearch(searchId, 'community');
-    return;
-  }
-  if (out.job && out.job.reviewable) {
-    // Cancelled after the provider had already answered. The findings were paid
-    // for, so they are offered rather than thrown away, and nothing was written
-    // to the file.
-    state.research.review = out.job;
-    toast('Research cancelled. Nothing was saved, but it had already found something. Review it below.');
-    render();
-    return;
-  }
-  toast('Research cancelled. Nothing was saved.');
-  render();
 }
 
 /**
@@ -1326,7 +1094,9 @@ function adoptResearchJob(){
   const job = state.search && state.search.researchJob;
   if (!job || state.research.active) return;
   if (RESEARCH_TERMINAL.has(job.state)) {
-    restoreResearchOutcome(job);
+    // Findings still waiting for a decision are surfaced. A failure that has
+    // already been reported once is not re-announced on every visit.
+    if (job.reviewable && !state.research.review) state.research.review = job;
     return;
   }
   const active = {
@@ -1351,37 +1121,6 @@ function adoptResearchJob(){
   if (!researchStatus(active, job)) pollResearch(active);
 }
 
-/**
- * Put a finished operation's explanation back on the page.
- *
- * A consultant who left while research was running, or whose tab was in the
- * background when it failed, comes back to the reason and the recovery action
- * rather than to a page that looks like nothing ever happened (D04). What they
- * have already dealt with stays dealt with: dismissal is recorded per job.
- */
-function restoreResearchOutcome(job){
-  if (state.research.dismissed[job.id]) return;
-  const outcome = researchTerminal(job);
-  // Saved work needs no notice: it is on the file, which is where it is read.
-  if (outcome.saved || outcome.cancelled) return;
-  if (outcome.review && !state.research.review) state.research.review = outcome.review;
-  if (outcome.error && !state.research.error) state.research.error = outcome.error;
-}
-
-/**
- * "I will fill this in by hand", recorded against the operation it was said
- * about. This was a bare flag, so a reload could not tell a failure that had
- * been read from one that had not.
- */
-function dismissResearchNotice(){
-  for (const id of [state.research.review?.id, state.research.error?.operation]) {
-    if (id) state.research.dismissed[id] = true;
-  }
-  state.research.error = null;
-  state.research.review = null;
-  state.research.draft = null;
-}
-
 /** Nothing from a previous workspace, search, or session may keep running. */
 function stopResearch(){
   const active = state.research.active;
@@ -1390,10 +1129,6 @@ function stopResearch(){
   state.research.error = null;
   state.research.review = null;
   state.research.key = null;
-  // Both are scoped to one search in one workspace, and neither may follow the
-  // consultant to the next one.
-  state.research.dismissed = {};
-  state.research.draft = null;
   if (!active) return;
   clearTimeout(active.pollTimer);
   active.controller.abort();
@@ -1500,104 +1235,37 @@ function abortedError(){
   return error;
 }
 
-/**
- * A request that ran out of time, which is neither a request that was
- * abandoned nor one that failed.
- *
- * Callers have to tell all three apart: "you stopped it", "the server said
- * no", and "we never found out". The third must never be reported as though
- * nothing happened on the server.
- */
-function timedOutError(ms){
-  const error = new Error('The server did not answer within ' + Math.round(ms / 1000) + ' seconds.');
-  error.code = 'REQUEST_TIMEOUT';
-  error.timedOut = true;
-  return error;
-}
-
-// A session token is a network call in front of every other network call, so
-// an authentication service that stopped answering used to leave a request
-// that had not started and a page with nothing to time out (D05).
-const TOKEN_TIMEOUT_MS = 15000;
-
-function authToken(){
-  let timer = null;
-  const bounded = new Promise((_resolve, reject) => {
-    timer = setTimeout(() => {
-      const error = new Error('Slate could not confirm your sign-in in time. Check your connection and try again.');
-      error.code = 'AUTH_TIMEOUT';
-      reject(error);
-    }, TOKEN_TIMEOUT_MS);
-  });
-  return Promise.race([window.SlateAuth.token(), bounded])
-    .finally(() => clearTimeout(timer));
-}
-
-/**
- * One signal for a request, out of the caller's signal and an optional
- * deadline, which also remembers which of them fired.
- *
- * AbortSignal.any would combine them but not tell them apart afterwards, and
- * telling them apart is the whole point.
- */
-function requestDeadline(signal, timeoutMs){
-  if (!timeoutMs) return { signal, timedOut: () => false, release(){} };
-  const own = new AbortController();
-  let fired = false;
-  const timer = setTimeout(() => { fired = true; own.abort(); }, timeoutMs);
-  const relay = () => own.abort();
-  if (signal) {
-    if (signal.aborted) own.abort();
-    else signal.addEventListener('abort', relay, { once: true });
-  }
-  return {
-    signal: own.signal,
-    timedOut: () => fired,
-    release(){
-      clearTimeout(timer);
-      if (signal) signal.removeEventListener('abort', relay);
-    }
-  };
-}
-
 async function api(path, opts={}){
-  const { timeoutMs = 0, signal: given = null, ...rest } = opts;
-  const deadline = requestDeadline(given, timeoutMs);
+  const token = path.startsWith('/api/apply/') ? null : await window.SlateAuth.token();
+  // Acquiring the token is itself a wait. A cancelled operation must not start
+  // a request just because the token promise happened to settle afterwards.
+  if (opts.signal && opts.signal.aborted) throw abortedError();
+  const writesSearch = opts.method && opts.method !== 'GET' && state.search && path.startsWith('/api/searches/'+state.search.id);
+  let res;
   try {
-    const token = path.startsWith('/api/apply/') ? null : await authToken();
-    // Acquiring the token is itself a wait. A cancelled operation must not start
-    // a request just because the token promise happened to settle afterwards.
-    if (given && given.aborted) throw abortedError();
-    if (deadline.timedOut()) throw timedOutError(timeoutMs);
-    const writesSearch = rest.method && rest.method !== 'GET' && state.search && path.startsWith('/api/searches/'+state.search.id);
-    let res;
-    try {
-      res = await fetch(path, {
-        credentials:'include',
-        ...rest,
-        signal: deadline.signal,
-        headers:{ 'content-type':'application/json', ...(token ? { authorization:'Bearer ' + token } : {}), ...(writesSearch ? { 'if-match':String(state.search.revision) } : {}), ...(rest.headers||{}) },
-        body: rest.body ? JSON.stringify(rest.body) : undefined
-      });
-    } catch (error) {
-      // An abort is a decision, not a network fault. A deadline is neither.
-      if (deadline.timedOut()) throw timedOutError(timeoutMs);
-      if ((given && given.aborted) || error.name === 'AbortError' || error.name === 'TimeoutError') throw abortedError();
-      throw error;
-    }
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      const error = new Error(data.error || res.statusText);
-      error.code = data.code;
-      error.status = res.status;
-      error.detail = data;
-      throw error;
-    }
-    if (writesSearch && data.revision) state.search.revision = data.revision;
-    return data;
-  } finally {
-    deadline.release();
+    res = await fetch(path, {
+      credentials:'include',
+      ...opts,
+      headers:{ 'content-type':'application/json', ...(token ? { authorization:'Bearer ' + token } : {}), ...(writesSearch ? { 'if-match':String(state.search.revision) } : {}), ...(opts.headers||{}) },
+      body: opts.body ? JSON.stringify(opts.body) : undefined
+    });
+  } catch (error) {
+    // An abort is a decision, not a network fault, and callers have to be able
+    // to tell them apart: one means "you stopped it", the other means "we do
+    // not know what happened".
+    if ((opts.signal && opts.signal.aborted) || error.name === 'AbortError' || error.name === 'TimeoutError') throw abortedError();
+    throw error;
   }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const error = new Error(data.error || res.statusText);
+    error.code = data.code;
+    error.status = res.status;
+    error.detail = data;
+    throw error;
+  }
+  if (writesSearch && data.revision) state.search.revision = data.revision;
+  return data;
 }
 
 // True when `view` names a process step that this search's package leaves off
@@ -2270,8 +1938,7 @@ function clearWorkspaceState(){
   state.media = {};
   state.search = null; state.searches = []; state.users = [];
   state.sel = null; state.picked = []; state.archives = null; state.history = null;
-  state.followUps = null; state.intake = null; state.intakeConflict = null; state.adoptPlan = null;
-  state.newPin = null; state.newPeople = null;
+  state.followUps = null; state.intake = null; state.newPin = null; state.newPeople = null;
   state.filters = {}; state.open = {}; state.mode = {}; state.tab = {};
   state.scrollMem = {}; state.homeQ = ''; state.searchesError = null;
   state.team = null; state.teamError = null; state.inviteDraft = null;
@@ -2365,10 +2032,7 @@ async function loadSearch(id){
   // changes so answers cannot bleed from one committee into another. Research
   // is the same: an operation on the previous search must not keep reporting
   // into this one.
-  if (state.search?.id !== id) {
-    state.intake = null; state.intakeConflict = null; state.adoptPlan = null;
-    state.newPin = null; state.newPeople = null; stopResearch();
-  }
+  if (state.search?.id !== id) { state.intake = null; state.newPin = null; state.newPeople = null; stopResearch(); }
   state.search = await api('/api/searches/'+id);
   // Research that is already running reconnects here rather than being lost
   // because the page was reloaded or revisited.
@@ -2543,10 +2207,7 @@ function shell(body){
           <button class="rail__link rail__link--sub" data-go="facts" ${state.view==='facts'?'aria-current="page"':''}>Search facts</button>
           <button class="rail__link rail__link--sub" data-go="history" ${state.view==='history'?'aria-current="page"':''}>History and recovery</button>
           <button class="rail__link rail__link--sub" data-act="reload-search">Reload search</button>
-        </div>` : `<button class="rail__link rail__link--dest" data-act="reload-search">
-          <span class="rail__ico">${ico('more', 15)}</span>
-          <span class="rail__label rail__label--dest">Reload search</span>
-        </button>`}
+        </div>` : ''}
       </div>`:''}
       <div class="rail__foot">
         ${railAccount(u, s)}
@@ -3266,16 +2927,14 @@ function activityPanel(s){
 const DASH = {
   committee(s){
     const team = stepState('team'), intake = stepState('intake'), profile = stepState('profile');
-    const answered = s.consensus ? s.consensus.submitted : Object.values(s.intake?.answered||{}).filter(Boolean).length;
+    const answered = s.consensus ? s.consensus.submitted : Object.values(s.intake?.submissions||{}).filter(x => x && x.submitted).length;
     return `<div class="spec"><div class="spec__bar">Committee and profile</div>
       <div class="spec__body stack">
         <div class="rosterline">${(s.roster||[]).map(m =>
           `<span class="rosterchip${m.searchRole==='manager'?' rosterchip--mgr':''}" title="${esc(SEARCH_ROLE[m.searchRole]?.label||m.searchRole)}"><span class="rosterchip__i">${esc(m.init)}</span>${esc(m.name)}${intakeDoneBy(m.userId)?' '+ico('check'):''}</span>`).join('') || '<span class="t-small">Nobody added yet.</span>'}
         </div>
         ${kv('Roster', statusPill(team))}
-        ${kv('Intake', statusPill(intake)+(s.intake?.status==='open'
-          ? ' <span class="t-small">'+answered+' of '+(s.roster||[]).length+' answered</span>'
-          : s.intake?.completedEmpty ? ' <span class="t-small">Completed without committee input</span>' : ''))}
+        ${kv('Intake', statusPill(intake)+(s.intake?.status==='open'?' <span class="t-small">'+answered+' of '+(s.roster||[]).length+' answered</span>':''))}
         ${kv('Profile', statusPill(profile)+' <span class="t-small">'+(s.criteria||[]).filter(c=>c.label).length+' criteria</span>')}
         <div class="row">${openBtn('team','Roster')}${openBtn('intake','Intake')}${openBtn('profile','Profile')}</div>
       </div></div>`;
@@ -3612,7 +3271,7 @@ function vCommittee(){
   const intake = stepState('intake');
   const agg = s.consensus;
   const roster = s.roster || [];
-  const answered = agg ? agg.submitted : Object.values(s.intake?.answered||{}).filter(Boolean).length;
+  const answered = agg ? agg.submitted : Object.values(s.intake?.submissions||{}).filter(x => x && x.submitted).length;
   const onSearch = Boolean(you().searchRole);
   const open = s.intake?.status === 'open';
   const mine = mySubmission();
@@ -3621,28 +3280,20 @@ function vCommittee(){
   return shell(`
     ${head('This search','Committee',
       'Who is on the committee, what they were asked, and the profile their answers produced.',
-      onSearch && open && !mine && canOpenStep('intake')
+      onSearch && open && !(mine && mine.submitted) && canOpenStep('intake')
         ? `<button class="btn btn--primary" data-go="intake-mine">Answer your questionnaire</button>` : '')}
     <div class="band"><div class="wrap stack">
       ${rosterPanel(s)}
       <div class="spec"><div class="spec__bar">Committee input</div>
         <div class="spec__body stack stack--tight">
           ${hubRow('Intake window',
-            open ? `Open${due?' · due '+esc(due):''}. ${answered} of ${roster.length} answered. Saved drafts stay private to whoever wrote them.`
-                 : s.intake?.completedEmpty
-                   ? 'Completed without committee input. No responses were collected; the reason is on the record.'
-                   : s.intake?.status === 'closed'
-                     ? 'Closed. Everyone on the search can read the submitted answers; unsent drafts stay private.'
-                     : 'Not opened yet.',
+            open ? `Open${due?' · due '+esc(due):''}. ${answered} of ${roster.length} answered.`
+                 : s.intake?.status === 'closed' ? 'Closed. Answers are visible to the search team.' : 'Not opened yet.',
             statusPill(intake),
             openBtn('intake', you().consultant ? 'Manage intake' : 'Open the questionnaire', open && !you().consultant))}
           ${onSearch ? hubRow('Your answers',
-            mine
-              ? (intakeHasUnsubmitted()
-                ? 'Submitted and counted. You have saved edits that are not submitted yet.'
-                : 'On file. You can revise them while the window is open.')
-              : open ? 'Not submitted yet.' : 'The window is not open.',
-            mine ? pill(intakeHasUnsubmitted() ? 'wait' : 'ok', intakeHasUnsubmitted() ? 'Edits not submitted' : 'Submitted') : pill('idle','Not submitted'),
+            mine && mine.submitted ? 'On file. You can revise them while the window is open.' : open ? 'Not submitted yet.' : 'The window is not open.',
+            mine && mine.submitted ? pill('ok','Submitted') : pill('idle','Not submitted'),
             open && canOpenStep('intake') ? `<button class="btn btn--secondary btn--sm" data-go="intake-mine">Open your questionnaire</button>` : '') : ''}
           ${hubRow('Adopted profile',
             crit ? crit+' criteria adopted. Screening, surveys, and interviews all score against these.' : 'Not adopted yet. It is built from the committee’s answers.',
@@ -3796,7 +3447,7 @@ function vFacts(){
       </div>` : ''}
       ${actionBar(
         `<button class="btn btn--primary" data-act="save-facts">Save facts</button>`,
-        researchAction('Research this ' + jurisdictionInfo().noun)
+        withTip(`<button type="button" class="btn btn--secondary" data-act="research">Research this ${esc(jurisdictionInfo().noun)}</button>`, TIPS.research)
         + ` <button type="button" class="btn btn--ghost" data-go="verify">County fact verification${factGap(s)}</button>`
         + ` <button type="button" class="btn btn--ghost" data-go="profile">Candidate profile</button>`)}
     </form></div></div>`);
@@ -4206,54 +3857,33 @@ function vTeam(){
  * runs the window and reads the room. A consultant who is both sees both.
  * ========================================================================= */
 
-// This member's own response record: their private draft and their last
-// submitted answer, which are two different things. Nobody else's draft is
-// ever in here, because the server does not send it.
-function myResponse(){
-  return (state.search?.intake?.responses || {})[state.user.id] || null;
-}
-
 function mySubmission(){
-  return myResponse()?.submitted || null;
-}
-
-/** The version this member's next write is a change to. */
-function myResponseRevision(){
-  return Number(myResponse()?.revision || 1);
+  return (state.search?.intake?.submissions || {})[state.user.id] || null;
 }
 
 function intakeDoneBy(userId){
-  // Who has answered is published while the window is open; what they said is
-  // not. One field, so the roster tick never depends on reading an answer.
-  const answered = state.search?.intake?.answered;
-  if (answered && Object.hasOwn(answered, userId)) return Boolean(answered[userId]);
+  const sub = (state.search?.intake?.submissions || {})[userId];
+  if (sub) return Boolean(sub.submitted);
+  // While the window is open the server only ships you your own answer, so
+  // everyone else's status has to come from the consensus roll-up.
   const agg = state.search?.consensus;
   if (!agg) return false;
   return !agg.pending.some(p => p.userId === userId);
 }
 
 // The draft a member is editing lives in state, not the DOM, so adding a line
-// or changing a weight does not lose what they already typed elsewhere. It
-// starts from their saved draft when they have one, and otherwise from what
-// they last submitted, so revising begins with the answer they gave.
+// or changing a weight does not lose what they already typed elsewhere.
 function intakeDraft(){
   if (!state.intake) {
-    const record = myResponse();
-    const start = record?.draft || record?.submitted || null;
+    const mine = mySubmission();
     state.intake = {
-      items: (start?.items || []).map(i => ({ ...i })),
-      mustHave: start?.mustHave || '',
-      dealBreaker: start?.dealBreaker || '',
-      context: start?.context || ''
+      items: (mine?.items || []).map(i => ({ ...i })),
+      mustHave: mine?.mustHave || '',
+      dealBreaker: mine?.dealBreaker || '',
+      context: mine?.context || ''
     };
   }
   return state.intake;
-}
-
-/** Saved-but-unsubmitted edits sitting on top of a submitted answer. */
-function intakeHasUnsubmitted(){
-  const record = myResponse();
-  return Boolean(record?.submitted && record?.draft);
 }
 
 function collectIntakeText(){
@@ -4274,19 +3904,13 @@ function collectIntakeText(){
 }
 
 function intakeRow(item, i){
-  // Five buttons reading "1" to "5" are indistinguishable to a screen reader
-  // once a form holds a dozen of them. Name the priority and the scale, the
-  // same way the profile editor already does (CA-11).
-  const named = String(item.label||'').trim();
-  const what = named || (KIND[item.kind]?.label || 'this priority') + ' ' + (i+1);
   return `<div class="intake-row" data-row="${i}">
     <div class="stack u-gap-6">
-      <input class="input" data-f="label" value="${esc(item.label)}" placeholder="Name it in your own words" aria-label="${esc(named ? 'Priority: '+what : 'Name '+what)}">
-      <input class="input" data-f="note" value="${esc(item.note||'')}" placeholder="Why does this matter here? (optional)" aria-label="Why ${esc(what)} matters here (optional)">
+      <input class="input" data-f="label" value="${esc(item.label)}" placeholder="Name it in your own words">
+      <input class="input" data-f="note" value="${esc(item.note||'')}" placeholder="Why does this matter here? (optional)">
     </div>
-    ${ratingGroup('How much '+what+' matters — 1, nice to have, to 5, decisive',
-      `<div class="wgt">${[1,2,3,4,5].map(n=>`<button type="button" data-iw="${n}" aria-label="Rate ${esc(what)} ${n} of 5" aria-pressed="${Number(item.weight)===n}">${n}</button>`).join('')}</div>`)}
-    <button class="btn btn--ghost btn--sm" data-idel="${i}" aria-label="Remove ${esc(what)}">Remove</button>
+    <div class="wgt" title="How much does this matter?">${[1,2,3,4,5].map(n=>`<button type="button" data-iw="${n}" aria-pressed="${Number(item.weight)===n}">${n}</button>`).join('')}</div>
+    <button class="btn btn--ghost btn--sm" data-idel="${i}">Remove</button>
   </div>`;
 }
 
@@ -4315,36 +3939,9 @@ function intakeGroup(kind){
     </div></section>`;
 }
 
-/**
- * What happened when a save collided with the same member's other tab.
- *
- * Both versions stay on screen and the local rows are never cleared, so
- * recovering is a choice between two readable answers rather than copying text
- * out of a form before reloading (CA-12).
- */
-function intakeConflictPanel(){
-  const c = state.intakeConflict;
-  if (!c) return '';
-  const theirs = c.submitted || c.draft;
-  const describe = answer => !answer ? 'nothing on file' :
-    (answer.items || []).filter(i => String(i.label||'').trim()).map(i => esc(i.label)+' ('+i.weight+')').join(', ') || 'no priorities named';
-  return `<div class="notice notice--stop"><div>
-    <div class="notice__t">Your answers were changed somewhere else</div>
-    <div class="notice__b">Nothing you have typed here was lost, and nothing here was overwritten. Another tab or device saved
-      ${c.submitted ? 'a submitted answer' : 'a draft'} for you${theirs?.updatedAt ? ' on '+esc(String(theirs.updatedAt).slice(0,10)) : ''}.
-      <div class="t-small u-mt-3"><b>Saved elsewhere:</b> ${describe(theirs)}</div>
-      <div class="t-small"><b>On this page:</b> ${describe({ items: intakeDraft().items })}</div>
-      <div class="row u-mt-3">
-        <button type="button" class="btn btn--secondary btn--sm" data-act="intake-keep-mine">Keep what is on this page</button>
-        <button type="button" class="btn btn--ghost btn--sm" data-act="intake-take-theirs">Use the version saved elsewhere</button>
-      </div></div>
-  </div></div>`;
-}
-
 function vIntakeAnswer(){
   const s = state.search;
   const intake = s.intake || {};
-  const record = myResponse();
   const mine = mySubmission();
   const d = intakeDraft();
   const open = intake.status === 'open';
@@ -4352,29 +3949,17 @@ function vIntakeAnswer(){
   const count = d.items.filter(i => String(i.label||'').trim()).length;
   return shell(`
     ${head('Step '+stepNo('intake'), 'What are you looking for?',
-      'Answer for yourself. Anything you save without submitting stays yours alone. Once you submit, the search team can read your '
-      + 'answer while they facilitate, and the rest of the committee reads it after the account manager closes the window.')}
+      'Answer for yourself. Nobody on the committee sees your answers, or anyone else’s, until the account manager closes the window. Then everything is read together.')}
     <div class="band"><div class="wrap stack">
-      ${intakeConflictPanel()}
       ${!open ? `<div class="notice notice--${closed?'ok':'info'}"><div>
         <div class="notice__t">${closed ? 'Intake is closed' : 'Intake has not opened yet'}</div>
         <div class="notice__b">${closed
           ? 'The window is shut and the committee’s answers have been read together. Ask '+esc(s.accountManager?.name||'the account manager')+' if you still need to add something.'
           : esc(s.accountManager?.name||'The account manager')+' will open it when the roster is set.'}</div>
       </div></div>` : ''}
-      ${mine ? `<div class="notice notice--${intakeHasUnsubmitted()?'wait':'ok'}"><div>
-        <div class="notice__t">${intakeHasUnsubmitted() ? 'Submitted — you have unpublished changes' : 'Your answers are in'}</div>
-        <div class="notice__b">Submitted ${esc((mine.submittedAt||mine.updatedAt||mine.at||'').slice(0,10))} and counted in the tally.
-          ${intakeHasUnsubmitted() ? 'Your saved edits are private until you choose <b>Update my answers</b>; until then the tally still shows what you submitted.' : ''}
-          ${open?'You can change them while the window is open.':''}</div>
-      </div></div>` : ''}
-      ${!mine && record?.draft ? `<div class="notice notice--info"><div>
-        <div class="notice__t">Saved, not submitted</div>
-        <div class="notice__b">Only you can read this. It is not in the tally and the search team cannot see it until you submit.</div>
-      </div></div>` : ''}
-      ${record?.withdrawnAt ? `<div class="notice notice--wait"><div>
-        <div class="notice__t">You withdrew your answers</div>
-        <div class="notice__b">They are out of the tally and back in your own draft. Anything already built from them stays on file and is marked as resting on earlier answers. Submit again to count.</div>
+      ${mine?.submitted ? `<div class="notice notice--ok"><div>
+        <div class="notice__t">Your answers are in</div>
+        <div class="notice__b">Submitted ${esc((mine.updatedAt||mine.at||'').slice(0,10))}. ${open?'You can still change them while the window is open.':''}</div>
       </div></div>` : ''}
       ${intake.dueBy ? `<div class="t-small"><b>Due:</b> ${esc(intake.dueBy)}</div>` : ''}
       ${intake.prompt ? `<div class="spec"><div class="spec__bar">From the account manager</div><div class="spec__body"><p>${esc(intake.prompt)}</p></div></div>` : ''}
@@ -4393,19 +3978,12 @@ function vIntakeAnswer(){
           ${field('What would make you say no?','', `<textarea class="input ed" id="intake-dealBreaker" rows="3">${esc(d.dealBreaker)}</textarea>`)}
           ${field('Anything else the search team should know','', `<textarea class="input ed" id="intake-context" rows="3">${esc(d.context)}</textarea>`)}
         </div></section>
-        ${beforeYouAct('<b>Save and finish later</b> keeps a private draft: '
-          + (mine ? 'the answers you already submitted stay exactly as they are.' : 'nobody can read it.')
-          + ' ' + esc(TIPS.submitIntake))}
         ${actionBar(
-          `<button type="button" class="btn btn--primary" data-act="submit-intake">${mine?'Update my answers':'Submit my answers'}</button>`,
+          `<button type="button" class="btn btn--primary" data-act="submit-intake">${mine?.submitted?'Update my answers':'Submit my answers'}</button>`,
           withTip(`<button type="button" class="btn btn--secondary" data-act="save-intake">Save and finish later</button>`,
-            mine
-              ? 'Keep these edits privately. Your submitted answers stay in the tally until you choose Update my answers.'
-              : 'Keep what you have written without submitting it. Nobody reads it until you submit.')
-          + (mine ? withTip(`<button type="button" class="btn btn--ghost" data-act="withdraw-intake">Withdraw my answers</button>`,
-            'Take your submitted answers out of the tally. They come back to you as a private draft.') : ''),
+            'Keep what you have written without submitting it. Nobody reads it until you submit.'),
           count+' named so far.',
-          mine ? (intakeHasUnsubmitted() ? 'Saved edits not submitted' : 'Submitted') : 'Not submitted yet')}` : ''}
+          'Not submitted yet')}` : ''}
       ${closed && s.consensus ? consensusPanels(s.consensus, false) : ''}
       ${!open ? stepFooter('intake') : ''}
     </div></div>`);
@@ -4435,14 +4013,7 @@ function consensusPanels(agg, showEmpty=true){
     return showEmpty ? `<div class="empty"><div class="empty__t">Nothing submitted yet</div>Consensus appears as members answer.</div>` : '';
   }
   const kinds = [['skill','Essential skills'],['trait','Leadership and personality traits'],['chall','Current challenges'],['opp','Future opportunities']];
-  // Participation and support, said once and together. Every count below is
-  // out of the people who answered, and somebody not naming an item is not a
-  // vote against it.
-  const turnout = `<p class="t-small">${agg.submitted} of ${agg.asked} people asked submitted answers.
-    Each count below is out of those ${agg.submitted}. Somebody who did not name an item was not voting against it.
-    Matching is by wording, so “Budgeting” and “Financial management” stay separate entries.
-    The must-have, deal-breaker and context answers are guidance for the search team, not rules the profile enforces.</p>`;
-  return turnout + kinds.map(([k,label]) => {
+  return kinds.map(([k,label]) => {
     const list = agg.byKind[k] || [];
     return `<div class="spec"><div class="spec__bar">${esc(label)} ${pill(list.length>=3?'ok':'wait', list.length+' named')}</div>
       <div class="spec__body stack">
@@ -4455,60 +4026,6 @@ function consensusPanels(agg, showEmpty=true){
       ${v.dealBreaker ? `<div class="t-small"><b>No to:</b> ${esc(v.dealBreaker)}</div>` : ''}
       ${v.context ? `<div class="t-small"><b>Also:</b> ${esc(v.context)}</div>` : ''}
     </div>`).join('')}</div></div>` : '');
-}
-
-/**
- * The proposed profile, before it is saved.
- *
- * Rebuilding used to quietly carry an old committee item forward with its old
- * "named by 2 of 2" still attached, and to drop hand-written criteria past the
- * cap without saying so. Every one of those is a line on this panel, and
- * keeping an unsupported item is a decision with a reason on it (CA-03).
- */
-function adoptPlanPanel(){
-  const plan = state.adoptPlan;
-  if (!plan) return '';
-  const c = plan.changes || {};
-  const retained = new Set(plan.retain || []);
-  const line = (row, extra='') => `<li><b>${esc(row.label)}</b> <span class="mono t-small">${esc(row.id||'')}</span>
-    <span class="t-small">${esc(KIND[row.kind]?.label || row.kind)}</span>${extra}</li>`;
-  const group = (title, rows, render) => rows.length
-    ? `<div class="spec"><div class="spec__bar">${esc(title)} ${pill('idle', String(rows.length))}</div>
-        <div class="spec__body"><ul class="stack stack--tight">${rows.map(render).join('')}</ul></div></div>` : '';
-  return `<div class="spec" id="adoptplan"><div class="spec__bar">Review the proposed profile</div>
-    <div class="spec__body stack">
-      <p class="t-small">Built from ${plan.respondents} of ${plan.participants} who were asked. Nothing is saved until you confirm.</p>
-      ${group('Arriving from the committee', c.added || [], r => line(r,
-        ` <span class="t-small">named by ${r.mentions} of ${plan.respondents}${r.contested?', contested':''}</span>`))}
-      ${group('Already on the profile, support refreshed', c.changed || [], r => line(r,
-        ` <span class="t-small">now named by ${r.mentions} of ${plan.respondents}${r.was && r.was.label !== r.label ? '; you renamed it from “'+esc(r.was.label)+'”' : ''}</span>`))}
-      ${group('Proposed for removal — nobody names these now', c.removed || [], r => `<li>
-        <b>${esc(r.label)}</b> <span class="mono t-small">${esc(r.id)}</span>
-        <div class="t-small">${esc(r.why)}</div>
-        <label class="t-small"><input type="checkbox" data-retain="${esc(r.id)}" ${retained.has(r.id)?'checked':''}>
-          Keep it anyway, as my decision</label>
-        ${retained.has(r.id) ? `<input class="input" data-retain-reason="${esc(r.id)}" placeholder="Why keep it? Recorded with the profile." value="${esc((plan.retainReasons||{})[r.id]||'')}">` : ''}
-      </li>`)}
-      ${group('Your own criteria, kept', c.kept || [], r => line(r))}
-      ${group('Kept by your decision — support describes earlier answers', c.retained || [], r => line(r,
-        ` <span class="t-small">${esc(r.why)}</span>`))}
-      ${group('Excluded — the category holds five', c.excluded || [], r => `<li>
-        <b>${esc(r.label)}</b> <span class="t-small">${esc(KIND[r.kind]?.label || r.kind)} — ${esc(r.why)}</span></li>`)}
-      ${(plan.discussion || []).length ? `<div class="spec"><div class="spec__bar">For discussion, not on the profile ${pill('stop', String(plan.discussion.length))}</div>
-        <div class="spec__body stack">${plan.discussion.map(d => `<div class="t-small">
-          <b>${esc(d.label)}</b> — named by ${d.mentions} of ${d.respondents}, rated ${d.minWeight} to ${d.maxWeight}${d.contested?', contested':''}.
-          ${(d.reasons||[]).slice(0,3).map(r => esc((r.name||'A member')+': '+r.note)).join(' · ')}
-        </div>`).join('')}</div></div>` : ''}
-      ${(plan.gaps || []).length
-        ? `<p class="t-small"><b>The finished profile would still be short in:</b> ${plan.gaps.map(g=>esc(g.label.toLowerCase())).join(', ')}.</p>`
-        : `<p class="t-small">Every category would have 3 to 5 criteria.</p>`}
-      ${(plan.coverage || []).length
-        ? `<p class="t-small">The committee named fewer than three items in ${plan.coverage.map(g=>esc(g.label.toLowerCase())).join(', ')}. That is what they nominated, which is a different thing from what the profile still needs.</p>` : ''}
-      <div class="row">
-        <button type="button" class="btn btn--primary" data-act="adopt-apply">Save this profile</button>
-        <button type="button" class="btn btn--ghost" data-act="adopt-cancel">Cancel</button>
-      </div>
-    </div></div>`;
 }
 
 function vIntakeManage(){
@@ -4553,35 +4070,15 @@ function vIntakeManage(){
         <p class="t-small">You can close the window without them. They can still score candidates later.</p>
         </div></div>` : ''}
 
-      ${!mine && you().member ? `<div class="notice notice--info"><div>
+      ${!mine?.submitted && you().member ? `<div class="notice notice--info"><div>
         <div class="notice__t">You have not answered yet</div>
         <div class="notice__b">Your own answers are counted in the tally too. <button class="btn btn--ghost btn--sm" data-go="intake-mine">Answer now</button></div>
       </div></div>` : ''}
 
-      ${intake.rosterChangedAt && open ? `<div class="notice notice--stop"><div>
-        <div class="notice__t">The roster changed while the window is open</div>
-        <div class="notice__b">Everyone on the roster, including anyone just added, can keep answering. Confirm the roster again in Step ${stepNo('team')} before you close the window or publish the profile — who was asked is part of what “${agg?agg.submitted:0} of ${agg?agg.asked:0} answered” means.
-          <button class="btn btn--ghost btn--sm" data-go="team">Open the roster</button></div>
-      </div></div>` : ''}
-
       ${!closed ? `<div class="notice notice--info"><div>
-        <div class="notice__t">Who can read what, while the window is open</div>
-        <div class="notice__b">A member's saved draft is theirs alone — nobody else reads it, including you and including after the window closes.
-          A <b>submitted</b> answer can be read by the search team in this workspace, because you facilitate; the rest of the committee
-          reads submitted answers only once you close the window, so nobody times their own answer against the count.
-          Matching is by wording, so “Budgeting” and “Financial management” stay separate entries.</div>
-      </div></div>` : `<div class="notice notice--ok"><div>
-        <div class="notice__t">The window is closed</div>
-        <div class="notice__b">Submitted answers are now readable by everyone on the search. Drafts nobody submitted are still private to their author.
-          Reopening collects new input under the same rules — it does not take back anything already shared.</div>
-      </div></div>`}
-
-      ${intake.completedEmpty ? `<div class="notice notice--wait"><div>
-        <div class="notice__t">Completed without committee input</div>
-        <div class="notice__b">${esc(intake.completedEmpty.byName||'The account manager')} recorded this on ${esc(String(intake.completedEmpty.at||'').slice(0,10))}: “${esc(intake.completedEmpty.reason)}”. No responses were collected.</div>
+        <div class="notice__t">Answers are private until you close the window</div>
+        <div class="notice__b">You can read the running tally because you are facilitating. The committee cannot, so nobody times their answer against the count.</div>
       </div></div>` : ''}
-
-      ${adoptPlanPanel()}
 
       <div class="sub">What the committee said</div>
       ${agg ? consensusPanels(agg) : ''}
@@ -4589,12 +4086,9 @@ function vIntakeManage(){
       ${agg && agg.submitted ? `<div class="next">
         <div class="t-label">Turn this into the profile</div>
         <h2>Step ${stepNo('profile')}. Adopt the candidate profile</h2>
-        <p class="t-small">Ranked by how many of the people who answered named each item, weighted by how much they said it mattered. You review what would change before anything is saved.</p>
+        <p class="t-small">Ranked by how many members named each item, weighted by how much they said it mattered. Anything you have already written by hand is kept behind the consensus. You edit it afterward.</p>
         <div class="row">
-          ${closed
-            ? `<button class="btn btn--primary" data-act="adopt-preview">Review what this would change</button>`
-            : `<button class="btn btn--primary" disabled>Review what this would change</button>
-               <span class="t-small">Close the window first. Building the profile publishes what the committee said to everyone on the search.</span>`}
+          <button class="btn btn--primary" data-act="adopt-consensus">Build the profile from this</button>
           <button class="btn btn--secondary" data-go="profile">Open Step ${stepNo('profile')}</button>
         </div>
       </div>` : ''}
@@ -4622,59 +4116,23 @@ function kindTotal(kind){
   return (state.search.criteria||[]).filter(c => c.kind===kind).length;
 }
 
-// Where a profile line came from, read off the line's own source record rather
-// than by looking its label up in today's tally. Editing the wording is not a
-// change of origin, and a hand-written criterion cannot acquire somebody
-// else's support by happening to match their words (CA-08).
-function critOrigin(c){
-  return c && c.source && c.source.key ? c.source : null;
-}
-
-/** The evidence this line was adopted on, as it stood at adoption. */
-function adoptedEvidence(c){
-  const origin = critOrigin(c);
-  if (!origin) return null;
-  return (state.search?.adoption?.groups || []).find(g => g.key === origin.key) || null;
-}
-
-/** What the committee says about this line now, if they still say anything. */
-function currentSupport(c){
-  const origin = critOrigin(c);
+// The consensus entry a profile line came from, matched on the label so the
+// badge survives the consultant renaming or reweighting it.
+function consensusFor(kind, label){
   const agg = state.search?.consensus;
-  if (!origin || !agg) return null;
-  return (agg.byKind[c.kind] || []).find(e => e.key === origin.key) || null;
+  if (!agg) return null;
+  const want = String(label||'').trim().toLowerCase();
+  if (!want) return null;
+  return (agg.byKind[kind] || []).find(e => e.label.trim().toLowerCase() === want) || null;
 }
 
 function critSource(c){
-  const origin = critOrigin(c);
-  const now = currentSupport(c);
-  const then = adoptedEvidence(c);
-  if (origin && now) {
-    return `<span class="crit-src">${pill(now.contested?'stop':'ok', now.mentions+' of '+state.search.consensus.submitted)}${now.contested?pill('stop','Contested'):''}</span>`;
+  const e = consensusFor(c.kind, c.label);
+  if (e) {
+    return `<span class="crit-src">${pill(e.contested?'stop':'ok', e.mentions+' of '+state.search.consensus.submitted)}${e.contested?pill('stop','Contested'):''}</span>`;
   }
-  if (origin && origin.support === 'historical') {
-    // Kept deliberately, and dated. The count it carries describes the answers
-    // that were on file then, not the ones on file now.
-    return `<span class="crit-src">${pill('wait', then ? then.mentions+' of '+then.respondents+' on '+String(origin.retainedAt||origin.at||'').slice(0,10) : 'Earlier answers')}</span>`;
-  }
-  if (origin && then) {
-    return `<span class="crit-src">${pill('wait', then.mentions+' of '+then.respondents+' on '+String(then.at||origin.at||'').slice(0,10))}</span>`;
-  }
-  if (c.from === 'committee') return `<span class="crit-src">${pill('wait','From the committee')}</span>`;
   if (c.from === 'draft') return `<span class="crit-src">${pill('info','Drafted')}</span>`;
   return `<span class="crit-src">${pill('idle','Yours')}</span>`;
-}
-
-/** The disagreement behind an adopted line, if the committee had any. */
-function critEvidence(c){
-  const then = adoptedEvidence(c);
-  if (!then) return '';
-  const reasons = (then.reasons || []).slice(0, 4);
-  if (!then.contested && !reasons.length) return '';
-  return `<div class="t-small crit-evid">
-    ${then.contested ? `<b>The committee disagreed.</b> Rated as low as ${then.minWeight} and as high as ${then.maxWeight} by the ${then.mentions} of ${then.respondents} who named it. Both readings are below; neither was merged into the other.` : ''}
-    ${reasons.length ? `<div>${reasons.map(r => esc((r.name||'A member')+' ('+r.weight+'): '+r.note)).join('<br>')}</div>` : ''}
-  </div>`;
 }
 
 function critRow(c, i){
@@ -4687,8 +4145,7 @@ function critRow(c, i){
     </div>
     ${ratingGroup('Weight for '+name+' — 1, nice to have, to 5, decisive',
       `<div class="wgt">${[1,2,3,4,5].map(n=>`<button type="button" data-w="${n}" aria-label="Weight ${n} of 5 for ${esc(name)}" aria-pressed="${Number(c.weight)===n}">${n}</button>`).join('')}</div>`)}
-    <button type="button" class="btn btn--ghost btn--sm" data-del="${i}" aria-label="Remove ${esc(name)}">Remove</button>
-    ${critEvidence(c)}
+    <button type="button" class="btn btn--ghost btn--sm" data-del="${i}">Remove</button>
   </div>`;
 }
 
@@ -4723,34 +4180,18 @@ function vProfile(){
         'What the search is looking for, adopted from the committee’s answers. Candidates are screened and interviewed against these.',
         nextBtn('profile'))}
       <div class="band"><div class="wrap stack">
-        ${s.profileWithheld ? `<div class="notice notice--info"><div>
-          <div class="notice__t">Not published yet</div>
-          <div class="notice__b">${esc(s.profileWithheld.reason)}</div>
-        </div></div>` : ''}
-        ${!s.profileWithheld && !(s.criteria||[]).length ? `<div class="empty"><div class="empty__t">Not adopted yet</div>${esc(s.accountManager?.name||'The account manager')} builds this from committee input.</div>` : ''}
-        ${s.adoption ? `<div class="notice notice--ok"><div>
-          <div class="notice__t">Built from committee input on ${esc(String(s.adoption.at||'').slice(0,10))}</div>
-          <div class="notice__b">${s.adoption.respondents} of ${s.adoption.participants} people asked submitted answers. A badge of
-            “${s.adoption.respondents ? '2 of '+s.adoption.respondents : 'x of y'}” counts the people who answered and named that item —
-            not naming something is not a vote against it. The narratives members wrote are guidance for the search team, not rules the profile enforces.
-            ${s.sourceChanged ? '<b>Committee input has changed since this was adopted.</b> The profile below is the one that was adopted; its counts describe the answers on file at that time.' : ''}</div>
-        </div></div>` : ''}
+        ${!(s.criteria||[]).length ? `<div class="empty"><div class="empty__t">Not adopted yet</div>${esc(s.accountManager?.name||'The account manager')} builds this from committee input.</div>` : ''}
         ${Object.keys(KIND).map(k => {
           const rows = labeledKind(k, s.criteria);
           if (!rows.length) return '';
           return `<div class="spec"><div class="spec__bar">${KIND[k].plural}</div>
             <div class="spec__body stack">${rows.map(c => `
               <div class="crit-read">
-                <span class="mono t-small">${esc(c.id)}${critSource(c)}</span>
-                <div><b>${esc(c.label)}</b>${c.note?`<div class="t-small">${esc(c.note)}</div>`:''}${critEvidence(c)}</div>
+                <span class="mono t-small">${esc(c.id)}</span>
+                <div><b>${esc(c.label)}</b>${c.note?`<div class="t-small">${esc(c.note)}</div>`:''}</div>
                 <span class="t-small mono">weight ${esc(c.weight)}</span>
               </div>`).join('')}</div></div>`;
         }).join('')}
-        ${(s.adoption?.discussion || []).length ? `<div class="spec"><div class="spec__bar">Raised, and not on the profile</div>
-          <div class="spec__body stack">
-            <p class="t-small">The committee named these, and the profile holds five per category. They are recorded for discussion rather than dropped.</p>
-            ${s.adoption.discussion.map(d => `<div class="t-small"><b>${esc(d.label)}</b> — named by ${d.mentions} of ${d.respondents}, rated ${d.minWeight} to ${d.maxWeight}${d.contested?', contested':''}.</div>`).join('')}
-          </div></div>` : ''}
         ${stepFooter('profile')}
       </div></div>`);
   }
@@ -4805,24 +4246,12 @@ function vProfile(){
   return shell(`
     ${head('Step '+stepNo('profile'),'Candidate profile','This is the spine. Built from what the committee said in Step '+stepNo('intake')+', then edited by you. Recruiting markets it. Surveys test it. Interviews evidence it.')}
     <div class="band"><div class="wrap stack">
-      ${s.sourceChanged ? `<div class="notice notice--stop"><div>
-        <div class="notice__t">Committee input has changed since this profile was adopted</div>
-        <div class="notice__b">The profile has not been altered, and it will not be: a changed answer is something to look at, not an automatic edit to a
-          published record. The support badges below describe the answers on file when each line was adopted.
-          <button type="button" class="btn btn--ghost btn--sm" data-act="adopt-preview">Review what rebuilding would change</button></div>
-      </div></div>` : ''}
-      ${s.adoptionProvenance === 'unverified' ? `<div class="notice notice--wait"><div>
-        <div class="notice__t">This profile's committee provenance is not on file</div>
-        <div class="notice__b">It was adopted before Slate recorded what each line rested on, so there is no stored evidence for its support claims and
-          today's tally is not that evidence. The committee does not see this profile until you review and save it.</div>
-      </div></div>` : ''}
       ${agg?.submitted ? `<div class="notice notice--${adopted?'ok':'info'}"><div>
-        <div class="notice__t">${agg.submitted} of ${agg.asked} people asked submitted answers</div>
+        <div class="notice__t">${agg.submitted} of ${agg.asked} on the committee answered</div>
         <div class="notice__b">${adopted
-          ? 'This profile was built from their answers. Each badge counts the people who answered and named that line; it follows the line, not its wording, so renaming one does not change where it came from. Not naming something is not a vote against it.'
+          ? 'This profile was built from their answers. The badge on each line shows how many of them named it. Edit freely; the badges follow the label.'
           : 'Build the matrix from their answers rather than typing it from memory, then edit.'}
-          ${agg.contested.length ? ' <b>'+agg.contested.length+'</b> item'+(agg.contested.length===1?' is':'s are')+' contested — the committee disagrees on how much '+(agg.contested.length===1?'it matters':'they matter')+'. Disagreement is kept as disagreement rather than averaged away.' : ''}
-          Matching is by wording, so “Budgeting” and “Financial management” stay separate entries.
+          ${agg.contested.length ? ' <b>'+agg.contested.length+'</b> item'+(agg.contested.length===1?' is':'s are')+' contested — the committee disagrees on how much '+(agg.contested.length===1?'it matters':'they matter')+'.' : ''}
           <button type="button" class="btn btn--ghost btn--sm" data-go="intake">See what they said</button></div>
       </div></div>` : `<div class="notice notice--info"><div>
         <div class="notice__t">No committee input on file</div>
@@ -4842,24 +4271,9 @@ function vProfile(){
           </div>
         </div>
       </div>
-      ${(s.adoption?.discussion || []).length ? `<div class="spec"><div class="spec__bar">Raised, and not on the profile ${pill('stop', String(s.adoption.discussion.length))}</div>
-        <div class="spec__body stack">
-          <p class="t-small">The committee named these and the cap is five per category. They are kept for the conversation rather than forced into a slot.</p>
-          ${s.adoption.discussion.map(d => `<div class="t-small"><b>${esc(d.label)}</b> — ${esc(KIND[d.kind]?.label||d.kind)}, named by ${d.mentions} of ${d.respondents}, rated ${d.minWeight} to ${d.maxWeight}${d.contested?', contested':''}.
-            ${(d.reasons||[]).slice(0,3).map(r => esc((r.name||'A member')+': '+r.note)).join(' · ')}</div>`).join('')}
-        </div></div>` : ''}
-      ${agg?.submitted && canManage()
-        ? beforeYouAct(esc(TIPS.adoptPreview) + ' Adoption is a save: it sets the criteria every candidate is scored against, and it is recorded with the answers it rested on.')
-        : ''}
-      ${!canManage() && canEdit()
-        ? beforeYouAct(esc(askManager() + ' Adopting the profile is their decision; prepare it here and ask them to review it.'))
-        : ''}
       ${actionBar(
         `<button type="button" class="btn btn--primary" data-act="save-profile">Save profile</button>`,
-        `${agg?.submitted && canManage() ? withTip(`<button type="button" class="btn btn--secondary" data-act="adopt-preview" ${s.intake?.status==='closed'?'':'disabled'}>${adopted?'Rebuild from committee':'Build from committee'}</button>`,
-          s.intake?.status==='closed'
-            ? 'Show what the committee’s answers would add, change and remove. Nothing is saved until you confirm it.'
-            : 'Close the committee input window first. Building the profile publishes what the committee said to everyone on the search.') : ''}
+        `${agg?.submitted && canManage() ? withTip(`<button type="button" class="btn btn--secondary" data-act="adopt-consensus">${adopted?'Rebuild from committee':'Build from committee'}</button>`, 'Replace this matrix with what the committee named, ranked by how many of them named it.') : ''}
          <button type="button" class="btn btn--secondary" data-act="save-profile-next">Save and move on</button>`,
         profileGaps(s.criteria||[]).length
           ? 'Still needed: '+esc(profileGaps(s.criteria||[]).join(', '))+'.'
@@ -5485,65 +4899,6 @@ function communityEmptyNotice(s){
   return `<div class="notice notice--info"><div><div class="notice__t">The community profile is not written yet</div><div class="notice__b">${body}</div></div></div>`;
 }
 
-/* ===========================================================================
- * Whether research can run, decided once
- *
- * Search facts offered an always-enabled button and sent people to the profile
- * only after they had pressed it; Community disabled the same action and
- * explained why. Two screens, two answers, one operation (D06). This is the
- * answer, and both screens render it.
- * ========================================================================= */
-
-function researchEligibility(){
-  const s = state.search;
-  if (!s) return { ok: false, why: 'Open a search first.' };
-  // Research writes to the search file, which is the firm's work.
-  if (isCommittee()) return { ok: false, why: 'Only the search team can run research on this file.' };
-  if (isFrozen(s)) {
-    return { ok: false, why: 'This search is ' + lifecycleOf(s) + ', so nothing new is written to it. Reopen it to research again.' };
-  }
-  if (state.research.active) {
-    return { ok: false, why: 'Research is already running on this search. Cancel it if you want to start again.' };
-  }
-  const profileDone = (s.steps || []).find(st => st.key === 'profile')?.status === 'done';
-  if (!profileDone) {
-    return {
-      ok: false,
-      // The same sentence on both screens, and it names the step rather than
-      // waiting for a click to redirect there.
-      why: 'Research runs once the candidate profile is adopted (Step ' + stepNo('profile') + ').',
-      go: 'profile'
-    };
-  }
-  if (!state.health?.hasKey) {
-    return { ok: false, why: 'No API key is configured, so research is unavailable. You can fill these facts by hand.' };
-  }
-  return { ok: true };
-}
-
-/**
- * The research action, with its availability and its explanation attached.
- *
- * Rendered from researchEligibility so the button state and the sentence beside
- * it can never disagree, and so neither can differ between screens.
- */
-function researchAction(label){
-  const verdict = researchEligibility();
-  const button = '<button type="button" class="btn btn--secondary" data-act="research"'
-    + (verdict.ok ? '' : ' disabled') + '>' + esc(label) + '</button>';
-  return withTip(button, TIPS.research)
-    + (verdict.ok ? '' : ' <span class="t-small">' + esc(verdict.why) + '</span>');
-}
-
-/**
- * What the lookup form should show: what was last typed, if a failed attempt
- * left it behind, and otherwise the file.
- */
-function researchDraftValue(field, fallback){
-  const held = state.research.draft && String(state.research.draft[field] || '').trim();
-  return held || fallback || '';
-}
-
 /**
  * Why the last research attempt did not land, and what to do about it.
  *
@@ -5563,7 +4918,6 @@ function researchFailurePanel(){
       ${missing}
       <div class="row u-mt-3">
         ${e.retry ? `<button type="button" class="btn btn--secondary btn--sm" data-act="research">Try research again</button>` : ''}
-        ${e.reconcile ? `<button type="button" class="btn btn--primary btn--sm" data-act="research-reconcile">Check what happened</button>` : ''}
         ${e.reload ? `<button type="button" class="btn btn--secondary btn--sm" data-act="reload-search">Reload this search</button>` : ''}
         <button type="button" class="btn btn--ghost btn--sm" data-act="research-dismiss">Fill the facts by hand</button>
       </div>
@@ -5615,9 +4969,7 @@ function vCommunity(){
   const s = state.search, meta = DRAFTS.community, has = Boolean(s.artifacts?.community);
   const profileDone = (s.steps||[]).find(st=>st.key==='profile')?.status==='done';
   const mode = docMode('community');
-  // Whether research is available, and why not, is researchEligibility's
-  // answer now (D06). This screen only decides whether to lead with the
-  // profile prerequisite as a notice rather than as a sentence on a button.
+  const aiReady = Boolean(state.health?.hasKey);
   return shell(`
     ${head('Step '+stepNo('community'), meta.title, meta.lede)}
     <div class="band"><div class="wrap stack">
@@ -5631,8 +4983,8 @@ function vCommunity(){
       ${mode==='edit' ? `
         ${sectionHead('Look this jurisdiction up')}
         <form id="citylookup" class="formgrid">
-          ${field(jurisdictionInfo().key==='county'?'County':'Jurisdiction','', `<input class="input" name="city" value="${esc(researchDraftValue('city', s.client))}" placeholder="${esc(jurisdictionInfo().clientPlaceholder)}">`)}
-          ${field('Official website','http or https', `<input class="input" name="website" value="${esc(researchDraftValue('website', s.website))}" placeholder="https://www.fcgov.com">`)}
+          ${field(jurisdictionInfo().key==='county'?'County':'Jurisdiction','', `<input class="input" name="city" value="${esc(s.client||'')}" placeholder="${esc(jurisdictionInfo().clientPlaceholder)}">`)}
+          ${field('Official website','http or https', `<input class="input" name="website" value="${esc(s.website||'')}" placeholder="https://www.fcgov.com">`)}
         </form>
         <p class="t-small">A research agent reads the official site, Census, and budget documents, then fills the facts on this search. It will not invent numbers. Check the file before you use it in recruiting.</p>
         ${modelToggle()}
@@ -5650,7 +5002,9 @@ function vCommunity(){
              : emptyState('Nothing to preview yet','Switch to Edit and research the jurisdiction, or write the profile by hand.'))}
       ${actionBar(
         `<button type="button" class="btn btn--primary" data-act="save-art" data-kind="community">Save edits</button>`,
-        `${researchAction('Research this ' + jurisdictionInfo().noun)}
+        `${withTip(`<button type="button" class="btn btn--secondary" data-act="research" ${profileDone && aiReady ?'':'disabled'}>Research this ${esc(jurisdictionInfo().noun)}</button>`, TIPS.research)}
+         ${!profileDone ? '<span class="t-small">Research runs once the candidate profile is adopted.</span>'
+           : !aiReady ? '<span class="t-small">No API key is configured, so research is unavailable. You can write this profile by hand.</span>' : ''}
          <button type="button" class="btn btn--secondary" data-act="next-step" data-from="community">Next · Initial survey</button>`,
         'Saved edits stay on the file.',
         'Unsaved edits')}
@@ -6450,8 +5804,6 @@ function vApply(){
           <div class="q__hd"><span class="q__n" aria-hidden="true">${String(q.n).padStart(2,'0')}</span><span class="q__t" id="q${q.n}-label">${esc(q.prompt)}${q.required?' <span class="req" aria-hidden="true">*</span>':''}</span></div>
           <div class="q__bd"><textarea class="input ed" name="q${q.n}" id="q${q.n}-input" aria-labelledby="q${q.n}-label" ${q.required?'required aria-required="true"':''}>${esc(draftAnswers['q'+q.n] || '')}</textarea></div>
         </div>`).join('')}
-      ${beforeYouAct('<b>Save draft</b> keeps your answers and lets you return with this same link. '
-        + 'Your questionnaire is not submitted until you select <b>Submit questionnaire</b>.')}
       <div class="applybar">
         <button class="btn btn--primary" type="submit">Submit questionnaire</button>
         <button class="btn btn--secondary" type="button" data-act="save-apply-draft" data-which="${which}">Save draft</button>
@@ -6794,12 +6146,6 @@ function focusKey(el){
   if (el.id) return '#' + el.id;
   const row = el.closest?.('[data-row]');
   if (row && el.dataset.f) return '[data-row="'+row.dataset.row+'"] [data-f="'+el.dataset.f+'"]';
-  // A rating button, in intake and in the profile editor. Rating a priority
-  // redraws the row, and the keyboard has to stay on the scale it was using
-  // rather than being dropped at the top of the form.
-  for (const attr of ['iw', 'w']) {
-    if (row && el.dataset[attr]) return '[data-row="'+row.dataset.row+'"] [data-'+attr+'="'+el.dataset[attr]+'"]';
-  }
   if (el.dataset.path) return '[data-path="'+el.dataset.path+'"]';
   // Suggestion chips and add/remove controls: identified by what they act on,
   // so the keyboard stays where it was after the list redraws.
@@ -7047,27 +6393,6 @@ function artHasContent(body){
   return Object.keys(body).length > 0;
 }
 
-/**
- * Ask the server what adopting would do, without doing it.
- *
- * The retain decisions are the manager's and are remembered here; everything
- * else in the plan — including which items the cap excludes once an item is
- * retained — is the server's answer, so the panel always shows the profile
- * that would actually be saved.
- */
-async function refreshAdoptPlan(){
-  const keepRetain = state.adoptPlan?.retain || [];
-  const keepReasons = state.adoptPlan?.retainReasons || {};
-  await withBusy(async () => {
-    const plan = await api('/api/searches/'+state.search.id+'/intake/adopt', {
-      method:'POST', body:{ preview:true, retain: keepRetain }
-    });
-    plan.retain = keepRetain;
-    plan.retainReasons = keepReasons;
-    state.adoptPlan = plan;
-  }, waitSave('Working out what would change'));
-}
-
 async function persistProfile(moveOn){
   const criteria = collectCriteria();
   const skills = labeledKind('skill', criteria);
@@ -7117,20 +6442,6 @@ document.addEventListener('change', e => {
     if (on) next.add(id); else next.delete(id);
     state.picked = [...next];
     if (state.view === 'home') render();
-    return;
-  }
-  if (e.target.dataset.retain && state.adoptPlan){
-    // Keeping an unsupported criterion is a decision. Ticking it re-asks the
-    // server what the profile would then look like, so the panel always shows
-    // the proposal that would actually be saved.
-    const id = e.target.dataset.retain;
-    const next = new Set(state.adoptPlan.retain || []);
-    if (e.target.checked) next.add(id); else next.delete(id);
-    state.adoptPlan.retain = [...next];
-    $$('[data-retain-reason]').forEach(el => {
-      state.adoptPlan.retainReasons = { ...(state.adoptPlan.retainReasons||{}), [el.dataset.retainReason]: el.value };
-    });
-    refreshAdoptPlan();
     return;
   }
   if (e.target.id === 'premium') state.premium = e.target.checked;
@@ -7454,7 +6765,7 @@ document.addEventListener('click', async e => {
     if (act==='reopen-survey') {
       reason = prompt('Why are you reopening this response? The original stays in history.');
       if (!reason?.trim()) return;
-    } else if (!confirm('Replace this candidate link?\n\nThe old link stops working immediately. Anything the candidate has already submitted is kept, but a draft they have not sent is reachable only from the link you are about to revoke. You will need to share the new link with them yourself.')) return;
+    } else if (!confirm('Replace this candidate link? The old link will stop working.')) return;
     await withBusy(async () => {
       state.search = await api('/api/searches/'+state.search.id+'/candidates/'+t.dataset.cid+'/'+(act==='reopen-survey'?'reopen':'invite'), { method:'POST', body:{ which:t.dataset.which, reason } });
       toast('Copy the new link below and share it with the candidate.');
@@ -7784,31 +7095,15 @@ document.addEventListener('click', async e => {
     const open = act==='intake-open';
     const form = $('#intakewindow');
     const win = form ? Object.fromEntries(new FormData(form).entries()) : {};
-    let emptyReason = '';
     if (!open) {
       const waiting = (state.search.consensus?.pending || []).length;
       if (waiting && !confirm(waiting+' member'+(waiting===1?' has':'s have')+' not answered yet. Close the window anyway?')) return;
-      // Finishing with nothing on file is a decision somebody makes and signs,
-      // not a step that quietly reports itself complete.
-      if (!(state.search.consensus?.submitted)) {
-        emptyReason = String(prompt('Nobody submitted committee input. Closing now completes this step without it.\n\nWhy are you completing it without committee input? This is recorded on the search.') || '').trim();
-        if (!emptyReason) { toast('Not closed. A reason is needed to complete this step without committee input.'); return; }
-      }
     }
     await withBusy(async () => {
-      try {
-        state.search = await api('/api/searches/'+state.search.id+'/intake/status', {
-          method:'POST', body:{ status: open ? 'open' : 'closed', ...win, ...(emptyReason ? { emptyReason } : {}) }
-        });
-      } catch (err) {
-        if (err.code === 'ROSTER_UNCONFIRMED'){ toast(err.message); go('team'); return; }
-        throw err;
-      }
-      toast(open
-        ? 'Intake is open. Everyone on the search can answer now.'
-        : (emptyReason
-          ? 'Completed without committee input. The reason is on the record.'
-          : 'Intake closed. Everyone on the search can now read the submitted answers.'));
+      state.search = await api('/api/searches/'+state.search.id+'/intake/status', {
+        method:'POST', body:{ status: open ? 'open' : 'closed', ...win }
+      });
+      toast(open ? 'Intake is open. Everyone on the search can answer now.' : 'Intake closed. The committee can see what the room said.');
     }, waitSave(open ? 'Opening the window' : 'Closing the window'));
     return;
   }
@@ -7832,108 +7127,35 @@ document.addEventListener('click', async e => {
       return;
     }
     await withBusy(async () => {
-      try {
-        state.search = await api('/api/searches/'+state.search.id+'/intake', {
-          method:'PUT',
-          // This member's own version, not the whole search's. Another member
-          // submitting at the same moment is not a conflict with this answer.
-          body:{ items, mustHave:d.mustHave, dealBreaker:d.dealBreaker, context:d.context,
-            submitted, responseRevision: myResponseRevision() }
-        });
-      } catch (err) {
-        // Keep every local field. The recovery is a choice on the page, not a
-        // reload that would throw the typed rows away (CA-12).
-        if (err.code === 'STALE_RESPONSE') { state.intakeConflict = err.detail?.response || {}; return; }
-        if (err.code === 'RESPONSE_REVISION_REQUIRED' || err.code === 'INTAKE_SHUT') { toast(err.message); return; }
-        throw err;
-      }
+      state.search = await api('/api/searches/'+state.search.id+'/intake', {
+        method:'PUT',
+        body:{ items, mustHave:d.mustHave, dealBreaker:d.dealBreaker, context:d.context, submitted }
+      });
       state.intake = null;
-      state.intakeConflict = null;
-      toast(submitted
-        ? 'Your answers are in. The rest of the committee cannot see them until the window closes.'
-        : 'Saved privately. Your submitted answers are unchanged until you choose Update my answers.');
+      toast(submitted ? 'Your answers are in. The rest of the committee cannot see them yet.' : 'Saved. Come back and submit when you are ready.');
       if (submitted && you().consultant) go('intake');
     }, waitSave(submitted ? 'Submitting your answers' : 'Saving your answers'));
     return;
   }
-  if (act==='intake-keep-mine'){
-    state.intakeConflict = null;
-    toast('Kept. Save or submit again to write this version.');
-    render();
-    return;
-  }
-  if (act==='intake-take-theirs'){
-    const theirs = state.intakeConflict?.submitted || state.intakeConflict?.draft;
-    state.intake = theirs ? {
-      items: (theirs.items || []).map(i => ({ ...i })),
-      mustHave: theirs.mustHave || '', dealBreaker: theirs.dealBreaker || '', context: theirs.context || ''
-    } : null;
-    state.intakeConflict = null;
-    // The conflicting version is now on the page, and the record it came from
-    // is the one this page holds, so the next save has the right precondition.
-    await withBusy(async () => { state.search = await api('/api/searches/'+state.search.id); }, waitSave('Loading the other version'));
-    toast('Loaded the version saved elsewhere. Edit it and save.');
-    return;
-  }
-  if (act==='withdraw-intake'){
-    if (!confirm('Withdraw your answers from the committee tally?\n\nThey come back to you as a private draft, and the counts on any profile already built from them will be marked as describing earlier answers. This is not the same as saving a draft.')) return;
+  if (act==='adopt-consensus'){
+    const adopted = (state.search.criteria||[]).some(c => String(c.label||'').trim());
+    if (adopted && !confirm('Rebuild the profile from committee input? Consensus items come first; anything you wrote by hand is kept behind them, up to five per section.')) return;
     await withBusy(async () => {
-      state.search = await api('/api/searches/'+state.search.id+'/intake/withdraw', { method:'POST', body:{} });
-      state.intake = null;
-      toast('Withdrawn. Your answers are out of the tally and saved as your own draft.');
-    }, waitSave('Withdrawing your answers'));
-    return;
-  }
-  if (act==='adopt-preview' || act==='adopt-consensus'){
-    await refreshAdoptPlan();
-    if (state.adoptPlan && state.view !== 'intake') go('intake');
-    return;
-  }
-  if (act==='adopt-cancel'){
-    state.adoptPlan = null;
-    render();
-    return;
-  }
-  if (act==='adopt-apply'){
-    const plan = state.adoptPlan;
-    if (!plan) return;
-    // Read the reasons off the panel before the re-render, the same way the
-    // intake and profile forms do.
-    const reasons = { ...(plan.retainReasons || {}) };
-    $$('[data-retain-reason]').forEach(el => { reasons[el.dataset.retainReason] = el.value; });
-    await withBusy(async () => {
-      try {
-        const out = await api('/api/searches/'+state.search.id+'/intake/adopt', {
-          method:'POST',
-          body:{ retain: plan.retain || [], retainReasons: reasons,
-            fingerprint: plan.fingerprint, profileRevision: plan.profileRevision }
-        });
-        state.search = out.search;
-        state.adoptPlan = null;
-        const gaps = out.gaps || [];
-        toast(gaps.length
-          ? 'Profile saved from committee input. It is still short in '+gaps.map(g=>g.label.toLowerCase()).join(', ')+' — write those yourself.'
-          : 'Profile saved from committee input. Edit the weights and wording, then save.');
-        go('profile');
-      } catch (err) {
-        if (err.code === 'STALE_SOURCE' || err.code === 'STALE_PROFILE') {
-          state.adoptPlan = null;
-          toast(err.message);
-          return;
-        }
-        throw err;
-      }
-    }, waitSave('Saving the profile'));
+      const out = await api('/api/searches/'+state.search.id+'/intake/adopt', { method:'POST', body:{} });
+      state.search = out.search;
+      const gaps = out.gaps || [];
+      toast(gaps.length
+        ? 'Built from the committee. Still short in '+gaps.map(g=>g.label.toLowerCase()).join(', ')+' — fill those in.'
+        : 'Built from the committee. Edit the weights and wording, then save.');
+      go('profile');
+    }, waitSave('Building the profile from committee input'));
     return;
   }
   if (act==='research'){
-    // The same decision the buttons were drawn from, checked again here: a
-    // keyboard activation, a stale render, or a search that changed underneath
-    // must not get past it (D06).
-    const verdict = researchEligibility();
-    if (!verdict.ok){
-      toast(verdict.why);
-      if (verdict.go) go(verdict.go);
+    const profileDone = (state.search.steps||[]).find(st=>st.key==='profile')?.status==='done';
+    if (!profileDone){
+      toast('Adopt the candidate profile first (Step '+stepNo('profile')+').');
+      go('profile');
       return;
     }
     const form = $('#citylookup') || $('#facts');
@@ -7954,17 +7176,9 @@ document.addEventListener('click', async e => {
     return;
   }
   if (act==='research-dismiss'){
-    dismissResearchNotice();
+    state.research.error = null;
+    state.research.review = null;
     render();
-    return;
-  }
-  if (act==='research-reconcile'){
-    // A read, never a start. The key is the only handle this tab has on an
-    // operation whose acknowledgement was lost.
-    const key = state.research.key;
-    await withBusy(
-      () => reconcileResearch({ searchId: state.search.id, key }),
-      waitSave('Checking what happened to this research'));
     return;
   }
   if (act==='reload-search'){
@@ -7982,7 +7196,6 @@ document.addEventListener('click', async e => {
       state.search = out.search;
       state.research.review = null;
       state.research.error = null;
-      state.research.draft = null;
       const held = out.held || [];
       toast(held.length
         ? 'Applied what research found. Kept what you had already entered for: '+held.join(', ')+'.'

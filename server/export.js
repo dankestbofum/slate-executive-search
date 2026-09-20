@@ -24,6 +24,7 @@ const media = require('./media');
 const jurisdictions = require('./jurisdictions');
 const disposition = require('./disposition');
 const { exportLocation } = require('./repository-url');
+const committee = require('./committee');
 
 const FORMAT_VERSION = 1;
 
@@ -162,7 +163,66 @@ function candidateRecord(candidate, { includeContact, superseded = [] }) {
  * app. Callers must already have established that this person may edit the
  * search; this function enforces the narrower rules within that.
  */
-function build(search, { viewer, users, dataDir, release }) {
+/**
+ * One public application, as it arrived.
+ *
+ * The frozen submission, never the live draft fields: what the record has to
+ * carry is what the applicant actually sent, under the form version they saw.
+ * Materials are listed by label and scan state; the files themselves stay
+ * where they are, which is the same rule the external-document inventory has
+ * always followed.
+ */
+function applicationRecord(application) {
+  const submitted = application.submitted;
+  return {
+    id: application.id,
+    reference: submitted.reference,
+    submittedAt: submitted.at,
+    version: submitted.version,
+    postingVersion: submitted.postingVersion,
+    source: 'Public portal',
+    applicant: {
+      name: submitted.answers.name,
+      email: submitted.answers.email,
+      phone: submitted.answers.phone || null,
+      location: submitted.answers.location || null
+    },
+    background: submitted.answers.background || null,
+    // Answers with their questions beside them, for the same reason the
+    // questionnaire responses carry theirs: an answer without its question is
+    // not a record of anything.
+    questions: (submitted.form.questions || []).map(question => ({
+      key: question.key,
+      prompt: question.prompt,
+      required: Boolean(question.required),
+      answer: submitted.answers.responses?.[question.key] ?? null
+    })),
+    materials: (submitted.files || []).map(file => ({
+      label: file.label,
+      contentType: file.contentType,
+      bytes: file.bytes,
+      sha256: file.sha256,
+      uploadedAt: file.uploadedAt,
+      scanState: file.scan?.state || null,
+      scanned: Boolean(file.scan?.scanned)
+    })),
+    acceptedAt: application.staff?.acceptedAt || null,
+    acceptedBy: application.staff?.acceptedByName || null,
+    candidateId: application.staff?.candidateId || null,
+    // Corrections keep the original. Showing only the current version would
+    // present a corrected application as if it were the first one.
+    supersededSubmissions: (application.corrections || []).map(correction => ({
+      reference: correction.submitted?.reference || null,
+      submittedAt: correction.submitted?.at || null,
+      reopenedAt: correction.at,
+      reopenedBy: correction.byName || null,
+      reason: correction.reason || null,
+      answers: correction.submitted?.answers?.responses || null
+    }))
+  };
+}
+
+function build(search, { viewer, users, dataDir, release, applications = [] }) {
   const lookupUser = id => (users || []).find(u => u.id === id) || null;
   const sealed = !search.released;
 
@@ -246,12 +306,32 @@ function build(search, { viewer, users, dataDir, release }) {
         openedAt: search.intake?.openedAt || null,
         closedAt: search.intake?.closedAt || null,
         prompt: search.intake?.prompt || null,
-        submissions: search.intake?.status === 'closed'
-          ? (search.intake?.submissions || {})
-          : (search.intake?.submissions?.[viewer?.id]
-            ? { [viewer.id]: search.intake.submissions[viewer.id] } : {}),
-        withheld: search.intake?.status !== 'closed'
-      }
+        // Committed answers only, and only the ones this reader is entitled
+        // to. A draft nobody submitted is not part of the record a shared
+        // export hands over, whatever the window's state (CA-01); the
+        // operational backup is where an author's unsent work is recoverable.
+        submissions: Object.fromEntries(Object.entries(committee.visibleResponses(search, {
+          userId: viewer?.id || null,
+          staff: Boolean(viewer?.staff),
+          member: (search.members || []).some(m => m.userId === viewer?.id)
+        })).filter(([, r]) => r.submitted).map(([uid, r]) => [uid, r.submitted])),
+        withheld: search.intake?.status !== 'closed',
+        draftsWithheld: true
+      },
+      adoptions: (search.adoptions || []).map(record => ({
+        id: record.id,
+        at: record.at,
+        by: attribute({ by: record.by, who: record.byName }, lookupUser),
+        respondents: record.respondents,
+        participants: record.participants,
+        fingerprint: record.fingerprint,
+        profileRevision: record.profileRevision || null,
+        groups: record.groups || [],
+        retained: record.retained || [],
+        removed: record.removed || [],
+        excluded: record.excluded || []
+      })),
+      adoptionProvenance: search.adoptionProvenance || 'recorded'
     },
 
     // The adopted criteria and the revision they belong to. Scores are only
@@ -367,12 +447,17 @@ function build(search, { viewer, users, dataDir, release }) {
         (search.history || []).some(entry => (entry.scores || entry.notesBy) &&
           (sealed || !(entry.released || entry.revision === search.profileRevision)))
           ? 'Sealed historical scores and explanations (see history.scoresWithheld).' : null,
-        search.intake?.status !== 'closed' ? 'Other participants’ private intake responses while intake is not closed.' : null,
+        search.intake?.status !== 'closed' ? 'Other participants’ submitted intake responses while intake is not closed.' : null,
+        'Unsubmitted intake drafts. A draft belongs to its author; it is recoverable from the operational backup, not from a shared export.',
         (search.candidates || []).some(c => (c.documents || []).some(d => d.url && exportLocation(d.url) !== d.url))
           ? 'Unsafe legacy document URLs withheld; retrieve the documents by their identifiers.' : null,
         'External documents held outside Slate (see documents.external).',
         'The documents themselves. Slate records what exists and where it is held, never the file.',
-        'Delivery confirmation for candidate contact. Every entry is staff-recorded; Slate sends nothing.'
+        'Delivery confirmation for candidate contact. Every entry is staff-recorded; Slate sends nothing.',
+        // The same rule as an unsubmitted intake answer, for the same reason.
+        'Unsubmitted application drafts. A draft is not an application: it belongs to its author, is not visible to staff, and expires.',
+        applications.some(a => (a.submitted?.files || []).length)
+          ? 'Application materials themselves. The record lists each file, its checksum and its scan state; the files are held in private storage.' : null
       ].filter(Boolean),
       unconfirmedFacts: jurisdictions.factStatus(search).outstanding
     }

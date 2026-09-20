@@ -8,6 +8,7 @@ const integrity = require('./integrity');
 const backup = require('./backup');
 const jurisdictions = require('./jurisdictions');
 const organizations = require('./organizations');
+const committee = require('./committee');
 
 const isProd = process.env.NODE_ENV === 'production';
 const DATA_DIR = process.env.DATA_DIR
@@ -100,8 +101,13 @@ function blankSearch(input, user, organizationId){
       prompt: '',
       openedAt: null,
       closedAt: null,
-      submissions: {}
+      // One record per person: their private draft and their committed
+      // answer, kept apart so saving the first never retracts the second.
+      responses: {}
     },
+    // Every time the profile was built from committee input: when, by whom,
+    // and the evidence each adopted line rested on at that moment.
+    adoptions: [],
     criteria: [],
     artifacts: {},
     // Work the firm does by hand, one record per staff step: a running log of
@@ -281,7 +287,7 @@ function releaseWriterLock(){
  * newer release is refused outright: rolling the application back onto a store
  * it does not understand is how a rollback turns into data loss.
  * ------------------------------------------------------------------ */
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 7;
 
 function removeLegacyPins(store){
   const users = [...(store.users || []),
@@ -340,8 +346,50 @@ const MIGRATIONS = [
   // inventing spend. An older build cannot open this store, which is what
   // stops a rollback from serving a client that polls a job table the previous
   // release neither writes nor recovers.
-  store => { store.researchJobs ||= []; }
+  store => { store.researchJobs ||= []; },
+  // 6 -> 7: a member's private draft and their committed answer become two
+  // fields instead of one record with a `submitted` flag, so saving a draft
+  // stops retracting the submission. The conversion is in
+  // migrateIntakeResponses(), which migrate() also runs on every boot; this
+  // rung is the version marker that stops an older build — one that would
+  // write the old shape back over a new draft — from opening the store.
+  store => {
+    for (const s of [...(store.searches || []), ...(store.archivedSearches || [])]) migrateIntakeResponses(s);
+  },
 ];
+
+/**
+ * Legacy `intake.submissions` to per-member response records.
+ *
+ * A legacy record held one answer and a `submitted` flag. Read it for what it
+ * was: a flagged record is the member's committed answer, an unflagged one is
+ * a private draft they never sent. Nothing invents a submitted version the old
+ * schema had already overwritten, existing timestamps and roster identity are
+ * carried across, and rerunning it changes nothing.
+ */
+function migrateIntakeResponses(search){
+  const intake = search && search.intake;
+  if (!intake || typeof intake !== 'object') return;
+  intake.responses ||= {};
+  const legacy = intake.submissions;
+  if (!legacy || typeof legacy !== 'object') { delete intake.submissions; return; }
+  for (const [userId, record] of Object.entries(legacy)) {
+    if (!record || typeof record !== 'object') continue;
+    if (intake.responses[userId]) continue;
+    const answer = {
+      items: Array.isArray(record.items) ? record.items : [],
+      mustHave: record.mustHave || '',
+      dealBreaker: record.dealBreaker || '',
+      context: record.context || '',
+      at: record.at || null,
+      updatedAt: record.updatedAt || record.at || null
+    };
+    intake.responses[userId] = record.submitted
+      ? { revision: 1, draft: null, submitted: { ...answer, submittedAt: answer.updatedAt } }
+      : { revision: 1, draft: answer, submitted: null };
+  }
+  delete intake.submissions;
+}
 
 function runMigrations(store){
   const from = Number.isInteger(store.schemaVersion) ? store.schemaVersion : 0;
@@ -460,9 +508,17 @@ function migrate(store){
         prompt: '',
         openedAt: null,
         closedAt: legacy ? (s.createdAt || now()) : null,
-        submissions: {},
+        responses: {},
         legacy: legacy || undefined
       };
+    }
+    migrateIntakeResponses(s);
+    s.adoptions ||= [];
+    // A profile adopted before adoptions were recorded has no evidence behind
+    // its support claims, and today's tally is not that evidence. Mark it for
+    // review rather than reconstructing a history that was never stored.
+    if ((s.criteria || []).some(c => c && c.from === 'committee' && !c.source) && !s.adoptions.length) {
+      s.adoptionProvenance = 'unverified';
     }
   }
 }
@@ -571,6 +627,22 @@ function canView(search, access){
 /** Editing the search file itself stays with the firm, not the committee. */
 function canEdit(search, access){
   return isStaff(access) && canView(search, access);
+}
+
+/**
+ * Who is on the committee has changed, or is about to.
+ *
+ * A confirmation given before this no longer describes the committee, so it is
+ * withdrawn and asked for again. While the intake window is open the change is
+ * also recorded against the window: who was asked is part of what "2 of 3
+ * answered" means, and the manager confirms the committee again before those
+ * answers are closed or published. Everybody on the roster, including whoever
+ * was just added, keeps answering in the meantime.
+ */
+function rosterChanged(search){
+  if (!search) return;
+  search.team = { confirmedAt: null, confirmedBy: null };
+  if (search.intake?.status === 'open') search.intake.rosterChangedAt = now();
 }
 
 /** Rostering, intake windows, and adoption belong to the account manager. */
@@ -690,7 +762,7 @@ function stepStatus(search, step, cache){
         const intake = search.intake || {};
         if (intake.status === 'closed') status = 'done';
         else if (intake.status === 'open') status = 'now';
-        else status = Object.keys(intake.submissions || {}).length ? 'now' : 'open';
+        else status = Object.keys(intake.responses || {}).length ? 'now' : 'open';
         break;
       }
       case 'profile': {
@@ -757,6 +829,16 @@ function decorate(search, access){
   };
   // History contains prior private scores and staff notes. It has its own editor-only route.
   delete out.history;
+  // Intake is assembled for a named viewer below. The raw record must never
+  // ride along on the spread: with no viewer there is nobody it could be
+  // shared with, so only the window's own state survives.
+  out.intake = { status: (search.intake || {}).status || 'draft', responses: {}, answered: {} };
+  // The adoption records and the publication snapshot are assembled per viewer
+  // too (server/index.js, painted). The stored forms carry a full copy of the
+  // criteria and every source reason, so leaving them on the spread would be a
+  // second path to a profile the viewer is not being shown.
+  delete out.adoptions;
+  delete out.publication;
   if (access) {
     const uid = access.userId;
     const searchRole = memberOf(search, uid);
@@ -772,16 +854,29 @@ function decorate(search, access){
       canEdit: canEdit(search, access),
       canManage: canManage(search, access)
     };
-    // Intake is answered in confidence. Until the manager closes the window,
-    // each person sees only their own submission; showing the room's answers
-    // early would turn independent input into an anchoring exercise.
+    // Intake is answered in confidence. An unfinished draft belongs to its
+    // author and to nobody else, before or after the window closes; closing
+    // publishes committed answers to the room, not everything on file (CA-01).
+    // Named fields only: what is not listed here is not sent, so a field added
+    // to the stored record later is withheld until somebody decides otherwise.
     const intake = search.intake || {};
-    const open = intake.status !== 'closed';
     out.intake = {
-      ...intake,
-      submissions: open
-        ? { [uid]: (intake.submissions || {})[uid] || null }
-        : (intake.submissions || {})
+      status: intake.status || 'draft',
+      dueBy: intake.dueBy || '',
+      prompt: intake.prompt || '',
+      openedAt: intake.openedAt || null,
+      closedAt: intake.closedAt || null,
+      legacy: intake.legacy,
+      completedEmpty: intake.completedEmpty || null,
+      rosterChangedAt: intake.rosterChangedAt || null,
+      responses: committee.visibleResponses(search, {
+        userId: uid,
+        staff: isStaff(access),
+        member: Boolean(searchRole)
+      }),
+      // Who has answered, which the roster ticks need and which discloses
+      // nothing about what anybody said.
+      answered: committee.answeredBy(search)
     };
     if (!search.released) {
       out.scores = { [uid]: (search.scores || {})[uid] || {} };
@@ -895,6 +990,7 @@ module.exports = {
   initials,
   ensureBackup: () => backup.ensureDaily(DATA_DIR),
   memberOf,
+  rosterChanged,
   accountManager,
   roster,
   pruneOrphanCommittee,

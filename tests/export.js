@@ -177,10 +177,33 @@ const revisionOf = async (id, auth) =>
 
   await check('open intake remains private in exports', async () => {
     const live = await (await api('/api/searches/' + id, { auth: abe })).json();
-    live.intake = { status: 'open', submissions: { mine: { context: 'MY_INPUT' }, other: { context: 'PRIVATE_OTHER_INPUT' } } };
+    live.members = [{ userId: 'mine', searchRole: 'committee' }, { userId: 'other', searchRole: 'committee' }];
+    live.intake = { status: 'open', responses: {
+      mine: { revision: 1, draft: null, submitted: { items: [], context: 'MY_INPUT' } },
+      other: { revision: 1, draft: null, submitted: { items: [], context: 'PRIVATE_OTHER_INPUT' } }
+    } };
     const bundle = exporter.build(live, { viewer: { id: 'mine' }, users: [] });
     assert.match(JSON.stringify(bundle), /MY_INPUT/);
     assert.doesNotMatch(JSON.stringify(bundle), /PRIVATE_OTHER_INPUT/);
+  });
+
+  // CA-01. Closing the window publishes what people submitted. It does not
+  // publish what somebody saved and never sent, to a reader or to an export.
+  await check('an unsubmitted draft is excluded from every export', async () => {
+    const live = await (await api('/api/searches/' + id, { auth: abe })).json();
+    live.members = [{ userId: 'mine', searchRole: 'committee' }, { userId: 'other', searchRole: 'committee' }];
+    live.intake = { status: 'closed', responses: {
+      mine: { revision: 1, draft: null, submitted: { items: [], context: 'MY_INPUT' } },
+      other: { revision: 2, draft: { items: [], context: 'UNSENT_DRAFT_TEXT' }, submitted: null }
+    } };
+    for (const viewer of [{ id: 'mine' }, { id: 'staffer', staff: true }, {}]) {
+      const bundle = exporter.build(live, { viewer, users: [] });
+      assert.doesNotMatch(JSON.stringify(bundle), /UNSENT_DRAFT_TEXT/,
+        'an unsubmitted draft reached an export for viewer ' + (viewer.id || 'anonymous'));
+      assert.strictEqual(bundle.committee.intake.draftsWithheld, true);
+      assert.ok(bundle.completeness.missing.some(gap => /drafts/i.test(gap)),
+        'the withheld drafts were not declared as a gap');
+    }
   });
 
   await check('sealed scoring is withheld and said to be withheld', async () => {

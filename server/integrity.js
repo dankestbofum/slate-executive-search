@@ -81,6 +81,9 @@ function reconcile(search, before) {
       if (search.reviews) delete search.reviews[key];
     }
   };
+  // `profileKey` deliberately reads only id/kind/label/weight/note. Annotating
+  // a criterion with where it came from changes nothing a candidate was scored
+  // against, so recording provenance must not reset scoring (CA-03).
   if (!equal(profileKey(before.criteria), profileKey(search.criteria))) {
     remember({ kind: 'profile', revision: before.profileRevision || 1, criteria: before.criteria,
       scores: before.scores, notesBy: before.notesBy, released: before.released,
@@ -112,7 +115,19 @@ function reconcile(search, before) {
     if (key === 'community' || key === 'plan') stale(['brochure', 'ads'], 'Source material changed. Review this copy before approving it again.');
     if (key === 'brochure') stale(['ads'], 'The brochure changed. Review the advertisements against it.');
   }
-  if (!equal(before.members, search.members)) search.team = { confirmedAt: null, confirmedBy: null };
+  if (!equal(before.members, search.members)) {
+    search.team = { confirmedAt: null, confirmedBy: null };
+    // Who is being asked is part of what "2 of 3 answered" means. A roster
+    // change during the window is recorded so the manager is asked to confirm
+    // the committee again before closing or publishing, while everybody on the
+    // roster — including whoever was just added — can keep answering.
+    if (search.intake?.status === 'open') search.intake.rosterChangedAt = at;
+  }
+  // The published profile's revision, stamped once reconcile knows what it
+  // became. A publication that named no revision could not be pointed at later.
+  if (search.publication && !search.publication.profileRevision) {
+    search.publication.profileRevision = search.profileRevision;
+  }
   for (const [key, record] of Object.entries(search.staff || {})) {
     const prev = before.staff?.[key];
     if (prev && (!equal(prev.log, record.log) || prev.notes !== record.notes)) {
@@ -154,12 +169,22 @@ function validateCandidate(body) {
   return null;
 }
 
+// Five per category is the profile's own ceiling. Adoption enforced it while
+// merging and manual saves enforced it in the browser; checking it here means
+// no write path can land a sixth (CA-07).
+const KIND_CAP = 5;
+
 function validateCriteria(criteria) {
   if (!Array.isArray(criteria) || criteria.length > 100) return 'Provide a list of profile criteria.';
   const ids = new Set();
+  const perKind = {};
   for (const c of criteria) {
     if (!c || typeof c !== 'object' || !/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(c.id || '') || ids.has(c.id)) return 'Each criterion needs a unique, valid ID.';
     if (!['skill', 'trait', 'chall', 'opp'].includes(c.kind)) return 'Choose a valid criterion category.';
+    const weight = Number(c.weight);
+    if (!Number.isInteger(weight) || weight < 1 || weight > 5) return 'Each criterion needs a weight from 1 to 5.';
+    perKind[c.kind] = (perKind[c.kind] || 0) + 1;
+    if (perKind[c.kind] > KIND_CAP) return 'A category holds at most ' + KIND_CAP + ' criteria.';
     ids.add(c.id);
   }
   return null;
