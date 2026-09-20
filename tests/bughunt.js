@@ -29,6 +29,19 @@ async function req(path, { method='GET', body, auth, expect }={}){
     const current = await fetch(BASE + searchPath, { headers: auth });
     if (current.ok) headers['if-match'] = String((await current.json()).revision);
   }
+  // A member's own intake write is preconditioned on their own response
+  // record, not on the whole search, so the helper supplies that the way it
+  // supplies if-match everywhere else.
+  if (method === 'PUT' && auth && /^\/api\/searches\/[^/]+\/intake$/.test(path) && body && body.responseRevision === undefined) {
+    const me = await fetch(BASE + '/api/me', { headers: auth });
+    const current = await fetch(BASE + searchPath, { headers: auth });
+    if (me.ok && current.ok) {
+      const uid = (await me.json()).user?.id;
+      const search = await current.json();
+      const mine = (search.intake?.responses || {})[uid];
+      body = { ...body, responseRevision: Number(mine?.revision || 1) };
+    }
+  }
   if (method === 'POST' && path.startsWith('/api/apply/') && body) {
     const current = await fetch(BASE + path);
     if (current.ok) body = { ...body, surveyVersion:(await current.json()).versions?.[body.which || 'survey1'] };
@@ -973,7 +986,7 @@ async function run(){
 
     const midway = await req('/api/searches/'+cm.id, { auth: ben.auth, expect:200 });
     record('While intake is open a member sees only their own answers',
-      Object.keys(midway.json.intake.submissions).length===1);
+      Object.keys(midway.json.intake.responses).length===1);
     record('While intake is open a member sees no running tally',
       midway.json.consensus===null);
 
@@ -990,17 +1003,12 @@ async function run(){
     record('Members who have not answered are listed by name',
       agg.pending.some(p => p.name==='Abe Macy'));
 
-    const adopted = await req('/api/searches/'+cm.id+'/intake/adopt', {
-      method:'POST', auth: abe.auth, expect:200, body:{}
+    // CA-02. Adoption publishes what the committee said to everyone on the
+    // search, so it waits for the window to shut.
+    await req('/api/searches/'+cm.id+'/intake/adopt', {
+      method:'POST', auth: abe.auth, expect:409, body:{}
     });
-    const crit = adopted.json.search.criteria;
-    const top = crit.find(c => c.label==='Financial management');
-    record('The profile can be built from what the committee said',
-      Boolean(top) && top.from==='committee' && top.weight===5, JSON.stringify(top));
-    record('Each adopted line records how many members named it',
-      /Named by 3 of 3/.test(top.note), top.note);
-    record('Kinds the committee left thin are reported as gaps',
-      Array.isArray(adopted.json.gaps) && adopted.json.gaps.some(g => g.kind==='opp'));
+    record('The profile cannot be built while the window is still open', true);
 
     const closed = await req('/api/searches/'+cm.id+'/intake/status', {
       method:'POST', auth: abe.auth, expect:200, body:{ status:'closed' }
@@ -1008,10 +1016,35 @@ async function run(){
     record('Closing the window completes the intake step',
       closed.json.steps.find(s=>s.key==='intake').status==='done');
 
+    const proposed = await req('/api/searches/'+cm.id+'/intake/adopt', {
+      method:'POST', auth: abe.auth, expect:200, body:{ preview:true }
+    });
+    record('Adoption can be reviewed before it is applied',
+      proposed.json.preview===true && proposed.json.criteria.some(c => c.label==='Financial management')
+      && (await req('/api/searches/'+cm.id, { auth: abe.auth, expect:200 })).json.criteria.length===0,
+      'previewing wrote to the profile');
+
+    const adopted = await req('/api/searches/'+cm.id+'/intake/adopt', {
+      method:'POST', auth: abe.auth, expect:200,
+      body:{ fingerprint: proposed.json.fingerprint, profileRevision: proposed.json.profileRevision }
+    });
+    const crit = adopted.json.search.criteria;
+    const top = crit.find(c => c.label==='Financial management');
+    record('The profile can be built from what the committee said',
+      Boolean(top) && top.from==='committee' && top.weight===5, JSON.stringify(top));
+    record('Each adopted line records how many people who answered named it',
+      /Named by 3 of 3 who answered/.test(top.note), top.note);
+    record('Each adopted line keeps a durable link to its source',
+      Boolean(top.source?.key) && Boolean(top.source.adoptionId), JSON.stringify(top.source));
+    record('Kinds the profile is still short in are reported as gaps',
+      Array.isArray(adopted.json.gaps) && adopted.json.gaps.some(g => g.kind==='opp'));
+    record('Committee coverage is reported separately from profile gaps',
+      Array.isArray(adopted.json.coverage));
+
     const after = await req('/api/searches/'+cm.id, { auth: ben.auth, expect:200 });
     record('Once closed the committee can read the room',
       after.json.consensus && after.json.consensus.submitted===3 &&
-      Object.keys(after.json.intake.submissions).length===3);
+      Object.keys(after.json.intake.responses).length===3);
 
     await req('/api/searches/'+cm.id+'/intake', {
       method:'PUT', auth: ben.auth, expect:400, body:{ submitted:true, items:[{ kind:'skill', label:'Late', weight:5 }] }
@@ -1054,12 +1087,12 @@ async function run(){
         { userId:'a', searchRole:'committee' }, { userId:'b', searchRole:'committee' },
         { userId:'c', searchRole:'committee' }, { userId:'d', searchRole:'committee' }
       ],
-      intake: { submissions: {
-        a: { submitted:true, items:[{ kind:'skill', label:'Community engagement', weight:5 }] },
-        b: { submitted:true, items:[{ kind:'skill', label:'strong community engagement skills', weight:4 }] },
+      intake: { responses: {
+        a: { revision:1, submitted:{ items:[{ kind:'skill', label:'Community engagement', weight:5 }] } },
+        b: { revision:1, submitted:{ items:[{ kind:'skill', label:'strong community engagement skills', weight:4 }] } },
         // Never submitted: must not count toward the denominator.
-        c: { submitted:false, items:[{ kind:'skill', label:'Community engagement', weight:1 }] },
-        d: { submitted:true, items:[{ kind:'skill', label:'Economic development', weight:2 }] }
+        c: { revision:1, draft:{ items:[{ kind:'skill', label:'Community engagement', weight:1 }] }, submitted:null },
+        d: { revision:1, submitted:{ items:[{ kind:'skill', label:'Economic development', weight:2 }] } }
       }}
     };
     const agg = committee.aggregate(fixture, id => id.toUpperCase());
@@ -1375,7 +1408,9 @@ async function run(){
 
   record('Consensus is drawn as a share of the committee', /function consensusMeter/.test(appJs) && /cons__bar/.test(appJs) && /Contested/.test(appJs));
 
-  record('The profile can be built from committee input', /data-act="adopt-consensus"/.test(appJs) && /intake\/adopt/.test(appJs));
+  record('The profile can be built from committee input, after a preview',
+    /data-act="adopt-preview"/.test(appJs) && /data-act="adopt-apply"/.test(appJs) && /intake\/adopt/.test(appJs)
+      && /function adoptPlanPanel/.test(appJs));
 
   record('Step numbers are read from the server catalog, not hardcoded',
     !/Step 1'|Step 2'|Step 9'|Step 14'/.test(appJs) && /function stepNo/.test(appJs));

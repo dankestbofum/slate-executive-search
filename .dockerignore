@@ -1,5 +1,5 @@
-# The Dockerfile copies only package files, server/, public/ and
-# scripts/backup.js, so most of this is already excluded by construction. It is
+# The Dockerfile copies only package files, server/, public/, content/ and
+# three scripts, so most of this is already excluded by construction. It is
 # repeated here so the build context itself never carries secrets or client
 # material to the daemon, and so a future COPY cannot widen the image by
 # accident.

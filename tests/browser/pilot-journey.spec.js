@@ -52,7 +52,7 @@ test('candidate receipt and two sealed reviewers stay connected through score re
   await Promise.all([manager.goto(personUrl), reviewer.goto(personUrl)]);
   await manager.locator('[data-score="S1"][data-val="4"]').click();
   await manager.locator('#cnote').fill('Manager synthetic note.');
-  await manager.getByRole('button', { name: 'Save my scores' }).click();
+  await manager.getByRole('button', { name: 'Save my scores', exact: true }).click();
   await expect(manager.locator('#toast')).toContainText(/on the file/i);
 
   // Reviewer loaded before the first save. Reload before scoring so this part
@@ -60,7 +60,7 @@ test('candidate receipt and two sealed reviewers stay connected through score re
   await reviewer.reload();
   await reviewer.locator('[data-score="S1"][data-val="5"]').click();
   await reviewer.locator('#cnote').fill('Reviewer synthetic note.');
-  await reviewer.getByRole('button', { name: 'Save my scores' }).click();
+  await reviewer.getByRole('button', { name: 'Save my scores', exact: true }).click();
   await expect(reviewer.locator('#toast')).toContainText(/on the file/i);
 
   const orgId = await sharedWorkspace();

@@ -1,0 +1,185 @@
+{
+  "startedAt": "2026-09-17T03:03:46.494Z",
+  "console": [
+    {
+      "type": "warning",
+      "text": "Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview"
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 401 ()"
+    }
+  ],
+  "failedRequests": [],
+  "errorResponses": [
+    {
+      "url": "https://slate-executive-search.onrender.com/api/me",
+      "status": 401
+    }
+  ],
+  "screens": [
+    {
+      "name": "anonymous-desktop",
+      "url": "https://slate-executive-search.onrender.com/",
+      "title": "Slate — Executive Search",
+      "width": 1440,
+      "documentWidth": 1440,
+      "height": 1000,
+      "text": "Slate\nSign in\nSign up\nA guided executive search\n\nEvery engagement assembles the search committee, asks each member what they are looking for, and builds the candidate profile from their answers. Recruiting, screening, and interviews all run against that profile.\n\nSign in to work with your search team. New here? Create an account, tell us your role, and we will guide you through getting started. If you were invited, use the email on your invitation.",
+      "buttons": [
+        "Sign in",
+        "Sign up"
+      ],
+      "violations": []
+    },
+    {
+      "name": "anonymous-mobile",
+      "url": "https://slate-executive-search.onrender.com/",
+      "title": "Slate — Executive Search",
+      "width": 390,
+      "documentWidth": 390,
+      "height": 844,
+      "text": "Slate\nSign in\nSign up\nA guided executive search\n\nEvery engagement assembles the search committee, asks each member what they are looking for, and builds the candidate profile from their answers. Recruiting, screening, and interviews all run against that profile.\n\nSign in to work with your search team. New here? Create an account, tell us your role, and we will guide you through getting started. If you were invited, use the email on your invitation.",
+      "buttons": [
+        "Sign in",
+        "Sign up"
+      ],
+      "violations": []
+    },
+    {
+      "name": "signin-mobile",
+      "url": "https://slate-executive-search.onrender.com/",
+      "title": "Slate — Executive Search",
+      "width": 390,
+      "documentWidth": 390,
+      "height": 844,
+      "text": "Slate\nSign in\nSign up\nA guided executive search\n\nEvery engagement assembles the search committee, asks each member what they are looking for, and builds the candidate profile from their answers. Recruiting, screening, and interviews all run against that profile.\n\nSign in to work with your search team. New here? Create an account, tell us your role, and we will guide you through getting started. If you were invited, use the email on your invitation.\n\nSign in to My Application\n\nWelcome back! Please sign in to continue\n\nContinue with Google\n\nor\n\nEmail address\nPassword\nContinue\nDon’t have an account?\nSign up\n\nSecured by\n\nDevelopment mode",
+      "buttons": [
+        "Sign in",
+        "Sign up",
+        "",
+        "Continue with Google",
+        "Continue"
+      ],
+      "violations": [
+        {
+          "id": "color-contrast",
+          "impact": "serious",
+          "description": "Ensure the contrast between foreground and background colors meets WCAG 2 AA minimum contrast ratio thresholds",
+          "nodes": [
+            {
+              "target": [
+                ".cl-internal-560t1i"
+              ],
+              "summary": "Fix any of the following:\n  Element has insufficient color contrast of 3.04 (foreground color: #6b3b20, background color: #f36b16, font size: 9.0pt (12px), font weight: normal). Expected contrast ratio of 4.5:1"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "signin-desktop",
+      "url": "https://slate-executive-search.onrender.com/",
+      "title": "Slate — Executive Search",
+      "width": 1440,
+      "documentWidth": 1440,
+      "height": 1000,
+      "text": "Slate\nSign in\nSign up\nA guided executive search\n\nEvery engagement assembles the search committee, asks each member what they are looking for, and builds the candidate profile from their answers. Recruiting, screening, and interviews all run against that profile.\n\nSign in to work with your search team. New here? Create an account, tell us your role, and we will guide you through getting started. If you were invited, use the email on your invitation.\n\nSign in to My Application\n\nWelcome back! Please sign in to continue\n\nContinue with Google\n\nor\n\nEmail address\nPassword\nContinue\nDon’t have an account?\nSign up\n\nSecured by\n\nDevelopment mode",
+      "buttons": [
+        "Sign in",
+        "Sign up",
+        "",
+        "Continue with Google",
+        "Continue"
+      ],
+      "violations": [
+        {
+          "id": "color-contrast",
+          "impact": "serious",
+          "description": "Ensure the contrast between foreground and background colors meets WCAG 2 AA minimum contrast ratio thresholds",
+          "nodes": [
+            {
+              "target": [
+                ".cl-internal-560t1i"
+              ],
+              "summary": "Fix any of the following:\n  Element has insufficient color contrast of 3.04 (foreground color: #6b3b20, background color: #f36b16, font size: 9.0pt (12px), font weight: normal). Expected contrast ratio of 4.5:1"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "signup-desktop",
+      "url": "https://slate-executive-search.onrender.com/",
+      "title": "Slate — Executive Search",
+      "width": 1440,
+      "documentWidth": 1440,
+      "height": 1000,
+      "text": "Slate\nSign in\nSign up\nA guided executive search\n\nEvery engagement assembles the search committee, asks each member what they are looking for, and builds the candidate profile from their answers. Recruiting, screening, and interviews all run against that profile.\n\nSign in to work with your search team. New here? Create an account, tell us your role, and we will guide you through getting started. If you were invited, use the email on your invitation.\n\nCreate your account\n\nWelcome! Please fill in the details to get started.\n\nContinue with Google\n\nor\n\nEmail address\nPassword\nContinue\nAlready have an account?\nSign in\n\nSecured by\n\nDevelopment mode",
+      "buttons": [
+        "Sign in",
+        "Sign up",
+        "",
+        "Continue with Google",
+        "",
+        "Continue"
+      ],
+      "violations": [
+        {
+          "id": "color-contrast",
+          "impact": "serious",
+          "description": "Ensure the contrast between foreground and background colors meets WCAG 2 AA minimum contrast ratio thresholds",
+          "nodes": [
+            {
+              "target": [
+                ".cl-internal-560t1i"
+              ],
+              "summary": "Fix any of the following:\n  Element has insufficient color contrast of 3.04 (foreground color: #6b3b20, background color: #f36b16, font size: 9.0pt (12px), font weight: normal). Expected contrast ratio of 4.5:1"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "signup-mobile",
+      "url": "https://slate-executive-search.onrender.com/",
+      "title": "Slate — Executive Search",
+      "width": 390,
+      "documentWidth": 390,
+      "height": 844,
+      "text": "Slate\nSign in\nSign up\nA guided executive search\n\nEvery engagement assembles the search committee, asks each member what they are looking for, and builds the candidate profile from their answers. Recruiting, screening, and interviews all run against that profile.\n\nSign in to work with your search team. New here? Create an account, tell us your role, and we will guide you through getting started. If you were invited, use the email on your invitation.\n\nCreate your account\n\nWelcome! Please fill in the details to get started.\n\nContinue with Google\n\nor\n\nEmail address\nPassword\nContinue\nAlready have an account?\nSign in\n\nSecured by\n\nDevelopment mode",
+      "buttons": [
+        "Sign in",
+        "Sign up",
+        "",
+        "Continue with Google",
+        "",
+        "Continue"
+      ],
+      "violations": [
+        {
+          "id": "color-contrast",
+          "impact": "serious",
+          "description": "Ensure the contrast between foreground and background colors meets WCAG 2 AA minimum contrast ratio thresholds",
+          "nodes": [
+            {
+              "target": [
+                ".cl-internal-560t1i"
+              ],
+              "summary": "Fix any of the following:\n  Element has insufficient color contrast of 3.04 (foreground color: #6b3b20, background color: #f36b16, font size: 9.0pt (12px), font weight: normal). Expected contrast ratio of 4.5:1"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "keyboard": {
+    "escapeClosesSignIn": true,
+    "focusAfterEscape": {
+      "tag": "BUTTON",
+      "text": "Sign in",
+      "action": "sign-in"
+    }
+  },
+  "finishedAt": "2026-09-17T03:03:51.582Z"
+}

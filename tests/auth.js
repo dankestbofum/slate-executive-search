@@ -160,6 +160,15 @@ const as = (base, email, route = '/api/me') => fetch(base + route, { headers: si
     // migration owned by nobody, not owned by whoever signs in first.
     store.searches.push({ id:'sr-legacy', no:'SR-LEGACY', client:'Legacy County', position:'Administrator',
       createdBy:'u1', createdAt:'2024-01-01T00:00:00.000Z', members:[{ userId:'u1', seat:'manager' }],
+      // Intake in the old one-record-per-member shape: one answer that was
+      // sent, and one that never was.
+      intake: { status:'closed', dueBy:'', prompt:'', openedAt:'2024-01-02T00:00:00.000Z', closedAt:'2024-01-09T00:00:00.000Z',
+        submissions: {
+          u1: { submitted:true, items:[{ kind:'skill', label:'Budgeting', weight:4 }], mustHave:'Fiscal grip',
+            dealBreaker:'', context:'', at:'2024-01-03T00:00:00.000Z', updatedAt:'2024-01-04T00:00:00.000Z' },
+          u2: { submitted:false, items:[{ kind:'trait', label:'Patience', weight:2 }], mustHave:'',
+            dealBreaker:'', context:'Not finished', at:'2024-01-05T00:00:00.000Z', updatedAt:'2024-01-05T00:00:00.000Z' }
+        } },
       candidates:[], activity:[], criteria:[], artifacts:{}, staff:{}, scores:{}, notesBy:{}, reviews:{} });
     // Simulate a pre-upgrade store: credentials, a live session table, a
     // disabled account and an archived user.
@@ -212,7 +221,32 @@ const as = (base, email, route = '/api/me') => fetch(base + route, { headers: si
     await stop();
 
     const upgraded = JSON.parse(fs.readFileSync(file, 'utf8'));
-    assert.equal(upgraded.schemaVersion, 6);
+    assert.equal(upgraded.schemaVersion, 8);
+    // 7 -> 8 added public postings and the applicant tables. Every existing
+    // search is left unpublished: inferring "this search is advertising" from
+    // an ad plan would put a client's search on the public internet because
+    // somebody upgraded the application.
+    for (const search of [...upgraded.searches, ...upgraded.archivedSearches]) {
+      assert.ok(search.posting, 'a migrated search has no posting record at all');
+      assert.equal(search.posting.state, 'draft', 'a migrated search came back advertising');
+      assert.equal(search.posting.published, null, 'a migrated search came back published');
+      assert.equal(search.posting.slug, null, 'a migrated search was given a public address');
+    }
+    for (const table of ['applications', 'applicants', 'applicantChallenges', 'applicantSessions']) {
+      assert.ok(Array.isArray(upgraded[table]), 'the ' + table + ' table was not created');
+      assert.equal(upgraded[table].length, 0, 'the ' + table + ' table was not empty on a legacy store');
+    }
+    // 6 -> 7 split a member's private draft from their committed answer. A
+    // legacy record is read for what it actually was, and nothing invents a
+    // submitted version the old schema had already overwritten.
+    const legacyIntake = upgraded.searches.find(s => s.id === 'sr-legacy').intake;
+    assert.equal(legacyIntake.submissions, undefined, 'the legacy submissions map survived the migration');
+    assert.equal(legacyIntake.responses.u1.draft, null, 'a submitted answer was turned into a draft');
+    assert.equal(legacyIntake.responses.u1.submitted.mustHave, 'Fiscal grip', 'a submitted answer lost its text');
+    assert.equal(legacyIntake.responses.u1.submitted.at, '2024-01-03T00:00:00.000Z', 'a submitted answer lost its timestamp');
+    assert.equal(legacyIntake.responses.u2.submitted, null, 'an unsent draft was published as a submission');
+    assert.equal(legacyIntake.responses.u2.draft.context, 'Not finished', 'an unsent draft lost its text');
+    assert.equal(legacyIntake.responses.u1.revision, 1, 'response revisions were not initialized');
     // 5 -> 6 added the research job table. It starts empty; a legacy store has
     // no research history to reconstruct.
     assert.ok(Array.isArray(upgraded.researchJobs), 'the research job table was not created');
@@ -232,7 +266,7 @@ const as = (base, email, route = '/api/me') => fetch(base + route, { headers: si
     assert.equal(upgraded.sessions, undefined, 'the session table survived the migration');
     assert.ok(upgraded.users.every(u => !('pin' in u) && !('pinHash' in u)));
     assert.equal(upgraded.archivedSearches[0].archivedUsers[0].pinHash, undefined);
-    assert.ok(fs.readdirSync(path.join(directory, 'backups')).some(n => n.startsWith('pre-migration-1-to-6-')));
+    assert.ok(fs.readdirSync(path.join(directory, 'backups')).some(n => n.startsWith('pre-migration-1-to-8-')));
     console.log('PASS  Account linking, disabled accounts, public sign-up, workspace creation, and migration to organization ownership');
   } finally { await stop(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

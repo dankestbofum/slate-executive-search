@@ -1,0 +1,32 @@
+{
+  "capturedAtUtc": "2026-09-17T03:18:36.7071004Z",
+  "assets": [
+    {
+      "capturedAtUtc": "2026-09-17T03:18:37.2724635Z",
+      "url": "https://slate-executive-search.onrender.com/app.js",
+      "status": 200,
+      "localPath": "public\\app.js",
+      "remoteSha256": "5474e4315c2f61a5be5c70ff41065b7d66ffdbeca8b50d741ea57f2d9cbfae02",
+      "localSha256": "5474e4315c2f61a5be5c70ff41065b7d66ffdbeca8b50d741ea57f2d9cbfae02",
+      "matches": true
+    },
+    {
+      "capturedAtUtc": "2026-09-17T03:18:37.5144505Z",
+      "url": "https://slate-executive-search.onrender.com/auth.js",
+      "status": 200,
+      "localPath": "public\\auth.js",
+      "remoteSha256": "82c3839ca857624574130986c9287f81808d996e2d7f97730a47f1f007eb0227",
+      "localSha256": "82c3839ca857624574130986c9287f81808d996e2d7f97730a47f1f007eb0227",
+      "matches": true
+    },
+    {
+      "capturedAtUtc": "2026-09-17T03:18:37.6717943Z",
+      "url": "https://slate-executive-search.onrender.com/",
+      "status": 200,
+      "localPath": "public\\index.html",
+      "remoteSha256": "f63b61283535bd5354a6d7304cba4d1db45b584e9b30e8e81d10ec785badac7f",
+      "localSha256": "f63b61283535bd5354a6d7304cba4d1db45b584e9b30e8e81d10ec785badac7f",
+      "matches": true
+    }
+  ]
+}

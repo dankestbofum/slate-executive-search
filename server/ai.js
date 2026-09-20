@@ -798,8 +798,9 @@ async function runResearchAgent(anthropic, request, op, { label = 'research' } =
 }
 
 const SCHEMAS = {
-  profile: `{"criteria":[{"id":"S1","kind":"skill|trait|chall|opp","label":"short label","weight":1-5,"note":"why this matters here"}]}
-Use S for skills, T for traits, C for challenges, O for opportunities. 3-5 of each kind. Weights 5 = essential.`,
+  profile: `{"criteria":[{"id":"S1","kind":"skill|trait|chall|opp","label":"short label","weight":1-5,"note":"why this matters here","sourceKey":"the committee item's key, or omit"}]}
+Use S for skills, T for traits, C for challenges, O for opportunities. 3-5 of each kind, never more than 5. Weights 5 = essential.
+Copy "sourceKey" verbatim from the committee item a criterion came from, and omit it entirely for anything the committee did not name. Never invent one.`,
   community: `{"lede":"2-3 sentences answering why a candidate would want to live here and lead this organization","facts":[{"k":"label","v":"value"}],"government":{"form":"","elected":"count and titles","roles":"","managerRole":"","employees":"","budget":"","departments":"","electedStaff":""},"community":{"history":"","qualityOfLife":"","housing":"","schools":"","parksArts":"","economy":"","healthcare":"","transportation":"","climate":"","growth":""},"organization":"paragraph","why":"paragraph"}`,
   brochure: `{"title":"string","lede":"string","theOpportunity":"paragraph","thePlace":"2 paragraphs","theOrganization":"2 paragraphs","leadershipOpportunity":"paragraph","challenges":"paragraph from the profile challenges","opportunities":"paragraph from the profile opportunities","ideal":"desired candidate profile","theJob":"position responsibilities","compensation":"short paragraph","whyConsider":"Why consider this community?","howToApply":"short paragraph"}`,
   ads: `{"openingDate":"","firstReview":"","closing":"closing date or Applications accepted until filled","apply":"website or email","contact":"name and how to reach the search team","full":{"headline":"","body":""},"short":{"headline":"","body":""},"social":{"headline":"","body":"under 500 characters"},"association":{"headline":"","body":""}}
@@ -830,9 +831,11 @@ const KIND_PROMPTS = {
 The committee input below is the primary source. Rules:
 - Rank by how many members named a quality, then by average weight. Keep their wording where it is already clear.
 - Set weight from avgWeight, rounded.
-- An item listed under "contested" is one the committee disagrees about. Keep it, and say so plainly in its note.
-- Do not invent a criterion nobody named unless a kind has fewer than three items; if you must add one, ground it in "inTheirWords" or the search facts and say in the note that it did not come from the committee.
-- In each note, state how many members named it.
+- A category holds at most five criteria. Choose from "skills", "traits", "challenges" and "opportunities"; those lists are already ranked and already fit.
+- An item marked "contested": true is one the committee disagrees about. If you put it on the profile, say so plainly in its note and give both ends of the range. Do not soften it into an average.
+- "discussion" holds contested items that did not fit the five. Leave them off the profile. They are handled as a discussion list, not squeezed in.
+- Do not invent a criterion nobody named unless a kind has fewer than three items; if you must add one, omit "sourceKey", ground it in "inTheirWords" or the search facts, and say in the note that it did not come from the committee.
+- In each note, state how many of the people who answered named it — "2 of 3 who answered", not "2 of the committee". Not naming something is not a vote against it.
 
 Committee input (${room.submissions} of ${room.asked} people asked responded):
 ${JSON.stringify(room, null, 2)}`

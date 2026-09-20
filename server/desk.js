@@ -278,6 +278,33 @@ function checkProfile(json, add){
   }
 }
 
+/**
+ * Every claimed committee source has to be one the committee actually
+ * produced.
+ *
+ * The server refuses to trust a model-authored provenance claim either way;
+ * catching it here means the draft comes back corrected instead of arriving
+ * with its support quietly stripped off (CA-09).
+ */
+function checkSourceKeys(json, sources, add){
+  const room = (sources || []).find(s => isObj(s) && Array.isArray(s.skills) && Number.isInteger(s.submissions));
+  if (!room) return;
+  const known = new Set([...room.skills, ...room.traits || [], ...room.challenges || [],
+    ...room.opportunities || [], ...room.discussion || []].map(e => e && e.key).filter(Boolean));
+  const discussion = new Set((room.discussion || []).map(e => e && e.key).filter(Boolean));
+  (Array.isArray(json.criteria) ? json.criteria : []).forEach((c, i) => {
+    if (!isObj(c) || c.sourceKey === undefined) return;
+    const p = 'criteria[' + i + '].sourceKey';
+    if (typeof c.sourceKey !== 'string' || !known.has(c.sourceKey)) {
+      add('ids', p, '"' + c.sourceKey + '" is not a committee item. Copy the key exactly, or omit the field.');
+      return;
+    }
+    if (discussion.has(c.sourceKey)) {
+      add('ids', p, 'this item is on the discussion list because the profile is full. Leave it off the profile.');
+    }
+  });
+}
+
 function checkShape(kind, json, add){
   if (!isObj(json)) {
     add('shape', '', 'the draft must be a JSON object');
@@ -341,6 +368,7 @@ function review(kind, json, search, sources){
   if (isObj(json)) {
     checkNumbers(kind, json, sources || [], add);
     if (kind !== 'profile') checkCriteriaRefs(json, search, add);
+    else checkSourceKeys(json, sources, add);
     checkStyle(json, add);
   }
   return findings;

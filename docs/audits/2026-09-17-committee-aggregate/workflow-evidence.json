@@ -1,0 +1,319 @@
+{
+  "generatedAt": "2026-09-18T00:39:53.079Z",
+  "isolation": "Disposable OS temporary DATA_DIR, loopback port, fixture Clerk signatures; no paid API calls",
+  "results": [
+    {
+      "id": "W01",
+      "description": "Opening without confirmed roster is refused",
+      "status": 400,
+      "data": {
+        "error": "Confirm the roster first. People added later would miss the window."
+      }
+    },
+    {
+      "id": "W02",
+      "description": "Confirmed roster permits opening",
+      "status": 200
+    },
+    {
+      "id": "W03",
+      "description": "Unassigned staff cannot submit, close or adopt",
+      "submit": 403,
+      "close": 403,
+      "adopt": 403
+    },
+    {
+      "id": "W04",
+      "description": "Committee cannot close or adopt",
+      "close": 403,
+      "adopt": 403
+    },
+    {
+      "id": "W05",
+      "description": "Empty and narrative-only submissions are refused",
+      "empty": 400,
+      "narrativeOnly": 400,
+      "noInputAdopt": 400
+    },
+    {
+      "id": "W06",
+      "description": "Draft excluded from tally and revision changes",
+      "status": 200,
+      "beforeRevision": 7,
+      "afterRevision": 8,
+      "submitted": 0,
+      "staleDraftStatus": 409
+    },
+    {
+      "id": "W07",
+      "description": "Open-window direct privacy and staff aggregate visibility",
+      "committeeConsensus": null,
+      "committeeSubmissionKeys": [
+        "u-23638d56"
+      ],
+      "committeeSeesBobNote": false,
+      "unassignedStaffVoters": [
+        {
+          "userId": "u-31146d7b",
+          "name": "Bob Workflow",
+          "weight": 5,
+          "note": "SUBMITTED PRIVATE BOB NOTE"
+        }
+      ],
+      "unassignedStaffVoices": [
+        {
+          "userId": "u-31146d7b",
+          "name": "Bob Workflow",
+          "mustHave": "SUBMITTED PRIVATE BOB NARRATIVE",
+          "dealBreaker": "",
+          "context": "",
+          "at": "2026-09-18T00:39:54.581Z"
+        }
+      ]
+    },
+    {
+      "id": "W08",
+      "description": "Adopt while open exposes source note and support count through profile",
+      "status": 200,
+      "intakeStatus": "open",
+      "consensus": null,
+      "criteria": [
+        {
+          "id": "S1",
+          "kind": "skill",
+          "label": "Financial stewardship",
+          "weight": 5,
+          "note": "Named by 1 of 1 on the committee. SUBMITTED PRIVATE BOB NOTE",
+          "from": "committee"
+        }
+      ],
+      "memberSeesBobNote": true,
+      "gaps": [
+        {
+          "kind": "skill",
+          "label": "Essential skills",
+          "have": 1,
+          "need": 3
+        },
+        {
+          "kind": "trait",
+          "label": "Leadership and personality traits",
+          "have": 0,
+          "need": 3
+        },
+        {
+          "kind": "chall",
+          "label": "Current challenges",
+          "have": 0,
+          "need": 3
+        },
+        {
+          "kind": "opp",
+          "label": "Future opportunities",
+          "have": 0,
+          "need": 3
+        }
+      ]
+    },
+    {
+      "id": "W09",
+      "description": "Closing publishes unfinished drafts to another committee member",
+      "draftVisible": {
+        "items": [
+          {
+            "kind": "skill",
+            "label": "UNFINISHED ALICE DRAFT",
+            "weight": 5,
+            "note": "DRAFT PRIVATE NOTE"
+          }
+        ],
+        "mustHave": "",
+        "dealBreaker": "",
+        "context": "DRAFT PRIVATE CONTEXT",
+        "submitted": false,
+        "at": "2026-09-18T00:39:54.524Z",
+        "updatedAt": "2026-09-18T00:39:54.524Z"
+      },
+      "submittedCount": 1,
+      "rawSubmissionCount": 2
+    },
+    {
+      "id": "W10",
+      "description": "Closed intake rejects edits",
+      "status": 400
+    },
+    {
+      "id": "W11",
+      "description": "Reopening hides aggregate but cannot unpublish profile source note",
+      "intakeStatus": "open",
+      "consensus": null,
+      "memberSeesBobNote": true
+    },
+    {
+      "id": "W12",
+      "description": "Save-and-finish-later after submission silently withdraws tally but keeps adopted profile",
+      "submittedBefore": 1,
+      "submittedAfter": 0,
+      "profileCriteria": [
+        {
+          "id": "S1",
+          "kind": "skill",
+          "label": "Financial stewardship",
+          "weight": 5,
+          "note": "Named by 1 of 1 on the committee. SUBMITTED PRIVATE BOB NOTE",
+          "from": "committee"
+        }
+      ],
+      "activityUnchanged": true,
+      "activityBefore": [
+        {
+          "at": "2026-09-18T00:39:54.722Z",
+          "who": "Abe Macy",
+          "by": "u1",
+          "role": "consultant",
+          "x": "opened committee intake"
+        },
+        {
+          "at": "2026-09-18T00:39:54.666Z",
+          "who": "Abe Macy",
+          "by": "u1",
+          "role": "consultant",
+          "x": "closed committee intake"
+        },
+        {
+          "at": "2026-09-18T00:39:54.628Z",
+          "who": "Abe Macy",
+          "by": "u1",
+          "role": "consultant",
+          "x": "built the profile from 1 committee submissions"
+        }
+      ],
+      "activityAfter": [
+        {
+          "at": "2026-09-18T00:39:54.722Z",
+          "who": "Abe Macy",
+          "by": "u1",
+          "role": "consultant",
+          "x": "opened committee intake"
+        },
+        {
+          "at": "2026-09-18T00:39:54.666Z",
+          "who": "Abe Macy",
+          "by": "u1",
+          "role": "consultant",
+          "x": "closed committee intake"
+        },
+        {
+          "at": "2026-09-18T00:39:54.628Z",
+          "who": "Abe Macy",
+          "by": "u1",
+          "role": "consultant",
+          "x": "built the profile from 1 committee submissions"
+        }
+      ]
+    },
+    {
+      "id": "W13",
+      "description": "Revision updates aggregate without stale adoption warning",
+      "aggregateSkill": [
+        "Strategic planning"
+      ],
+      "profileSkill": [
+        "Financial stewardship"
+      ],
+      "staleFields": {
+        "revision": 14,
+        "profileRevision": 2,
+        "staleArtifacts": {}
+      }
+    },
+    {
+      "id": "W14",
+      "description": "Rebuild retains obsolete committee criteria as filler",
+      "status": 200,
+      "criteria": [
+        {
+          "id": "S2",
+          "kind": "skill",
+          "label": "Strategic planning",
+          "weight": 5,
+          "note": "Named by 1 of 1 on the committee. REPLACEMENT BOB NOTE",
+          "from": "committee"
+        },
+        {
+          "id": "S1",
+          "kind": "skill",
+          "label": "Financial stewardship",
+          "weight": 5,
+          "note": "Named by 1 of 1 on the committee. SUBMITTED PRIVATE BOB NOTE",
+          "from": "committee"
+        }
+      ]
+    },
+    {
+      "id": "W15",
+      "description": "Removing member withdraws answers and access but keeps adopted criteria",
+      "status": 200,
+      "submitted": 0,
+      "criteria": [
+        {
+          "id": "S2",
+          "kind": "skill",
+          "label": "Strategic planning",
+          "weight": 5,
+          "note": "Named by 1 of 1 on the committee. REPLACEMENT BOB NOTE",
+          "from": "committee"
+        },
+        {
+          "id": "S1",
+          "kind": "skill",
+          "label": "Financial stewardship",
+          "weight": 5,
+          "note": "Named by 1 of 1 on the committee. SUBMITTED PRIVATE BOB NOTE",
+          "from": "committee"
+        }
+      ],
+      "removedMemberReadStatus": 404,
+      "rosterConfirmed": false,
+      "intakeStatus": "closed"
+    },
+    {
+      "id": "W16",
+      "description": "Cannot reopen after roster change until reconfirmed",
+      "status": 400
+    },
+    {
+      "id": "W17",
+      "description": "Adding member while open clears roster confirmation but intake remains open",
+      "confirmed": false,
+      "intakeStatus": "open",
+      "newMemberSubmitStatus": 200
+    },
+    {
+      "id": "W18",
+      "description": "Adoption also succeeds in draft intake state with retained answers",
+      "status": 200,
+      "intakeStatus": "draft"
+    },
+    {
+      "id": "W19",
+      "description": "Can close never-opened empty intake without roster confirmation",
+      "status": 200,
+      "intakeStatus": "closed",
+      "submitted": 0,
+      "intakeStep": {
+        "n": 2,
+        "key": "intake",
+        "t": "Collect what each member is looking for",
+        "opt": false,
+        "phase": 0,
+        "needs": [
+          "team"
+        ],
+        "pkg": "basic",
+        "status": "done",
+        "blocked": false
+      }
+    }
+  ]
+}

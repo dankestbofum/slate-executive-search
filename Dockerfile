@@ -18,8 +18,16 @@ RUN npm ci --omit=dev && npm cache clean --force
 
 COPY server ./server
 COPY public ./public
+# The user guide. It is runtime content, not documentation: server/help.js
+# requires it and help.verify() runs at startup, so an image built without it
+# does not boot. That is the failure this line exists to prevent.
+COPY content ./content
 COPY scripts/backup.js ./scripts/backup.js
 COPY scripts/container-persistence.js ./scripts/container-persistence.js
+# The operator preflight. It is the documented way to check model entitlement,
+# and the check that matters is the one run in the environment the app runs in,
+# so it ships with the image rather than living only on a developer's machine.
+COPY scripts/preflight.js ./scripts/preflight.js
 
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
