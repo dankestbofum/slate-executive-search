@@ -78,7 +78,7 @@ test('twenty candidates stay readable and every row keeps its actions', async ({
 
   await page.goto('/#/s/' + search.id + '/screen');
   await expect(page.locator('.candtable tbody tr')).toHaveCount(20, { timeout: 10000 });
-  await expect(page.getByRole('button', { name: 'Review' })).toHaveCount(20);
+  await expect(page.getByRole('button', { name: 'Review', exact: true })).toHaveCount(20);
 
   const overflow = await sidewaysOverflow(page);
   expect(overflow.page, 'the candidate list scrolls the page sideways').toBeLessThanOrEqual(1);

@@ -1,0 +1,162 @@
+/* ============================================================
+   The public careers portal.
+
+   Reuses the token layer, the button and notice primitives, and
+   the pill styles from styles.css so that the two halves of the
+   product read as one product. Everything below is layout the
+   staff application does not have: a job page, a listing, and
+   an application form that has to work on a phone held in one
+   hand at a bus stop.
+   ============================================================ */
+
+.careers{min-height:100vh; background:var(--chrome); color:var(--ink)}
+.careers__main{display:block}
+
+.careers__bar{
+  display:flex; align-items:center; gap:var(--s-3); flex-wrap:wrap;
+  padding:var(--s-3) var(--s-5);
+  background:var(--paper); border-bottom:1px solid var(--line);
+}
+.careers__brand{
+  display:inline-flex; align-items:center; gap:var(--s-2);
+  color:var(--brand); font-weight:600; text-decoration:none;
+}
+.careers__crumbs{
+  display:flex; align-items:center; gap:var(--s-2); flex-wrap:wrap;
+  font-size:14px; color:var(--ink-3);
+}
+.careers__crumbs a{color:var(--ink-2)}
+.careers__dot{color:var(--ink-3)}
+.careers__bar .btn{margin-left:auto}
+
+/* The save bar inside the application form is the same element name reused in
+   a content context, where it should not look like the page chrome. */
+.careers__form .careers__bar,
+.careers__wrap .careers__bar{
+  background:none; border:0; padding:0; margin-top:var(--s-4);
+  align-items:center;
+}
+.careers__wrap .careers__bar .btn{margin-left:0}
+
+.careers__wrap{max-width:900px; margin:0 auto; padding:var(--s-6) var(--s-5) var(--s-8)}
+.careers__wrap--narrow{max-width:680px}
+.careers__wrap--job{max-width:760px}
+.careers__h1{font-size:30px; line-height:1.18; margin-bottom:var(--s-3)}
+.careers__wrap .lede{color:var(--ink-2); margin-bottom:var(--s-5); max-width:var(--measure)}
+/* Space above as well as below. Without it the first heading on the job page
+   sits hard against the compensation and deadline lines that precede it, while
+   every later heading has room — so the page reads as though the first section
+   belongs to the paragraph above it. */
+.careers__wrap section{margin:var(--s-6) 0 var(--s-5); max-width:var(--measure)}
+.careers__wrap section:first-of-type{margin-top:var(--s-5)}
+.careers__wrap section p + p{margin-top:var(--s-3)}
+.careers__wrap .t-section{margin-bottom:var(--s-2)}
+.careers__stamp{margin-top:var(--s-6); color:var(--ink-3)}
+
+/* --- lists ---------------------------------------------------------------- */
+
+.careers__firms,.careers__jobs{list-style:none; margin:0; padding:0; display:grid; gap:var(--s-3)}
+.careers__card,.careers__job{
+  display:grid; gap:4px; text-decoration:none; color:var(--ink);
+  padding:var(--s-4); background:var(--paper);
+  border:1px solid var(--line); border-radius:var(--r-3);
+}
+.careers__card:hover,.careers__job:hover{border-color:var(--line-strong); background:var(--sunken)}
+.careers__cardt,.careers__jobt{font-size:19px; font-weight:600}
+.careers__cards,.careers__jobm{color:var(--ink-2); font-size:15px}
+.careers__jobst{display:flex; flex-wrap:wrap; align-items:center; gap:var(--s-2); margin-top:var(--s-2)}
+
+.careers__empty{
+  padding:var(--s-5); background:var(--paper);
+  border:1px solid var(--line); border-radius:var(--r-3);
+  display:grid; gap:var(--s-2); max-width:var(--measure);
+}
+
+.careers__filters{
+  display:flex; flex-wrap:wrap; align-items:flex-end; gap:var(--s-3);
+  margin-bottom:var(--s-5); padding:var(--s-4);
+  background:var(--paper); border:1px solid var(--line); border-radius:var(--r-3);
+}
+
+/* --- the job page --------------------------------------------------------- */
+
+.careers__jobpage{
+  padding:var(--s-6); background:var(--paper);
+  border:1px solid var(--line); border-radius:var(--r-3);
+}
+.careers__badges{margin-bottom:var(--s-4)}
+.careers__comp{margin-bottom:var(--s-2)}
+.careers__mats{margin:var(--s-2) 0 var(--s-3); padding-left:1.25em; display:grid; gap:var(--s-2)}
+.careers__apply{
+  margin:var(--s-6) 0; padding:var(--s-5);
+  background:var(--accent-tint); border-radius:var(--r-3);
+  display:flex; flex-wrap:wrap; gap:var(--s-3); align-items:center;
+}
+.careers__apply p{flex-basis:100%; color:var(--ink-2)}
+.careers__privacy{border-top:1px solid var(--line); padding-top:var(--s-5)}
+.careers__support{
+  margin-top:var(--s-6); padding-top:var(--s-5); border-top:1px solid var(--line);
+}
+.careers__contact{list-style:none; margin:var(--s-2) 0 0; padding:0; display:grid; gap:4px}
+
+/* --- forms ---------------------------------------------------------------- */
+
+.careers__form{display:grid; gap:var(--s-5); max-width:var(--measure)}
+.careers__group{
+  border:1px solid var(--line); border-radius:var(--r-3);
+  background:var(--paper); padding:var(--s-5); margin:0;
+  display:grid; gap:var(--s-4);
+}
+.careers__group legend{padding:0 var(--s-2); font-size:11px; font-weight:700; letter-spacing:.13em; text-transform:uppercase; color:var(--ink-3)}
+.careers__field{display:grid; gap:6px}
+.careers__field > span:first-child{font-weight:600; font-size:15px}
+.careers__hint{font-size:14px; color:var(--ink-2); line-height:1.45}
+.careers__field .req{color:var(--stop)}
+.careers__acts{display:flex; flex-wrap:wrap; gap:var(--s-3)}
+
+.careers__material{display:grid; gap:var(--s-2); padding-bottom:var(--s-3); border-bottom:1px solid var(--line)}
+.careers__material:last-child{border-bottom:0; padding-bottom:0}
+.careers__matname{font-weight:600}
+.careers__files{list-style:none; margin:0; padding:0; display:grid; gap:var(--s-2)}
+.careers__files li{
+  display:flex; flex-wrap:wrap; align-items:center; gap:var(--s-2);
+  padding:var(--s-2) var(--s-3); background:var(--sunken); border-radius:var(--r-2);
+}
+.careers__file{font:inherit; font-size:14px}
+
+/* The save state sits beside the control that saves, never in a corner of the
+   page. It is the answer to "did that work", and it has to be where the eye
+   already is. */
+.careers__savestate{font-size:14px; color:var(--ink-2); flex:1 1 220px}
+.careers__savestate--bad{color:var(--stop); font-weight:600}
+
+/* --- review and receipt ---------------------------------------------------- */
+
+.careers__review,.careers__receipt{
+  margin:0 0 var(--s-5); padding:var(--s-5);
+  background:var(--paper); border:1px solid var(--line); border-radius:var(--r-3);
+  display:grid; gap:var(--s-4);
+}
+.careers__rrow{display:grid; grid-template-columns:minmax(140px,220px) 1fr; gap:var(--s-4)}
+.careers__rrow dt{font-weight:600; color:var(--ink-2)}
+.careers__rrow dd{margin:0; overflow-wrap:anywhere}
+.careers__rrow dd ul{margin:0; padding-left:1.25em}
+.careers__declare ul{margin:var(--s-2) 0 0; padding-left:1.25em; display:grid; gap:var(--s-2)}
+.careers__details{margin-top:var(--s-3)}
+.careers__details summary{cursor:pointer; font-weight:600}
+.careers__details p{margin-top:var(--s-2)}
+
+@media (max-width:640px){
+  .careers__wrap{padding:var(--s-5) var(--s-4) var(--s-7)}
+  .careers__h1{font-size:25px}
+  .careers__jobpage{padding:var(--s-4)}
+  .careers__group{padding:var(--s-4)}
+  .careers__rrow{grid-template-columns:1fr; gap:4px}
+  .careers__bar{padding:var(--s-3) var(--s-4)}
+  .careers__bar .btn{margin-left:0}
+}
+
+@media print{
+  .careers__bar,.careers__apply,.careers__filters,.helpdrawer{display:none !important}
+  .careers__jobpage{border:0; padding:0}
+}

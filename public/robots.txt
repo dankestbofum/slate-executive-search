@@ -1,0 +1,16 @@
+# Public job pages are meant to be found. Everything else here is either a
+# firm's private workspace or one person's application, and neither belongs in
+# a search index.
+#
+# This is a request, not a control. The pages that actually matter also send
+# X-Robots-Tag and Cache-Control: no-store, because a crawler that ignores this
+# file must still not be able to index somebody's application.
+
+User-agent: *
+Allow: /careers
+Allow: /careers/
+Disallow: /careers/*/*/apply
+Disallow: /apply/
+Disallow: /api/
+Disallow: /media/
+Disallow: /

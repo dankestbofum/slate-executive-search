@@ -8,6 +8,8 @@ const integrity = require('./integrity');
 const backup = require('./backup');
 const jurisdictions = require('./jurisdictions');
 const organizations = require('./organizations');
+const committee = require('./committee');
+const postings = require('./postings');
 
 const isProd = process.env.NODE_ENV === 'production';
 const DATA_DIR = process.env.DATA_DIR
@@ -85,6 +87,11 @@ function blankSearch(input, user, organizationId){
     firstReview: input.firstReview || '',
     notes: input.notes || '',
     research: null,
+    // The public job page for this search: unpublished, with nothing approved.
+    // Present from the first moment rather than attached on first use, because
+    // a field that appears later looks like an edit to server/integrity.js and
+    // would move the revision under a client that had only read the search.
+    posting: postings.blank(),
     aiUsage: { input_tokens: 0, output_tokens: 0 },
     createdBy: user.id,
     createdAt: now(),
@@ -100,8 +107,13 @@ function blankSearch(input, user, organizationId){
       prompt: '',
       openedAt: null,
       closedAt: null,
-      submissions: {}
+      // One record per person: their private draft and their committed
+      // answer, kept apart so saving the first never retracts the second.
+      responses: {}
     },
+    // Every time the profile was built from committee input: when, by whom,
+    // and the evidence each adopted line rested on at that moment.
+    adoptions: [],
     criteria: [],
     artifacts: {},
     // Work the firm does by hand, one record per staff step: a running log of
@@ -281,7 +293,7 @@ function releaseWriterLock(){
  * newer release is refused outright: rolling the application back onto a store
  * it does not understand is how a rollback turns into data loss.
  * ------------------------------------------------------------------ */
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 8;
 
 function removeLegacyPins(store){
   const users = [...(store.users || []),
@@ -340,8 +352,72 @@ const MIGRATIONS = [
   // inventing spend. An older build cannot open this store, which is what
   // stops a rollback from serving a client that polls a job table the previous
   // release neither writes nor recovers.
-  store => { store.researchJobs ||= []; }
+  store => { store.researchJobs ||= []; },
+  // 6 -> 7: a member's private draft and their committed answer become two
+  // fields instead of one record with a `submitted` flag, so saving a draft
+  // stops retracting the submission. The conversion is in
+  // migrateIntakeResponses(), which migrate() also runs on every boot; this
+  // rung is the version marker that stops an older build — one that would
+  // write the old shape back over a new draft — from opening the store.
+  store => {
+    for (const s of [...(store.searches || []), ...(store.archivedSearches || [])]) migrateIntakeResponses(s);
+  },
+  // 7 -> 8: public postings and applications from the portal.
+  //
+  // Purely additive, and every existing search is left unpublished. That is
+  // the only safe default: a migration that inferred "this search is
+  // advertising" from an ad plan or a brochure would put a client's search on
+  // the public internet because somebody upgraded the application. Publishing
+  // is a decision a named person makes, and nobody has made it for these.
+  //
+  // The applicant tables start empty. An older build cannot open this store,
+  // which is what stops a rollback from serving a portal whose sessions,
+  // drafts, and receipts the previous release neither writes nor recovers —
+  // and, worse, from continuing to accept applications into records it would
+  // then drop.
+  store => {
+    store.applications ||= [];
+    store.applicants ||= [];
+    store.applicantChallenges ||= [];
+    store.applicantSessions ||= [];
+    for (const s of [...(store.searches || []), ...(store.archivedSearches || [])]) {
+      if (!s.posting) s.posting = postings.blank();
+    }
+  }
 ];
+
+/**
+ * Legacy `intake.submissions` to per-member response records.
+ *
+ * A legacy record held one answer and a `submitted` flag. Read it for what it
+ * was: a flagged record is the member's committed answer, an unflagged one is
+ * a private draft they never sent. Nothing invents a submitted version the old
+ * schema had already overwritten, existing timestamps and roster identity are
+ * carried across, and rerunning it changes nothing.
+ */
+function migrateIntakeResponses(search){
+  const intake = search && search.intake;
+  if (!intake || typeof intake !== 'object') return;
+  intake.responses ||= {};
+  const legacy = intake.submissions;
+  if (!legacy || typeof legacy !== 'object') { delete intake.submissions; return; }
+  for (const [userId, record] of Object.entries(legacy)) {
+    if (!record || typeof record !== 'object') continue;
+    if (intake.responses[userId]) continue;
+    const answer = {
+      items: Array.isArray(record.items) ? record.items : [],
+      mustHave: record.mustHave || '',
+      dealBreaker: record.dealBreaker || '',
+      context: record.context || '',
+      at: record.at || null,
+      updatedAt: record.updatedAt || record.at || null
+    };
+    intake.responses[userId] = record.submitted
+      ? { revision: 1, draft: null, submitted: { ...answer, submittedAt: answer.updatedAt } }
+      : { revision: 1, draft: answer, submitted: null };
+  }
+  delete intake.submissions;
+}
 
 function runMigrations(store){
   const from = Number.isInteger(store.schemaVersion) ? store.schemaVersion : 0;
@@ -404,6 +480,10 @@ function load(){
 function migrate(store){
   store.archivedSearches ||= [];
   store.researchJobs ||= [];
+  store.applications ||= [];
+  store.applicants ||= [];
+  store.applicantChallenges ||= [];
+  store.applicantSessions ||= [];
   store.users = store.users || [];
   organizations.ensureTables(store);
   for (const u of store.users) {
@@ -437,6 +517,10 @@ function migrate(store){
     // Searches written before packages existed ran the whole process. Keep it
     // that way rather than hiding steps that may already have work on file.
     if (!PACKAGES[s.package]) s.package = DEFAULT_PACKAGE;
+    // Unpublished, always, for anything that has never had one. Never inferred
+    // from an ad plan or a brochure: those are drafts of what might be posted,
+    // not a decision to post it.
+    if (!s.posting) s.posting = postings.blank();
     if (!s.staff || typeof s.staff !== 'object') s.staff = {};
     if (!Array.isArray(s.members) || !s.members.length) {
       s.members = [{
@@ -460,9 +544,17 @@ function migrate(store){
         prompt: '',
         openedAt: null,
         closedAt: legacy ? (s.createdAt || now()) : null,
-        submissions: {},
+        responses: {},
         legacy: legacy || undefined
       };
+    }
+    migrateIntakeResponses(s);
+    s.adoptions ||= [];
+    // A profile adopted before adoptions were recorded has no evidence behind
+    // its support claims, and today's tally is not that evidence. Mark it for
+    // review rather than reconstructing a history that was never stored.
+    if ((s.criteria || []).some(c => c && c.from === 'committee' && !c.source) && !s.adoptions.length) {
+      s.adoptionProvenance = 'unverified';
     }
   }
 }
@@ -571,6 +663,22 @@ function canView(search, access){
 /** Editing the search file itself stays with the firm, not the committee. */
 function canEdit(search, access){
   return isStaff(access) && canView(search, access);
+}
+
+/**
+ * Who is on the committee has changed, or is about to.
+ *
+ * A confirmation given before this no longer describes the committee, so it is
+ * withdrawn and asked for again. While the intake window is open the change is
+ * also recorded against the window: who was asked is part of what "2 of 3
+ * answered" means, and the manager confirms the committee again before those
+ * answers are closed or published. Everybody on the roster, including whoever
+ * was just added, keeps answering in the meantime.
+ */
+function rosterChanged(search){
+  if (!search) return;
+  search.team = { confirmedAt: null, confirmedBy: null };
+  if (search.intake?.status === 'open') search.intake.rosterChangedAt = now();
 }
 
 /** Rostering, intake windows, and adoption belong to the account manager. */
@@ -690,7 +798,7 @@ function stepStatus(search, step, cache){
         const intake = search.intake || {};
         if (intake.status === 'closed') status = 'done';
         else if (intake.status === 'open') status = 'now';
-        else status = Object.keys(intake.submissions || {}).length ? 'now' : 'open';
+        else status = Object.keys(intake.responses || {}).length ? 'now' : 'open';
         break;
       }
       case 'profile': {
@@ -757,6 +865,26 @@ function decorate(search, access){
   };
   // History contains prior private scores and staff notes. It has its own editor-only route.
   delete out.history;
+  // Intake is assembled for a named viewer below. The raw record must never
+  // ride along on the spread: with no viewer there is nobody it could be
+  // shared with, so only the window's own state survives.
+  out.intake = { status: (search.intake || {}).status || 'draft', responses: {}, answered: {} };
+  // The adoption records and the publication snapshot are assembled per viewer
+  // too (server/index.js, painted). The stored forms carry a full copy of the
+  // criteria and every source reason, so leaving them on the spread would be a
+  // second path to a profile the viewer is not being shown.
+  delete out.adoptions;
+  delete out.publication;
+  // The posting record, for the same reason as the three above. Everything in
+  // it is the firm's own working material: the draft advertisement and its
+  // compensation line before a client has approved them, and a log naming who
+  // published or paused it and when. server/index.js assigns a small, explicit
+  // summary in its place for a viewer who may edit the search; stripping it
+  // here is what stops the raw record riding along on the spread for everybody
+  // else. Found by the security review of the portal work: the committee
+  // member's payload carried the unapproved salary, invisibly, because the
+  // client never rendered it.
+  delete out.posting;
   if (access) {
     const uid = access.userId;
     const searchRole = memberOf(search, uid);
@@ -772,16 +900,29 @@ function decorate(search, access){
       canEdit: canEdit(search, access),
       canManage: canManage(search, access)
     };
-    // Intake is answered in confidence. Until the manager closes the window,
-    // each person sees only their own submission; showing the room's answers
-    // early would turn independent input into an anchoring exercise.
+    // Intake is answered in confidence. An unfinished draft belongs to its
+    // author and to nobody else, before or after the window closes; closing
+    // publishes committed answers to the room, not everything on file (CA-01).
+    // Named fields only: what is not listed here is not sent, so a field added
+    // to the stored record later is withheld until somebody decides otherwise.
     const intake = search.intake || {};
-    const open = intake.status !== 'closed';
     out.intake = {
-      ...intake,
-      submissions: open
-        ? { [uid]: (intake.submissions || {})[uid] || null }
-        : (intake.submissions || {})
+      status: intake.status || 'draft',
+      dueBy: intake.dueBy || '',
+      prompt: intake.prompt || '',
+      openedAt: intake.openedAt || null,
+      closedAt: intake.closedAt || null,
+      legacy: intake.legacy,
+      completedEmpty: intake.completedEmpty || null,
+      rosterChangedAt: intake.rosterChangedAt || null,
+      responses: committee.visibleResponses(search, {
+        userId: uid,
+        staff: isStaff(access),
+        member: Boolean(searchRole)
+      }),
+      // Who has answered, which the roster ticks need and which discloses
+      // nothing about what anybody said.
+      answered: committee.answeredBy(search)
     };
     if (!search.released) {
       out.scores = { [uid]: (search.scores || {})[uid] || {} };
@@ -895,6 +1036,7 @@ module.exports = {
   initials,
   ensureBackup: () => backup.ensureDaily(DATA_DIR),
   memberOf,
+  rosterChanged,
   accountManager,
   roster,
   pruneOrphanCommittee,
@@ -915,6 +1057,58 @@ module.exports = {
     }
     return null;
   },
+  findOrganization: id => organizations.findOrganization(db, id),
+
+  /* ------------------------------------------------------------------ *
+   * Public posting lookups
+   *
+   * The only path from an address a member of the public typed to a record in
+   * this store. Two properties matter:
+   *
+   *  - Archived searches are not consulted at all. Archiving a search takes it
+   *    off the book, and a posting on an archived search is not something the
+   *    public should still be able to reach.
+   *  - A search whose lifecycle is closed or cancelled is found but reported
+   *    as not live, so the caller can decide between "no such posting" and
+   *    "this one has ended". The caller, not this lookup, owns that wording.
+   * ------------------------------------------------------------------ */
+  livePostings(firmSlug){
+    const out = [];
+    for (const s of db.searches) {
+      const posting = s.posting;
+      if (!posting?.published) continue;
+      if (posting.published.firmSlug !== firmSlug) continue;
+      out.push({ search: s, posting });
+    }
+    return out;
+  },
+
+  findPosting(firmSlug, postingSlug){
+    for (const s of db.searches) {
+      const posting = s.posting;
+      if (!posting?.published) continue;
+      if (posting.published.firmSlug !== firmSlug) continue;
+      if (posting.slug !== postingSlug) continue;
+      return { search: s, posting, organization: organizations.findOrganization(db, s.organizationId) };
+    }
+    return null;
+  },
+
+  /** Every firm with at least one published posting, for the portal index. */
+  publishedFirms(){
+    const seen = new Map();
+    for (const s of db.searches) {
+      const slug = s.posting?.published?.firmSlug;
+      if (!slug) continue;
+      if (!seen.has(slug)) {
+        const organization = organizations.findOrganization(db, s.organizationId);
+        seen.set(slug, { slug, name: organization?.name || 'Recruiting firm', postings: 0 });
+      }
+      seen.get(slug).postings += 1;
+    }
+    return [...seen.values()].sort((a, b) => a.name.localeCompare(b.name));
+  },
+
   touch(search, user, x){
     search.updatedAt = now();
     // `who` is the display name a reader recognises; `by` is the stable account

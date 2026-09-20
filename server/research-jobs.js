@@ -64,6 +64,23 @@ function create({ db, ai, telemetry, aibudget, apply, authorize, research, clock
     return table().find(j => j.id === id) || null;
   }
 
+  /**
+   * Find the operation an idempotency key names, without starting one.
+   *
+   * The browser can lose the answer to a start request, which leaves it holding
+   * a key and no job id: it cannot poll, and it cannot honestly say whether
+   * anything is running. Retrying the start would be one way to find out, and
+   * it is the wrong way — a start request is allowed to create work. This reads
+   * only (D03).
+   */
+  function findByKey(searchId, userId, key){
+    const wanted = String(key || '').trim();
+    if (!wanted) return null;
+    return table().find(j => j.idempotencyKey === wanted
+      && j.searchId === searchId
+      && j.requestedBy === userId) || null;
+  }
+
   function activeFor(searchId){
     return table().find(j => j.searchId === searchId && !TERMINAL.has(j.state)) || null;
   }
@@ -247,7 +264,38 @@ function create({ db, ai, telemetry, aibudget, apply, authorize, research, clock
     }
   }
 
+  /**
+   * A terminal state, reached while this run was still finishing.
+   *
+   * Cancellation and the restart sweep both write a terminal state from outside
+   * the run, and the run then carries on to whatever it was going to conclude.
+   * The state already recorded stands; what the run learned is still attached,
+   * because the findings were paid for and are worth reviewing. This is the last
+   * line of defence behind the pre-save checks, not a substitute for them: it
+   * keeps the record honest, it cannot un-write a file.
+   */
+  function attachLate(job, state, { result = null, usage = null, usageKnown = false, model = null, rounds = 0 } = {}){
+    if (result && !job.result) job.result = result;
+    if (usage && !job.usage) job.usage = usage;
+    if (usageKnown && !job.usageKnown) job.usageKnown = true;
+    if (model && !job.model) job.model = model;
+    if (rounds && !job.rounds) job.rounds = rounds;
+    live.delete(job.id);
+    try { db.persist(); } catch (error) {
+      telemetry.log.error('research-job-persist-failed', { job: job.id, state: job.state, error: error.message });
+    }
+    telemetry.log.warn('research-job-terminal-conflict', { job: job.id, kept: job.state, refused: state });
+    schedulePump();
+  }
+
   function finish(job, state, { failure = null, result = null, usage = null, usageKnown = false, model = null, rounds = 0 } = {}){
+    // A job that is already terminal keeps the state it reached. Without this,
+    // a run that concluded "succeeded" after cancel() had recorded "cancelled"
+    // overwrote it, and the record then said the opposite of what happened.
+    if (TERMINAL.has(job.state) && job.state !== state) {
+      attachLate(job, state, { result, usage, usageKnown, model, rounds });
+      return;
+    }
     job.state = state;
     job.stage = state === 'succeeded' ? 'done' : job.stage;
     job.finishedAt = new Date(clock()).toISOString();
@@ -264,11 +312,18 @@ function create({ db, ai, telemetry, aibudget, apply, authorize, research, clock
       // logged loudly rather than swallowed.
       telemetry.log.error('research-job-persist-failed', { job: job.id, state, error: error.message });
     }
+    const ms = Date.parse(job.finishedAt) - Date.parse(job.createdAt);
     telemetry.log.info('research-job', {
-      job: job.id, event: state, rounds: job.rounds,
-      ms: Date.parse(job.finishedAt) - Date.parse(job.createdAt),
+      job: job.id, event: state, rounds: job.rounds, ms,
       code: failure ? failure.code : null
     });
+    // The outcome of the job, which is a different measurement from the
+    // outcome of the provider call inside it: a call that answered and then
+    // could not be saved is a success by one count and a failure by the other,
+    // and readiness has to be able to tell them apart (D07).
+    if (typeof telemetry.recordResearchOutcome === 'function') {
+      telemetry.recordResearchOutcome({ state, code: failure ? failure.code : null, ms, rounds: job.rounds });
+    }
     schedulePump();
   }
 
@@ -377,33 +432,41 @@ function create({ db, ai, telemetry, aibudget, apply, authorize, research, clock
       unknownUsageAttempts: op.unknownUsageAttempts
     });
 
+    // What the run learned, attached to whatever the save decides, so every
+    // path below reports the same cost and the same findings.
+    const ledger = () => ({
+      result: reviewableResult(out, { applied: false }),
+      usage: op.usageKnown ? op.usage : null,
+      usageKnown: op.usageKnown,
+      model: out.model,
+      rounds: op.rounds
+    });
+
     // A cancellation that arrived while the provider was answering wins. The
     // work is paid for either way, but it is not written to the file.
-    if (job.state === 'cancelled' || op.cancelled) {
-      finish(job, 'cancelled', {
-        result: reviewableResult(out, { applied: false }),
-        usage: op.usageKnown ? op.usage : null,
-        usageKnown: op.usageKnown,
-        model: out.model,
-        rounds: op.rounds
-      });
-      return;
-    }
+    if (stopped(job, op)) { concludeStopped(job, op, ledger()); return; }
 
     stageOf(job, 'saving');
     let verdict;
     try {
-      verdict = await authorize(job);
+      // Bounded by what is left of this operation's deadline. The directory
+      // lookup carries no abort signal of its own, so an unreachable directory
+      // held the save phase open past the deadline, and the cancellation check
+      // on the near side of this await was the last one before the write (D02).
+      verdict = await op.guard(authorize(job), 'the access check');
     } catch (error) {
+      // Three different things arrive here and must not be conflated: the
+      // consultant cancelled, the operation ran out of time, or the directory
+      // could not answer. None of them is a reason to write.
+      if (stopped(job, op) || error.code === 'RESEARCH_CANCELLED' || error.code === 'RESEARCH_TIMEOUT') {
+        concludeStopped(job, op, ledger(), error);
+        return;
+      }
       // The directory being unreachable is not a reason to write into a
       // workspace whose membership we could not confirm.
       finish(job, 'failed', {
         failure: { code: 'RESEARCH_UNVERIFIED', error: 'Slate could not confirm your access to this search, so the result was not saved. Reload and review it.' },
-        result: reviewableResult(out, { applied: false }),
-        usage: op.usageKnown ? op.usage : null,
-        usageKnown: op.usageKnown,
-        model: out.model,
-        rounds: op.rounds
+        ...ledger()
       });
       telemetry.log.warn('research-job-unverified', { job: job.id, error: error.message });
       return;
@@ -414,11 +477,7 @@ function create({ db, ai, telemetry, aibudget, apply, authorize, research, clock
         failure: { code: verdict.code, error: verdict.error },
         // Kept for review rather than discarded: the findings were paid for,
         // and a consultant who reloads can decide what to do with them.
-        result: reviewableResult(out, { applied: false }),
-        usage: op.usageKnown ? op.usage : null,
-        usageKnown: op.usageKnown,
-        model: out.model,
-        rounds: op.rounds
+        ...ledger()
       });
       return;
     }
@@ -426,13 +485,30 @@ function create({ db, ai, telemetry, aibudget, apply, authorize, research, clock
     if (out.partial) {
       // Supported findings with named gaps. Offered for review; never written
       // over a consultant's own work without them asking.
-      finish(job, 'partial', {
-        result: reviewableResult(out, { applied: false }),
-        usage: op.usageKnown ? op.usage : null,
-        usageKnown: op.usageKnown,
-        model: out.model,
-        rounds: op.rounds
-      });
+      finish(job, 'partial', ledger());
+      return;
+    }
+
+    /* ----------------------------------------------------------------
+     * The write.
+     *
+     * Everything from here to apply() is synchronous, deliberately. The last
+     * check before a write has to be the last thing that happens before it: an
+     * await in between is a window in which Cancel can be pressed, the deadline
+     * can pass, or the search can be edited, and the reproduction in
+     * docs/audits/2026-09-16-website-audit showed all three landing on the file
+     * anyway.
+     * ---------------------------------------------------------------- */
+    if (stopped(job, op)) { concludeStopped(job, op, ledger()); return; }
+
+    // The synchronous half of the access check, re-run against the store as it
+    // is now rather than as it was before the await: the search may have been
+    // edited, closed, moved, or deleted while the directory was answering. The
+    // asynchronous half — the directory lookup — is not repeated, because its
+    // answer is what this verdict carries.
+    const confirmed = typeof verdict.recheck === 'function' ? verdict.recheck() : verdict;
+    if (!confirmed.ok) {
+      finish(job, 'failed', { failure: { code: confirmed.code, error: confirmed.error }, ...ledger() });
       return;
     }
 
@@ -440,15 +516,12 @@ function create({ db, ai, telemetry, aibudget, apply, authorize, research, clock
     // persist, so there is no window where the file has the research and the
     // job still says it is running.
     try {
-      apply(verdict.search, verdict.user, { city: job.input.city, website: job.input.website, out });
+      apply(confirmed.search || verdict.search, confirmed.user || verdict.user,
+        { city: job.input.city, website: job.input.website, out });
     } catch (error) {
       finish(job, 'failed', {
         failure: { code: 'RESEARCH_SAVE_FAILED', error: 'The research could not be written to the search file. Review it and try again.' },
-        result: reviewableResult(out, { applied: false }),
-        usage: op.usageKnown ? op.usage : null,
-        usageKnown: op.usageKnown,
-        model: out.model,
-        rounds: op.rounds
+        ...ledger()
       });
       telemetry.log.error('research-job-save-failed', { job: job.id, error: error.message });
       return;
@@ -459,6 +532,41 @@ function create({ db, ai, telemetry, aibudget, apply, authorize, research, clock
       usageKnown: op.usageKnown,
       model: out.model,
       rounds: op.rounds
+    });
+  }
+
+  /**
+   * Is this operation over, whatever the provider just handed back?
+   *
+   * Cancellation and expiry are both checked, and both are checked again after
+   * every await in the save phase. Reading the job record as well as the
+   * operation is not redundancy: cancel() marks the record terminal from
+   * outside the run, and a restart's recovery sweep can too.
+   */
+  function stopped(job, op){
+    return TERMINAL.has(job.state) || op.cancelled || op.expired();
+  }
+
+  /**
+   * Conclude a job that was stopped rather than finished.
+   *
+   * Cancellation is reported as cancellation and expiry as expiry, because a
+   * consultant who pressed Cancel must not be told the provider was slow. The
+   * findings are kept for review either way; nothing is written.
+   */
+  function concludeStopped(job, op, ledger, error = null){
+    const cancelled = job.state === 'cancelled' || op.cancelled
+      || (error && error.code === 'RESEARCH_CANCELLED');
+    if (cancelled) {
+      finish(job, 'cancelled', ledger);
+      return;
+    }
+    finish(job, 'failed', {
+      failure: {
+        code: 'RESEARCH_TIMEOUT',
+        error: 'Research ran past its time limit before it could be saved. Nothing was written. Review what it found, or try again.'
+      },
+      ...ledger
     });
   }
 
@@ -511,6 +619,12 @@ function create({ db, ai, telemetry, aibudget, apply, authorize, research, clock
     }
     if (TERMINAL.has(job.state)) return { job };
     const op = live.get(job.id);
+    // A job that never started has no run to conclude it, so its outcome is
+    // recorded here. One that is running is recorded when its run finishes,
+    // which is the same cancellation counted once rather than twice.
+    if (!op && job.state === 'queued' && typeof telemetry.recordResearchOutcome === 'function') {
+      telemetry.recordResearchOutcome({ state: 'cancelled', code: null, ms: clock() - Date.parse(job.createdAt), rounds: 0 });
+    }
     job.state = 'cancelled';
     job.finishedAt = new Date(clock()).toISOString();
     job.failure = null;
@@ -627,7 +741,7 @@ function create({ db, ai, telemetry, aibudget, apply, authorize, research, clock
   }
 
   return {
-    enabled, table, find, activeFor, latestFor, referenceFor, publicJob,
+    enabled, table, find, findByKey, activeFor, latestFor, referenceFor, publicJob,
     start: startJob, cancel, applyReviewed, recover, prune, dropForSearch, stop,
     counts: () => ({ queued: queued(), running: running(), total: table().length }),
     MAX_QUEUED

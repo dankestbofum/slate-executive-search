@@ -1,0 +1,32 @@
+﻿{
+    "recordedAtUtc":  "2026-09-18T00:43:43.9727506Z",
+    "commit":  "9290200ca6c0d6904d5f704cc4b96040ea91fa29",
+    "nodeVersion":  "v22.18.0",
+    "sourceFiles":  [
+                        {
+                            "path":  "server/committee.js",
+                            "sha256":  "b2db6d0b678c86efbc425848fc8d3e9bd73471907c7622618dc0588eebd932f9"
+                        },
+                        {
+                            "path":  "server/index.js",
+                            "sha256":  "9022a7c44536f38880afa7ff7e2fb2a64a4ea6c67df7488709a93d3b8c820bd3"
+                        },
+                        {
+                            "path":  "server/db.js",
+                            "sha256":  "b99008a2ca490fb05f1deb7001a7b51c26272ced8c346443f52ed3e27b6e0faf"
+                        },
+                        {
+                            "path":  "server/integrity.js",
+                            "sha256":  "7407bdf23529537a3c80eb6444af2727506ec7a149cb46c0b8cbed79865b0156"
+                        },
+                        {
+                            "path":  "server/ai.js",
+                            "sha256":  "344f108830d061ceeaced5e4d9400bd467cb6ea18fb16623c9828098ba0fcad5"
+                        },
+                        {
+                            "path":  "public/app.js",
+                            "sha256":  "2a94236b219f9cee2b6b99a98ec596a356f02d8739733a8d412a2f5c68662453"
+                        }
+                    ],
+    "scope":  "Local code and synthetic fixture data; no deployed parity assertion"
+}

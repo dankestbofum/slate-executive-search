@@ -53,8 +53,15 @@ const CLERK_CSP = clerkOrigin ? CSP_DIRECTIVES.map(directive => {
 // leak the candidate's token to any site they navigate to next.
 const BEARER_PATH = /^\/(api\/)?apply(\/|$)/;
 
+// The careers portal and the applicant API. No staff identity provider is
+// involved in any of it, so it gets the strict policy with no third-party
+// origin at all rather than inheriting the one widened for Clerk. A page that
+// members of the public open should carry the smallest policy that works.
+const PUBLIC_PATH = /^\/(careers(\/|$)|api\/(public|applications)(\/|$))/;
+
 function securityHeaders(req, res, next) {
-  res.set('Content-Security-Policy', BEARER_PATH.test(req.path) ? CSP : CLERK_CSP);
+  const narrow = BEARER_PATH.test(req.path) || PUBLIC_PATH.test(req.path);
+  res.set('Content-Security-Policy', narrow ? CSP : CLERK_CSP);
   res.set('X-Content-Type-Options', 'nosniff');
   // frame-ancestors covers modern browsers; this is the legacy companion.
   res.set('X-Frame-Options', 'DENY');
@@ -159,7 +166,12 @@ function safePath(value) {
   const path = String(value || '').split('?')[0];
   return path
     .replace(/^(\/(?:api\/)?apply)\/[^/]+/, '$1/:token')
-    .replace(/^(\/media)\/[^/]+/, '$1/:id');
+    .replace(/^(\/media)\/[^/]+/, '$1/:id')
+    // An application id is not a bearer token — ownership is checked against
+    // the session on every request — but it identifies one person's
+    // application, and a request log is not the place to be able to count who
+    // applied for what.
+    .replace(/^(\/api\/applications)\/(apl-[^/]+)/, '$1/:id');
 }
 
 const SECRET_KEYS = /^(pin|password|secret|token|invite|apiKey|authorization|cookie)$/i;

@@ -71,6 +71,15 @@ const ACTIONS = {
     label: 'Certify sourcing or interview work',
     error: 'A consultant in this workspace signs off on staff work.'
   },
+  publishPosting: {
+    authority: 'manager',
+    label: 'Publish, pause, close, or republish the public job posting',
+    // The one decision in the application that puts a client's search in front
+    // of the general public. Consultants write the posting and preview it; the
+    // act of making it reachable belongs to the person accountable for the
+    // engagement.
+    error: 'Publishing a public job posting, or changing whether it accepts applications, is the search manager’s decision. Prepare the posting and preview it, then ask them.'
+  },
   closeSearch: {
     authority: 'manager',
     label: 'Close or cancel the search',

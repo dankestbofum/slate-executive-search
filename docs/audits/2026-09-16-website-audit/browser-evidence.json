@@ -1,0 +1,54 @@
+{
+  "observedAtUtc": "2026-09-17T03:18:45.645Z",
+  "target": "https://slate-executive-search.onrender.com/#/home",
+  "method": "Codex in-app browser, anonymous live UI, accessibility tree, screenshots and read-only DOM measurements",
+  "desktop": {
+    "width": 1280,
+    "height": 720,
+    "documentWidth": 1280,
+    "landingTitle": "A guided executive search",
+    "buttons": [
+      "Sign in",
+      "Sign up"
+    ],
+    "signInHeading": "Sign in to My Application",
+    "developmentModeVisible": true
+  },
+  "mobile": {
+    "width": 390,
+    "height": 844,
+    "screens": [
+      "landing",
+      "sign-in",
+      "sign-up"
+    ],
+    "documentWidthOnAllScreens": 390,
+    "formControlsWithHorizontalOverflow": 0,
+    "signInHeading": "Sign in to My Application",
+    "signUpHeading": "Create your account",
+    "developmentModeVisible": true
+  },
+  "keyboard": {
+    "signInEscapeCloses": true,
+    "signInFocusRestored": true,
+    "signUpEscapeCloses": true,
+    "signUpFocusRestored": true
+  },
+  "console": [
+    {
+      "level": "warn",
+      "timestamp": "2026-09-17T03:09:39.827Z",
+      "message": "Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production.",
+      "source": "Clerk browser SDK"
+    }
+  ],
+  "limits": [
+    "No authenticated session",
+    "No form submissions",
+    "No real-device testing",
+    "No new automated accessibility scan",
+    "Console capture only: not a complete network-error log"
+  ],
+  "productionWrites": false,
+  "paidProviderCalls": false
+}

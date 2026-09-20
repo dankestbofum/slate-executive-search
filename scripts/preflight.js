@@ -14,8 +14,16 @@
 // never in a routine check or in the test suite.
 //
 // Exits non-zero if anything required is missing or unavailable.
+//
+// It reads configuration the way the application does, through server/env.js:
+// a local .env in development, the platform's own environment in production.
+// Before that it read bare process.env, so on a developer's machine it
+// reported no API key while `npm run dev` two terminals away had one — a
+// diagnostic that disagreed with the thing it was diagnosing (D10).
 
 const Anthropic = require('@anthropic-ai/sdk');
+const env = require('../server/env');
+const loaded = env.loadLocalEnv();
 const budget = require('../server/aibudget');
 
 const WANTED = {
@@ -33,6 +41,19 @@ function report(ok, label, detail) {
 
 (async () => {
   console.log('Slate AI preflight\n');
+
+  // Which configuration this run is reporting on. Without this line a FAIL
+  // below is ambiguous: it could be a missing key or a key the check never
+  // looked for.
+  console.log('Configuration source: ' + (loaded.loaded
+    ? loaded.path + ' (' + loaded.keys + ' variable(s)), over the process environment'
+    : loaded.reason === 'production'
+      ? 'the deployment environment (NODE_ENV=production; a local .env is ignored here, by design)'
+      : loaded.reason === 'test'
+        ? 'the process environment (NODE_ENV=test)'
+        : 'the process environment only — ' + loaded.path + ' was not read'
+          + (loaded.error ? ' (' + loaded.error + ')' : '')));
+  console.log('Node ' + process.versions.node + '; NODE_ENV=' + (process.env.NODE_ENV || 'unset') + '\n');
 
   const key = String(process.env.ANTHROPIC_API_KEY || '').trim();
   report(Boolean(key), 'ANTHROPIC_API_KEY is set',
@@ -78,11 +99,39 @@ function report(ok, label, detail) {
     }
   }
 
+  /* --------------------------------------------------------------------- *
+   * The public portal
+   *
+   * Not a pass or a fail: all three of these are legitimately off, and a
+   * deployment that only advertises jobs never needs them. But an operator
+   * about to publish a posting should be told what an applicant will actually
+   * be able to do, before somebody finds out by trying to apply.
+   * --------------------------------------------------------------------- */
+  const mailer = require('../server/mailer');
+  const files = require('../server/application-files');
+
+  console.log('\nPublic careers portal');
+  const mail = mailer.status();
+  console.log('  ' + (mail.configured ? ' ok  ' : ' off ') + 'Mail transport: ' + mail.transport);
+  console.log('        ' + mail.note);
+  const uploads = files.uploadsEnabled();
+  console.log('  ' + (uploads ? ' ok  ' : ' off ') + 'Application uploads: ' + (uploads ? 'on' : 'off'));
+  const scanner = files.scannerStatus();
+  console.log('  ' + (scanner.scans ? ' ok  ' : ' off ') + 'File scanner: ' + scanner.scanner);
+  console.log('        ' + scanner.note);
+  if (!mail.configured) {
+    console.log('        A posting will publish as a readable advertisement with its support');
+    console.log('        contact, and will not offer an application form.');
+  }
+
   console.log('\nWhat this did NOT check:');
+  console.log('  - Whether mail is actually delivered. That needs a controlled recipient.');
   console.log('  - Whether a draft or a research run actually succeeds. That is a billed call.');
   console.log('  - Latency or real cost under load.');
   console.log('  - Tool and effort compatibility in practice.');
   console.log('  Those need an explicitly authorised staging run against synthetic records.');
+  console.log('\n  To check the deployment rather than a laptop, run this inside the running');
+  console.log('  service (the image carries it), so it reads the same environment the app does.');
 
   if (failed) console.log('\nPreflight failed. Fix the items marked FAIL before relying on AI features.');
   else console.log('\nPreflight passed.');
