@@ -18,6 +18,11 @@ RUN npm ci --omit=dev && npm cache clean --force
 
 COPY server ./server
 COPY public ./public
+# The user guide. server/help.js requires it at load, and help.verify() runs at
+# boot, so an image without this does not fail at the help screen — it fails to
+# start at all. It is content rather than code, which is exactly why it was
+# easy to leave out of the image.
+COPY content ./content
 COPY scripts/backup.js ./scripts/backup.js
 COPY scripts/container-persistence.js ./scripts/container-persistence.js
 # The operator preflight. It is the documented way to check model entitlement,
