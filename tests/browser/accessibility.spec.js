@@ -46,11 +46,20 @@ async function scan(page) {
 // Buttons animate their background over 120ms, so a scan started immediately
 // after the switch measures a colour that is on its way from one palette to
 // the other and reports contrast that never actually settles on screen.
+//
+// The drawer is opened only when it is not already open. Toggling it blindly
+// asks the Menu button for the opposite of whatever state the drawer is in,
+// which is not what this helper wants from it: it wants the theme controls
+// reachable. The two are the same thing only when the drawer is known to be
+// closed, and it is not — a drawer opened while a screen was still loading is
+// legitimately still open when that screen lands.
 async function setTheme(page, theme) {
   const menu = page.getByRole('button', { name: 'Menu', exact: true });
   const inDrawer = await menu.isVisible().catch(() => false);
-  if (inDrawer) await menu.click();
-  await page.locator('button[data-theme="' + theme + '"]').click();
+  if (inDrawer && (await menu.getAttribute('aria-expanded')) !== 'true') await menu.click();
+  const control = page.locator('button[data-theme="' + theme + '"]');
+  await expect(control).toBeVisible();
+  await control.click();
   if (inDrawer) await page.keyboard.press('Escape');
   await page.waitForTimeout(300);
 }
@@ -272,6 +281,11 @@ test('a populated workspace screen has no WCAG 2.1 AA violations, in either them
   for (const view of ['screen', 'profile', 'new']) {
     const path = view === 'new' ? '/#/new' : '/#/s/' + search.id + '/' + view;
     await page.goto(path);
+    // These are same-document hash moves, so the previous screen's heading is
+    // still on the page and satisfies the check below on its own. Waiting for
+    // the router's own fetches to finish is what makes the scan measure the
+    // screen that was asked for rather than the one being left.
+    await page.waitForLoadState('networkidle');
     await expect(page.locator('#main h1')).toBeVisible({ timeout: 10000 });
 
     for (const theme of ['light', 'dark']) {
@@ -328,6 +342,8 @@ test('the record-keeping screens have no WCAG 2.1 AA violations, in either theme
   ];
   for (const [view, tab] of surfaces) {
     await page.goto('/#/s/' + search.id + '/' + view);
+    // Same-document moves: settle before scanning. See the note above.
+    await page.waitForLoadState('networkidle');
     await expect(page.locator('#main h1')).toBeVisible({ timeout: 10000 });
     if (tab) await page.getByRole('tab', { name: tab }).click();
 

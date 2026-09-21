@@ -154,19 +154,102 @@ can do it under pressure.
 
 ## 6. Retention
 
-**Nothing is deleted automatically.** Snapshots accumulate until an operator
-removes them. This is deliberate: retention is a records policy, and a
-destructive job that runs before the policy exists could destroy something
-under legal hold.
+There are **two retentions**, they have different owners, and confusing them is
+how records get destroyed. Losing a recovery point is an operational cost.
+Losing a record is a legal one.
 
-Monitor disk use. `/api/ready` reports snapshot counts; the volume's own
-metrics report space.
+### 6a. Recovery retention — automatic, operational, Slate's
 
-> **Owner decision — not made.** The retention schedule, agreed with the county
-> records officer, including legal holds. Keep the short operational rotation
-> (how many recent snapshots to keep for recovery) separate from the official
-> records retention period for search records — they are different questions
-> with different owners.
+A rolling window of recovery points, so that a bad write, a bad migration or an
+accidental deletion can be undone. This is the only thing Slate deletes, and it
+deletes nothing else.
+
+| Kind | Name | Swept? | Window |
+|---|---|---|---|
+| Daily | `2026-09-21` | Yes | `SLATE_BACKUP_KEEP_DAYS` (default 14) |
+| Scheduled | `2026-09-21T04-30-00-000Z` | Yes | `SLATE_RECOVERY_KEEP_SNAPSHOTS` (default 24) |
+| Anything else | `pre-migration-*`, `legal-hold-*`, a name you chose | **Never** | — |
+
+The rule is the names: the sweep only ever removes a directory whose name Slate
+itself generated on a schedule. A directory named anything else is protected,
+whatever its age. **To hold a snapshot indefinitely, rename it** to something
+that is not a bare date or a bare timestamp.
+
+The scheduled window is counted in snapshots rather than days because that is
+what bounds the disk — the interval is configurable, so "a day of snapshots" is
+not a fixed number of copies but this is. At the default hourly interval, 24 is
+one day.
+
+Further safeguards, all covered by `tests/recovery.js`:
+
+- the sweep runs **after** a new snapshot has been taken and verified, never
+  before, so it cannot drop the last good copy and then fail to write its
+  replacement;
+- the newest snapshot is never removed, whatever the windows say;
+- it runs whether or not the off-volume copy succeeded — the window is what
+  keeps the volume from filling, and a mirror outage must not turn into a full
+  disk;
+- a directory that will not delete is reported on `/api/ready`
+  (`storage.retention.failed`), not retried into a loop.
+
+This sweep did not previously recognise scheduled snapshots, so they
+accumulated for ever. If you are upgrading a deployment that ran before that
+was fixed, **check `DATA_DIR/backups/` for an accumulated pile** — the sweep
+will now bring it down to the window on its next run, so confirm first that
+nothing in there is being kept deliberately, and rename it if it is.
+
+### 6b. Records retention — the records custodian's, not Slate's
+
+The official schedule for search records, candidate records, applications and
+uploaded materials. Slate does not implement this and must not be assumed to:
+nothing here expires a record, and a swept recovery snapshot is not a deleted
+record.
+
+Storage locations a records decision has to cover:
+
+| Location | Holds |
+|---|---|
+| `DATA_DIR/slate.json` | Searches, candidates, scores, decisions, audit history, applications |
+| `DATA_DIR/application-files/` | Applicant-uploaded PDFs (when uploads are on) |
+| `DATA_DIR/media/` | Brochure photography |
+| `DATA_DIR/backups/` | Recovery snapshots of all of the above |
+| Off-volume destination | Copies of those snapshots |
+| Exports | Whatever has been exported out of Slate, wherever it was put |
+
+> **Owner decision — not made.** The retention schedule, agreed with the records
+> custodian and counsel: how long search records are kept, how long applications
+> and uploaded materials are kept, and what happens at the end of each period.
+> Do not infer a period from the recovery window above; they are different
+> questions with different owners.
+
+### 6c. Legal holds
+
+When a hold is received, ordinary automated cleanup must not destroy held
+material. In Slate today that means:
+
+1. **Identify every location** from the table in §6b, not just the store.
+   Applicant materials and exports are the ones most often missed.
+2. **Protect the snapshots that carry it.** Rename any snapshot that must be
+   kept so it is no longer a bare date or timestamp — `legal-hold-<matter>-…`
+   is enough, because the sweep only touches names it generated. Do this before
+   the next scheduled run.
+3. **Suspend draft expiry if it is in scope.** Expired application drafts are
+   removed along with their files; a hold covering an unsubmitted application
+   needs that application taken out of the expiry path by hand.
+4. **Record what was held, where, and by whom**, and tell the operator and the
+   records custodian, so a later cleanup does not undo it.
+5. **Do not rely on the off-volume copy as the held record.** It is subject to
+   whatever retention the destination has.
+
+> **Owner decision — not made.** Who receives a hold, who executes it, how it is
+> recorded, and how it is released. Counsel's call, not an engineering one.
+
+### Monitoring disk use
+
+`/api/ready` reports, under `storage.usage`: the store, applicant materials,
+media and snapshot bytes, the total, the snapshot count, and the configured
+windows. `storage.retention` reports what the last sweep did. Counts and sizes
+only — never a filename or a record.
 
 ## 7. Platform volume backups
 

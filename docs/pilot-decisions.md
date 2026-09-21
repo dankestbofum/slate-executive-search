@@ -48,8 +48,26 @@ assign them.
 login.** Whether an application is disclosable is a question of law, not of
 access control.
 
-Until 2.3 and 2.4 are decided, **nothing is deleted automatically** — no
-retention job runs. See `docs/operations.md` §6.
+Until 2.3 and 2.4 are decided, **no records retention job runs** — nothing
+expires a search, a candidate, an application or an uploaded document on the
+basis of age.
+
+Two things *are* deleted automatically, and neither is a records decision.
+Both are named here so that "nothing is deleted" is not repeated as though it
+were true:
+
+- **Recovery snapshots outside their window.** A rolling window of recovery
+  points, swept by name: only a bare date or a bare timestamp is ever removed,
+  and anything else — `pre-migration-*`, a hand-labelled copy, a legal hold — is
+  protected whatever its age. Deleting a recovery point is not deleting a
+  record. `docs/operations.md` §6a.
+- **Expired application drafts**, after 14 days, along with their uploaded
+  files. A draft is not an application: it is invisible to staff, in no export,
+  and saving again puts the expiry back. A *submitted* application never
+  expires.
+
+If a legal hold could reach either, see `docs/operations.md` §6c before the
+next scheduled run.
 
 ## 3. What the export contains, and what it does not
 
@@ -210,10 +228,13 @@ is a conflict between two things this repository currently says:
    account may make material decisions at all.
 2. Proposed session length against the session policy actually configured in the
    hosted Clerk instance. The proposal is not the configuration.
-3. "Nothing is deleted automatically" against the documented 14-day expiry of a
-   candidate's saved draft. Both cannot be true. Decide which drafts and records
-   must be preserved under the accepted retention and legal-hold policy, and
-   make the application and the notice say the same thing.
+3. ~~"Nothing is deleted automatically" against the documented 14-day expiry of a
+   candidate's saved draft.~~ **Resolved as a wording conflict, not a decision.**
+   §2 above now states exactly what is deleted automatically — expired drafts,
+   and recovery snapshots outside their window — and separates both from records
+   retention. The underlying decision is still open: decide which drafts and
+   records must be preserved under the accepted retention and legal-hold policy,
+   and make the application and the notice say the same thing.
 
 ## Before real candidate information is entered
 

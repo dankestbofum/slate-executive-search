@@ -13,9 +13,14 @@
 //    decision. SLATE_BACKUP_MIRROR takes a path (a second mounted volume) and
 //    SLATE_BACKUP_COMMAND takes whatever approved tool the operator already
 //    uses, so neither requires this file to name a vendor.
-//  - It does not delete anything on a schedule. Retention is a records policy
-//    the county has not set, and an automatic destructive job before that
-//    policy exists could destroy something under legal hold.
+//  - It does not apply a records retention policy. What it sweeps is its own
+//    rolling recovery window — the scheduled snapshots this file created,
+//    against the window in server/backup.js — and nothing else. A
+//    `pre-migration-*` or hand-labelled copy is never touched. Official
+//    records live in the store and in exports and are governed by the records
+//    custodian's policy and by legal holds. The two retentions are set out in
+//    docs/operations.md and must not be confused: losing a recovery point is
+//    an operational cost, losing a record is a legal one.
 
 const fs = require('fs');
 const path = require('path');
@@ -206,6 +211,7 @@ async function runOnce(config) {
       state.mirrorCount += 1;
     }
   } catch (error) {
+    // Recorded below, then the sweep still runs: see the note there.
     // Never surface a backup failure as an application error. The operator is
     // told; the app keeps serving. A failed backup is an incident to act on,
     // not a reason to stop a search from being worked on.
@@ -213,6 +219,24 @@ async function runOnce(config) {
     if (state.lastSnapshotAt === null || !state.lastSnapshotPath) state.lastSnapshotError = message;
     else state.lastMirrorError = message;
     console.error('Slate: scheduled recovery copy failed: ' + message);
+  }
+
+  // The sweep, and only now: after a new snapshot has been created and
+  // verified, never before. A sweep that ran first could drop the last good
+  // copy and then fail to write its replacement.
+  //
+  // It runs whether or not the mirror succeeded, and that is deliberate. The
+  // window it enforces is what keeps the volume from filling; skipping it
+  // through a mirror outage would turn a recoverable alert into a full disk,
+  // which is the failure that stops the application saving at all. It never
+  // touches the newest snapshot, so there is always something to mirror once
+  // the far end comes back.
+  if (state.lastSnapshotAt && !state.lastSnapshotError) {
+    try { backup.pruneSnapshots(dataDir); }
+    catch (error) {
+      // Retention failing is an operator problem, never an application one.
+      console.error('Slate: snapshot sweep failed: ' + (error.message || String(error)));
+    }
   }
   return status(config);
 }
@@ -293,6 +317,6 @@ function stop() {
 }
 
 module.exports = {
-  snapshotNow, mirrorSnapshot, encryptTree, decryptTree, keyFrom,
+  snapshotName, snapshotNow, mirrorSnapshot, encryptTree, decryptTree, keyFrom,
   configure, start, stop, runOnce, status, state
 };

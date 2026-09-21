@@ -83,6 +83,59 @@ test('the navigation drawer closes with Escape and gives focus back', async ({ p
   await expect(menu).toBeFocused();
 });
 
+// The drawer used to be closed by whichever navigation happened to be in
+// flight, because go() wrote navOpen=false when a move was *asked for* and the
+// render that applied it could be seconds later. On a phone the drawer is the
+// only navigation there is, so a menu opened while a screen was still loading
+// was torn down as that screen landed — taking the destinations and the theme
+// controls with it. This is the pair that holds the corrected rule: a screen
+// change closes the menu you left from, and only that one.
+test('a screen change closes the drawer it was started from', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'mobile-chrome', 'the drawer only exists below the breakpoint');
+  await workspace(page);
+  const search = await makeSearch(page, { client: 'Drawer City', position: 'City Manager' });
+
+  await page.goto('/#/s/' + search.id + '/overview');
+  await expect(page.locator('#main h1')).toBeVisible({ timeout: 10000 });
+
+  await page.getByRole('button', { name: 'Menu', exact: true }).click();
+  await expect(page.locator('.rail')).toBeVisible();
+
+  // Choosing a destination from the open drawer is what closes it.
+  await page.locator('.rail__link', { hasText: 'Process checklist' }).click();
+  await expect(page.locator('.rail')).toBeHidden();
+});
+
+test('a navigation already running does not close a drawer opened while it loads', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'mobile-chrome', 'the drawer only exists below the breakpoint');
+  await workspace(page);
+  const search = await makeSearch(page, { client: 'Held City', position: 'City Manager' });
+
+  // Hold the search load that the router awaits before it commits the screen,
+  // which is the window a slow connection opens on its own.
+  let release;
+  const held = new Promise(resolve => { release = resolve; });
+  await page.route('**/api/searches/' + search.id, async route => { await held; await route.continue(); });
+
+  page.goto('/#/s/' + search.id + '/overview').catch(() => {});
+  await expect(page.locator('#main h1')).toBeVisible({ timeout: 10000 });
+
+  const menu = page.getByRole('button', { name: 'Menu', exact: true });
+  await menu.click();
+  await expect(page.locator('.rail')).toBeVisible();
+  const theme = page.locator('button[data-theme="light"]');
+  await expect(theme).toBeVisible();
+
+  release();
+  // The held screen lands. The drawer the user opened after asking for it
+  // stays open, and its controls stay usable.
+  await expect(page.locator('#main h1')).toBeVisible();
+  await expect(page.locator('.rail')).toBeVisible();
+  await expect(theme).toBeVisible();
+  await theme.click();
+  await expect(theme).toHaveAttribute('aria-pressed', 'true');
+});
+
 test('switching theme never writes aria-pressed onto the document element', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop-chrome', 'one pass over the theme controls is enough');
   await workspace(page);

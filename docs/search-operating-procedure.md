@@ -109,8 +109,16 @@ shows the change rather than only the final state.
 
 ## 5. Resume and application storage
 
+Slate runs in one of two modes here, and which one this engagement uses is a
+decision that has to be made before a posting is published.
+
+### 5a. Inventory mode — the default
+
 Slate records that a document exists, what kind it is, when it arrived, and
-where it is held. It never holds the document.
+where it is held. **It does not hold the document.** This is how the internal
+workspace works: `server/candidates.js` records a *reference* to a resume held
+in the client's approved repository and refuses to become a way of making a
+restricted document reachable.
 
 | Step | Requirement |
 |---|---|
@@ -124,6 +132,57 @@ where it is held. It never holds the document.
 **Rehearsal acceptance.** An authorized reviewer retrieves the correct version
 from the identifier in Slate's inventory, and that inventory entry carries no
 sharing credential.
+
+### 5b. Custody mode — the public applicant portal with uploads on
+
+When a public posting is published **and** `SLATE_APPLICATION_UPLOADS=on`,
+members of the public attach PDFs to their applications and **Slate stores
+those files**, under `DATA_DIR/application-files/`. The sentence in §5a stops
+being true of this engagement, and several things follow that do not follow in
+inventory mode:
+
+- Slate becomes a **storage location and a processor** for candidate-supplied
+  documents, not merely an index of where they are.
+- Those files are **in every recovery snapshot** and in the off-volume copy,
+  so they are in whatever failure domain those live in.
+- They are subject to the **records retention** decision and to **legal holds**
+  (docs/operations.md §6b, §6c), and the locations to be searched for a records
+  request now include the application-files directory and the snapshots.
+- A **privacy notice and a data-use notice** have to say so, before the posting
+  is published. The posting cannot be published without a support contact; that
+  is a floor, not the notice.
+
+| Step | Requirement |
+|---|---|
+| Uploads enabled? | `[TO ASSIGN]` — a deliberate decision per engagement, not a default |
+| Format | PDF only, size-capped, content-checked; the accommodation route for anyone who cannot produce one is the posting's support contact |
+| Malware scanning | **`[TO ASSIGN]`** — with no scanner, stored files are *not openable* by reviewers, and `/api/ready` reports `portal.files.productionCapable: false`. See §5c |
+| Privacy notice | On the posting, before publication, saying that materials are stored and for how long |
+| Retention | The records custodian's schedule, applied to `application-files/` as well as the store |
+| Access | Reviewers on that search only, per request, and only once a scan has cleared the file |
+| Deletion | An expired draft removes its files; a submitted application does not expire |
+
+**Rehearsal acceptance.** A synthetic applicant attaches a PDF, a reviewer on
+that search can open it and a reviewer on another search cannot, the file
+appears in a snapshot, and a restore of that snapshot into an empty directory
+brings the file back with the application that names it.
+
+### 5c. If uploads are on and scanning is not available
+
+This is a real state, not a hypothetical one: there is no scanner
+implementation today, and `SLATE_FILE_SCANNER=accept-all` is refused under
+`NODE_ENV=production`. In that state Slate stores what applicants send and
+**refuses to let reviewers open any of it** — the applicant is told their
+material was received and is being checked, which is true, and staff are told
+plainly that nothing has checked it.
+
+That is a safe state and a useless one. Before a pilot, choose:
+
+- turn uploads **off** and take materials through the inventory route in §5a, or
+- configure a **real malware scanner** and record the evidence that it works.
+
+Do not run a public intake with uploads on and no scanner for longer than it
+takes to decide which.
 
 ## 6. Reference notes
 

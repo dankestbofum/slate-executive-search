@@ -72,26 +72,112 @@ const SCAN_STATES = {
   }
 };
 
+/* ------------------------------------------------------------------ *
+ * Scanning
+ *
+ * Two settings and no provider, on the same principle as server/mailer.js:
+ *
+ *   none        the default. Files are stored and are NOT openable by a
+ *               reviewer, and the record says so in plain words.
+ *   accept-all  development and the test suite only, and refused outright
+ *               under NODE_ENV=production. Marks files openable without
+ *               scanning them, and records `scanned: false` so nobody later
+ *               reads a clean state as evidence that a scan happened.
+ *
+ * `accept-all` is exactly as dangerous as it sounds: it is the difference
+ * between a reviewer opening a PDF that was checked and one that a stranger
+ * chose. It is fine over synthetic development data and is not a configuration
+ * a production deployment should be able to reach by accident, so it cannot —
+ * it resolves to `none` there and says so loudly at startup.
+ *
+ * Choosing a real scanner is operations work this module does not pretend to
+ * have done. scan() below is the one function a provider implementation
+ * replaces; nothing above it assumes a scan ever happened.
+ * ------------------------------------------------------------------ */
+
+const SCANNERS = ['none', 'accept-all'];
+
+/** Settings that exist for development and must never face a real applicant. */
+const NON_PRODUCTION_SCANNERS = ['accept-all'];
+
+function isProd() {
+  return process.env.NODE_ENV === 'production';
+}
+
+let warnedAboutScanner = false;
+
 function scannerName() {
   const chosen = String(process.env.SLATE_FILE_SCANNER || 'none').trim().toLowerCase();
-  return ['none', 'accept-all'].includes(chosen) ? chosen : 'none';
+  if (!SCANNERS.includes(chosen)) return 'none';
+  if (NON_PRODUCTION_SCANNERS.includes(chosen) && isProd()) {
+    // Refused, not crashed. Uploads being unscannable is a reason to keep
+    // materials closed to reviewers; it is not a reason to take a live search
+    // offline, and a deployment with uploads switched off is unaffected.
+    if (!warnedAboutScanner) {
+      warnedAboutScanner = true;
+      console.error('Slate: SLATE_FILE_SCANNER=' + chosen + ' is a development setting and is refused in production.'
+        + ' Scanning is UNAVAILABLE: uploaded materials are stored and cannot be opened by reviewers.'
+        + ' Configure a real scanner, or switch uploads off (SLATE_APPLICATION_UPLOADS).');
+    }
+    return 'none';
+  }
+  return chosen;
 }
 
 /**
  * What the deployment can honestly say about scanning.
  *
- * `accept-all` is a pilot setting and names itself as one: it marks files
- * openable without scanning them, and the record keeps `scanned: false` so
- * nobody later reads a clean state as evidence that a scan happened.
+ * `productionCapable` is the one an operator should read before a posting goes
+ * live: it is false whenever materials cannot be checked, whether that is
+ * because nothing is configured or because what was configured is a
+ * development setting this deployment refused.
  */
 function scannerStatus() {
   const scanner = scannerName();
+  const asked = String(process.env.SLATE_FILE_SCANNER || 'none').trim().toLowerCase();
+  const refused = scanner !== asked && SCANNERS.includes(asked);
   return {
     scanner,
     scans: scanner !== 'none',
-    note: scanner === 'none'
-      ? 'No file scanner is configured. Uploaded materials are stored and are not available to reviewers.'
-      : 'Files are marked available without being scanned (SLATE_FILE_SCANNER=accept-all). This is a pilot setting, not a scan.'
+    // No real scanner exists yet, so this is false on every deployment. It
+    // becomes true when scan() is backed by a provider — and not before.
+    productionCapable: false,
+    refusedSetting: refused ? asked : null,
+    note: refused
+      ? 'SLATE_FILE_SCANNER=' + asked + ' is a development setting and is refused in production. '
+        + 'Uploaded materials are stored and are not available to reviewers.'
+      : scanner === 'none'
+        ? 'No file scanner is configured. Uploaded materials are stored and are not available to reviewers.'
+        : 'Files are marked available without being scanned (SLATE_FILE_SCANNER=accept-all). This is a pilot setting, not a scan.'
+  };
+}
+
+/**
+ * Check one file, and report what was actually established about it.
+ *
+ * The seam a real scanner is inserted at. Whatever replaces this returns the
+ * same shape, and the distinction it has to keep is the one the rest of Slate
+ * relies on: `state` is what a reviewer is allowed to do, `scanned` is whether
+ * anything actually looked at the bytes. They are separate fields because
+ * `accept-all` sets the first without the second, and a record that conflated
+ * them would read, months later, as evidence of a scan that never happened.
+ *
+ * Synchronous today because neither setting does any work. A provider
+ * implementation returning a promise is the expected shape; store() would then
+ * record `pending` and settle it when the answer arrives, which is why
+ * `pending` is already a state the interface and both audiences understand.
+ */
+function scan(_file) {
+  const scanner = scannerName();
+  return {
+    state: scanner === 'accept-all' ? 'clean' : 'unavailable',
+    scanner,
+    // Only a real scanner sets this. Never inferred from `state`.
+    scanned: false,
+    at: new Date().toISOString(),
+    evidence: scanner === 'accept-all'
+      ? 'Marked available by SLATE_FILE_SCANNER=accept-all. No scan was performed.'
+      : 'No scanner is configured on this deployment. No scan was performed.'
   };
 }
 
@@ -200,7 +286,6 @@ function store(dataDir, applicationId, { type, buffer, filename, materialKey }) 
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   fs.writeFileSync(path.join(dir, key), buffer, { mode: 0o600 });
 
-  const scanner = scannerName();
   return {
     id: 'af-' + crypto.randomBytes(6).toString('hex'),
     key,
@@ -210,13 +295,9 @@ function store(dataDir, applicationId, { type, buffer, filename, materialKey }) 
     bytes: buffer.length,
     sha256: crypto.createHash('sha256').update(buffer).digest('hex'),
     uploadedAt: new Date().toISOString(),
-    scan: {
-      // Honest from the first moment. `accept-all` says it did not scan.
-      state: scanner === 'accept-all' ? 'clean' : 'unavailable',
-      scanner,
-      scanned: false,
-      at: new Date().toISOString()
-    }
+    // Built here, from the deployment's own configuration, and never from
+    // anything in the request. An upload cannot bring its own scan result.
+    scan: scan({ buffer, type })
   };
 }
 
@@ -281,8 +362,8 @@ function applicantView(file) {
 }
 
 module.exports = {
-  TYPES, MAX_BYTES, MAX_FILES, SCAN_STATES,
-  scannerName, scannerStatus, uploadsEnabled,
+  TYPES, MAX_BYTES, MAX_FILES, SCAN_STATES, SCANNERS,
+  scannerName, scannerStatus, scan, uploadsEnabled,
   root, directoryFor, pathFor, typeFor, safeLabel,
   validate, store, read, readable, remove, removeAll,
   staffView, applicantView
