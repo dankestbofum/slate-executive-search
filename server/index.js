@@ -21,6 +21,7 @@ const jurisdictions = require('./jurisdictions');
 const http = require('./http');
 const media = require('./media');
 const recovery = require('./recovery');
+const backup = require('./backup');
 const telemetry = require('./telemetry');
 const exporter = require('./export');
 const candidates = require('./candidates');
@@ -647,6 +648,7 @@ app.get('/api/ready', (_req, res) => {
   }
 
   const ready = !shuttingDown && storage.writable && db.db.schemaVersion === db.SCHEMA_VERSION;
+  const storageUsage = readinessStorage();
 
   res.status(ready ? 200 : 503).json({
     ready,
@@ -659,7 +661,26 @@ app.get('/api/ready', (_req, res) => {
     releaseStamped: RELEASE_STAMPED,
     releaseIdentity: releaseIdentity(),
     schemaVersion: db.db.schemaVersion,
-    storage,
+    storage: {
+      ...storage,
+      // What Slate is costing on the volume, and what bounds it. These are the
+      // numbers that decide whether the disk is big enough, and an operator
+      // should not have to shell into the container to find them. Sizes and
+      // counts only — never a filename, a candidate, or a record.
+      // Measured once and used twice. Adding up the volume walks every file in
+      // every snapshot, so this is a sample with a time on it rather than a
+      // fresh reading per poll — see dataUsage() in server/backup.js.
+      usage: storageUsage.usage,
+      // Whether the volume is plausibly big enough for what this deployment is
+      // configured to put on it. A judgement and its reasons, never an
+      // instruction, and it names no hosting platform.
+      pressure: storageUsage.pressure,
+      // What the last retention sweep actually did. Operational recovery
+      // points only: this never applies a records retention policy, and it
+      // never touches a pre-migration or hand-labelled copy. See
+      // docs/operations.md.
+      retention: backup.pruneStatus()
+    },
     // Drafting is unavailable without a key, but nothing else is. This is
     // reported separately, and it is deliberately not part of `ready` above:
     // Render takes a failing health check as a reason to pull traffic and
@@ -705,8 +726,8 @@ app.get('/api/ready', (_req, res) => {
         // volume is big enough, and an operator should not have to shell into
         // the container to find them.
         bytes: applicationFileBytes(),
-        snapshots: require('./backup').snapshotUsage(db.DATA_DIR),
-        keepDays: require('./backup').keepDays()
+        snapshots: backup.snapshotUsage(db.DATA_DIR),
+        keepDays: backup.keepDays()
       },
       applications: (db.db.applications || []).reduce((counts, a) => {
         counts[a.state] = (counts[a.state] || 0) + 1;
@@ -723,6 +744,21 @@ app.get('/api/ready', (_req, res) => {
     })
   });
 });
+
+/**
+ * What the volume is carrying, and whether that is a problem.
+ *
+ * One measurement feeding both answers. dataUsage() samples rather than
+ * measures per call, so a monitor polling readiness does not spend a second of
+ * disk reads walking every snapshot each time it asks.
+ */
+function readinessStorage(){
+  const usage = backup.dataUsage(db.DATA_DIR);
+  const { space, pressured, reasons, copies } = backup.storagePressure(db.DATA_DIR, {
+    uploadsEnabled: applicationFiles.uploadsEnabled(), usage
+  });
+  return { usage, pressure: { space, pressured, reasons, retainedCopies: copies } };
+}
 
 function aiConfigured(){
   return Boolean(String(process.env.ANTHROPIC_API_KEY || '').trim());
@@ -4138,6 +4174,22 @@ const server = app.listen(PORT, HOST, () => {
     // Misconfigured recovery must be loud, but it must not stop the app from
     // serving work that is already underway.
     console.error('Recovery: not scheduled. ' + error.message);
+  }
+  // Whether this volume is plausibly big enough for what the deployment is
+  // configured to put on it. Said once, at startup, because the moment to find
+  // out is before a posting is published — not when a save starts failing
+  // because the disk filled with copies of other people's resumes.
+  try {
+    const pressure = backup.storagePressure(db.DATA_DIR, {
+      uploadsEnabled: applicationFiles.uploadsEnabled()
+    });
+    if (pressure.space) {
+      console.log('Storage: ' + Math.round(pressure.usage.totalBytes / 1e6) + ' MB used of '
+        + Math.round(pressure.space.totalBytes / 1e6) + ' MB; retention holds up to ' + pressure.copies + ' snapshots');
+    }
+    for (const reason of pressure.reasons) console.warn('Slate: storage pressure — ' + reason + '.');
+  } catch (error) {
+    console.error('Slate: could not measure storage. ' + error.message);
   }
   // Whatever was in flight when the last process stopped. A running job is
   // marked interrupted rather than replayed: the provider may already have

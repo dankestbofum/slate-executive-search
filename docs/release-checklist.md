@@ -7,6 +7,14 @@ Status as of `cdb2ce8`: **no gate reached**, but Gate 1's container and CI
 requirements are now satisfied. What remains for Gate 1 is browser coverage
 breadth, print, and load testing. See `docs/handoff.md` §6.
 
+> **This page is the standing gate definition, not the current status.** The
+> numbers above are from `cdb2ce8` and do not describe any later commit. The
+> release-specific record — which commit, which evidence, which gate was
+> actually reached — is the dated file in `docs/pilot-runs/`; the most recent is
+> [2026-09-21](pilot-runs/2026-09-21-release-readiness.md). Evidence from an
+> earlier commit never approves a later release. How a change reaches `main` and
+> what must be true at each step is [the release process](release-process.md).
+
 ---
 
 ## Gate 1 — Technical staging ready

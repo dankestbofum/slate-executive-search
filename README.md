@@ -588,6 +588,11 @@ and is not verified.
 | `container` | The image builds, refuses to start without storage, boots on an empty volume without PIN configuration, runs as non-root, answers `/api/health` with the built release, and preserves representative search, candidate, score, history, and media records across a restart |
 
 A failing run means the commit is not eligible to be marked ready for release.
+That is a rule, not yet an enforced one: `main` is unprotected at the time of
+writing, which is how two consecutive commits with failing checks became the
+deployed branch. The branch-protection settings that close this, and the path a
+change takes from a working tree to a running service, are in
+[the release process](docs/release-process.md).
 
 What a green run still does not cover: a real phone, a screen reader, printed
 output looked at by a person, and two commands that are deliberately outside CI
@@ -813,6 +818,16 @@ means nothing is readable and the record says so. The bytes live beside the
 store under `application-files/`, so `server/backup.js` covers them and a
 restore brings the documents back with the records that reference them.
 
+**With uploads on, Slate holds candidate documents — and that changes the
+operating model.** Everywhere else Slate records *where* a document is and
+refuses to hold it. The portal with `SLATE_APPLICATION_UPLOADS=on` is the
+exception: applicant PDFs are stored under `DATA_DIR/application-files/`, which
+makes Slate a storage location and a processor for them, puts them in every
+recovery snapshot and in the off-volume copy, and brings them inside the
+records-retention and legal-hold decisions. The two modes are set out in
+[the operating procedure](docs/search-operating-procedure.md) §5, and the
+retention split in [operations](docs/operations.md) §6.
+
 **Three things are off by default, and the application says so.** Without a
 mail provider a posting publishes as a readable advertisement and does not
 offer an application form it cannot complete; without uploads enabled no
@@ -820,6 +835,20 @@ material can be attached; without a scanner no material can be opened. The
 posting screen warns before publishing and `/api/ready` reports all three. See
 `.env.example` for `SLATE_MAIL_TRANSPORT`, `SLATE_APPLICATION_UPLOADS` and
 `SLATE_FILE_SCANNER`.
+
+**Two of them cannot be faked in production, and today neither is real.**
+`SLATE_MAIL_TRANSPORT=echo` and `SLATE_FILE_SCANNER=accept-all` exist for
+development and are refused under `NODE_ENV=production`, resolving to the safe
+value and logging a warning rather than crashing a live service. Beyond that,
+no transport in `server/mailer.js` delivers to a real mailbox and no scanner in
+`server/application-files.js` reads a byte, so `/api/ready` reports
+`portal.mail.productionCapable: false` and `portal.files.productionCapable:
+false` on **every** deployment, and a production portal offers no email flow at
+all — including on `log`, which would otherwise tell an applicant a code was
+sent and put it in a log file they cannot read. Each is one function and one
+list entry away from working; neither is guessed at here. A controlled pilot
+therefore runs public intake only with a real provider and a real scanner
+configured, or not at all.
 
 Public routes: `/careers`, `/careers/:firm`, `/careers/:firm/:posting`, and
 `/careers/:firm/:posting/apply` (no-store, `noindex`). Read APIs under

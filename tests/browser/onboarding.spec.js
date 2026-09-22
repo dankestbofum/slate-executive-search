@@ -43,7 +43,12 @@ test('a new account confirms who it is, then has to join a workspace before anyt
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
   await page.screenshot({ path:testInfo.outputPath('account-setup.png'), fullPage:true });
+  // Settled, not flipped: `.btn` transitions its background over 120ms, so a
+  // scan started the instant the scheme changes measures a colour on its way
+  // between the two palettes rather than one that ever reaches the screen.
+  // See the note in tests/browser/welcome.spec.js.
   await page.emulateMedia({ colorScheme:'dark' });
+  await page.waitForTimeout(300);
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   await page.screenshot({ path:testInfo.outputPath('account-setup-dark.png'), fullPage:true });
   await page.emulateMedia({ colorScheme:'light' });

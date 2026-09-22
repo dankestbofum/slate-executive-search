@@ -49,6 +49,43 @@ async function check(name, fn) {
     assert.ok(body.alerts, 'no alert status');
   });
 
+  // What the volume is carrying, and what bounds it. These are the numbers
+  // that decide whether the disk is big enough, and an operator should not
+  // have to shell into the container to find them.
+  await check('readiness reports what the volume holds and what bounds it', async () => {
+    const body = await (await fetch(BASE + '/api/ready')).json();
+    const usage = body.storage?.usage;
+    assert.ok(usage, 'readiness carries no storage usage');
+    for (const field of ['storeBytes', 'applicationFileBytes', 'mediaBytes', 'backupBytes', 'totalBytes']) {
+      assert.strictEqual(typeof usage[field], 'number', field + ' is not reported');
+    }
+    assert.ok(Number.isInteger(usage.backupCount));
+    assert.ok(usage.retention.keepDays >= 1 && usage.retention.keepSnapshots >= 1,
+      'the configured retention windows are not reported');
+    assert.ok(body.storage.retention, 'readiness does not say what retention did');
+    assert.strictEqual(typeof body.storage.pressure.pressured, 'boolean');
+    assert.ok(Array.isArray(body.storage.pressure.reasons));
+  });
+
+  await check('readiness never claims a capability the deployment does not have', async () => {
+    const body = await (await fetch(BASE + '/api/ready')).json();
+    // There is no mail provider and no scanner in any build, so both of these
+    // are false everywhere. They are what an operator reads before publishing
+    // a posting, and a true here would be the application lying about what it
+    // can do for an applicant.
+    assert.strictEqual(body.portal.mail.productionCapable, false,
+      'readiness claimed mail could be delivered to a real mailbox');
+    assert.strictEqual(body.portal.files.productionCapable, false,
+      'readiness claimed uploaded files could be scanned');
+  });
+
+  await check('readiness reports state, never record contents', async () => {
+    const text = JSON.stringify(await (await fetch(BASE + '/api/ready')).json());
+    // Storage reporting counts bytes and directories. It must never name one.
+    assert.doesNotMatch(text, /\.pdf|application-files[\\/][a-z]/i,
+      'a stored filename or application directory reached the readiness endpoint');
+  });
+
   await check('AI availability is reported separately from readiness', async () => {
     const body = await (await fetch(BASE + '/api/ready')).json();
     // The isolated suite runs with no API key, so this is the outage case: the

@@ -402,6 +402,56 @@ function pdf(size = 2048) {
     fileId = ok.body.file.id;
   });
 
+  await check('an upload cannot bring its own scan result', async () => {
+    const forged = await portal('a', '/api/applications/' + applicationId + '/files', {
+      method: 'POST',
+      body: {
+        filename: 'forged.pdf', contentType: 'application/pdf', data: pdf(), materialKey: 'cover',
+        // Everything somebody would send to make an unchecked file openable.
+        scan: { state: 'clean', scanner: 'trusted-av', scanned: true },
+        scanState: 'clean', scanned: true, available: true
+      }
+    });
+    assert.strictEqual(forged.status, 200, JSON.stringify(forged.body));
+    assert.ok(!/trusted-av/.test(JSON.stringify(forged.body)),
+      'a scanner name from the request was echoed back to the applicant');
+
+    // The record the server actually kept, read through the staff projection.
+    const stored = await json('/api/searches/' + id + '/applications/' + applicationId);
+    const kept = ((stored.body.application || stored.body).files || []).find(f => f.label === 'forged.pdf');
+    if (kept) {
+      assert.notStrictEqual(kept.scanner, 'trusted-av', 'a request payload set the scanner on the record');
+      assert.strictEqual(kept.scanned, false, 'a request payload claimed a scan had happened');
+    }
+
+    // And at the source: store() builds the scan from the deployment, never
+    // from anything a caller hands it.
+    const before = process.env.SLATE_FILE_SCANNER;
+    try {
+      delete process.env.SLATE_FILE_SCANNER;
+      const os = require('os'); const fsx = require('fs'); const pathx = require('path');
+      const dir = fsx.mkdtempSync(pathx.join(os.tmpdir(), 'slate-forge-'));
+      const record = applicationFiles.store(dir, 'apl-forge', {
+        type: applicationFiles.TYPES[0], buffer: Buffer.from('%PDF-1.4\nx'), filename: 'x.pdf',
+        scan: { state: 'clean', scanner: 'trusted-av', scanned: true }
+      });
+      assert.strictEqual(record.scan.scanner, 'none');
+      assert.strictEqual(record.scan.scanned, false);
+      assert.strictEqual(record.scan.state, 'unavailable');
+      assert.strictEqual(applicationFiles.readable(record), false,
+        'a caller-supplied scan result made an unchecked file openable');
+    } finally {
+      if (before === undefined) delete process.env.SLATE_FILE_SCANNER;
+      else process.env.SLATE_FILE_SCANNER = before;
+    }
+
+    // Leave the draft as it was found: the checks that follow count what this
+    // applicant attached, and this one was only ever here to be refused.
+    const removed = await portal('a', '/api/applications/' + applicationId + '/files/' + forged.body.file.id,
+      { method: 'DELETE' });
+    assert.strictEqual(removed.status, 200, 'the forged upload could not be cleaned up');
+  });
+
   await check('the applicant never sees the storage key or the scanner configuration', async () => {
     const mine = await portal('a', '/api/applications/' + firmSlug + '/' + postingSlug);
     const text = JSON.stringify(mine.body.application.files);
@@ -872,6 +922,51 @@ function pdf(size = 2048) {
     }
   });
 
+  await check('no transport claims real delivery, and production offers no flow without one', () => {
+    const beforeEnv = process.env.NODE_ENV;
+    const beforeTransport = process.env.SLATE_MAIL_TRANSPORT;
+    try {
+      for (const transport of ['none', 'log', 'echo']) {
+        process.env.NODE_ENV = 'production';
+        process.env.SLATE_MAIL_TRANSPORT = transport;
+        delete require.cache[require.resolve('../server/mailer')];
+        const production = require('../server/mailer');
+        assert.strictEqual(production.productionCapable(), false,
+          'SLATE_MAIL_TRANSPORT=' + transport + ' presented itself as delivering mail');
+        assert.strictEqual(production.configured(), false,
+          'the portal would have offered an email flow on ' + transport + ', which delivers nothing');
+        assert.strictEqual(production.status().configured, false);
+      }
+    } finally {
+      process.env.NODE_ENV = beforeEnv;
+      if (beforeTransport === undefined) delete process.env.SLATE_MAIL_TRANSPORT;
+      else process.env.SLATE_MAIL_TRANSPORT = beforeTransport;
+      delete require.cache[require.resolve('../server/mailer')];
+      require('../server/mailer');
+    }
+  });
+
+  await check('a message handed to a transport is never recorded as delivered', async () => {
+    const mailer = require('../server/mailer');
+    const handed = await mailer.deliver({ to: 'a@b.c', subject: 's', body: 'b', kind: 'verification' });
+    assert.strictEqual(handed.state, 'accepted', 'the test transport did not record a handoff');
+    assert.strictEqual(handed.accepted, true);
+    assert.strictEqual(handed.deliveryConfirmed, false,
+      'delivery was claimed with no provider evidence for it');
+
+    const before = process.env.SLATE_MAIL_TRANSPORT;
+    try {
+      delete process.env.SLATE_MAIL_TRANSPORT;
+      const nothing = await mailer.deliver({ to: 'a@b.c', subject: 's', body: 'b', kind: 'verification' });
+      assert.strictEqual(nothing.state, 'failed');
+      assert.strictEqual(nothing.accepted, false);
+      assert.strictEqual(nothing.deliveryConfirmed, false);
+    } finally {
+      if (before === undefined) delete process.env.SLATE_MAIL_TRANSPORT;
+      else process.env.SLATE_MAIL_TRANSPORT = before;
+    }
+  });
+
   await check('with no scanner, a stored file is honestly unavailable rather than quietly openable', () => {
     const before = process.env.SLATE_FILE_SCANNER;
     try {
@@ -896,6 +991,86 @@ function pdf(size = 2048) {
     } finally {
       if (before === undefined) delete process.env.SLATE_FILE_SCANNER;
       else process.env.SLATE_FILE_SCANNER = before;
+    }
+  });
+
+  /* --- the scanner cannot be switched off by accident ------------------
+   *
+   * `accept-all` marks a stranger's PDF openable without anything having
+   * looked at it. That is a reasonable thing to do over synthetic development
+   * data and is not a configuration a production deployment should be able to
+   * reach at all, least of all by a stray environment variable nobody meant to
+   * carry over. It is refused there, on the same principle as the mail
+   * transport that hands verification codes back to the caller.
+   * ------------------------------------------------------------------- */
+
+  await check('the pilot scanner setting cannot be activated in production', () => {
+    const beforeEnv = process.env.NODE_ENV;
+    const beforeScanner = process.env.SLATE_FILE_SCANNER;
+    try {
+      process.env.NODE_ENV = 'production';
+      process.env.SLATE_FILE_SCANNER = 'accept-all';
+      assert.strictEqual(applicationFiles.scannerName(), 'none',
+        'files were marked openable without a scan on a production deployment');
+      const status = applicationFiles.scannerStatus();
+      assert.strictEqual(status.scans, false);
+      assert.strictEqual(status.refusedSetting, 'accept-all',
+        'readiness did not report that the configured setting was refused');
+      assert.match(status.note, /refused in production/);
+      // And the refusal reaches the file, not just the status line.
+      assert.strictEqual(applicationFiles.scan({}).state, 'unavailable');
+      assert.strictEqual(applicationFiles.readable({ scan: applicationFiles.scan({}) }), false,
+        'a reviewer could open a file that nothing had checked');
+    } finally {
+      process.env.NODE_ENV = beforeEnv;
+      if (beforeScanner === undefined) delete process.env.SLATE_FILE_SCANNER;
+      else process.env.SLATE_FILE_SCANNER = beforeScanner;
+    }
+  });
+
+  await check('no deployment claims a production-capable scanner, because there is none', () => {
+    for (const setting of ['none', 'accept-all']) {
+      const before = process.env.SLATE_FILE_SCANNER;
+      try {
+        process.env.SLATE_FILE_SCANNER = setting;
+        assert.strictEqual(applicationFiles.scannerStatus().productionCapable, false,
+          'SLATE_FILE_SCANNER=' + setting + ' presented itself as fit for production');
+      } finally {
+        if (before === undefined) delete process.env.SLATE_FILE_SCANNER;
+        else process.env.SLATE_FILE_SCANNER = before;
+      }
+    }
+  });
+
+  await check('a scan result records what was established, never more', () => {
+    const before = process.env.SLATE_FILE_SCANNER;
+    try {
+      process.env.SLATE_FILE_SCANNER = 'accept-all';
+      const result = applicationFiles.scan({});
+      assert.strictEqual(result.state, 'clean', 'the pilot setting did not make the file openable');
+      assert.strictEqual(result.scanned, false,
+        'a state of "clean" was recorded as evidence that a scan happened');
+      assert.strictEqual(result.scanner, 'accept-all');
+      assert.match(result.evidence, /No scan was performed/);
+      assert.ok(Date.parse(result.at), 'the scan result carries no time');
+    } finally {
+      if (before === undefined) delete process.env.SLATE_FILE_SCANNER;
+      else process.env.SLATE_FILE_SCANNER = before;
+    }
+  });
+
+  await check('an applicant is never told their file was scanned when it was not', () => {
+    for (const state of ['unavailable', 'pending']) {
+      const view = applicationFiles.applicantView({
+        id: 'af-1', label: 'resume.pdf', materialKey: 'resume', bytes: 10,
+        uploadedAt: new Date().toISOString(),
+        scan: { state, scanner: 'none', scanned: false }
+      });
+      assert.strictEqual(view.state, 'received');
+      assert.ok(!/scanned|clean|checked and/i.test(view.note),
+        'the applicant was told a scan had happened: ' + view.note);
+      assert.ok(!('scanned' in view) && !('scanner' in view),
+        'the applicant view leaked the deployment scanner configuration');
     }
   });
 

@@ -32,6 +32,17 @@ const isProd = process.env.NODE_ENV === 'production';
 
 const TRANSPORTS = ['none', 'log', 'echo'];
 
+/**
+ * Transports that actually put a message in somebody's mailbox.
+ *
+ * Empty, and that is the honest answer: `log` writes to the process log and
+ * `echo` hands the body back to the caller. Neither is delivery, and neither
+ * becomes delivery by being the only thing configured. A provider
+ * implementation adds its name here, and that is the single edit that makes
+ * this deployment able to run an applicant flow.
+ */
+const PRODUCTION_CAPABLE = [];
+
 function transportName() {
   const chosen = String(process.env.SLATE_MAIL_TRANSPORT || 'none').trim().toLowerCase();
   if (!TRANSPORTS.includes(chosen)) return 'none';
@@ -42,27 +53,51 @@ function transportName() {
   return chosen;
 }
 
+/** Does the active transport actually deliver to a real mailbox? */
+function productionCapable() {
+  return PRODUCTION_CAPABLE.includes(transportName());
+}
+
 /**
  * Can this deployment actually complete a flow that needs email?
  *
  * Read before offering the applicant anything that depends on it, so the
  * refusal happens before somebody types their address rather than after.
+ *
+ * In production the answer is real delivery or nothing. `log` writes the
+ * verification code to the process log, which is enough to develop against and
+ * is not a flow a member of the public can complete: they would be told a code
+ * was on its way and would wait for a message that exists only in a log file
+ * they cannot read. Refusing is the kinder failure, and the honest one.
  */
 function configured() {
+  if (isProd) return productionCapable();
   return transportName() !== 'none';
 }
 
 function status() {
   const transport = transportName();
+  const asked = String(process.env.SLATE_MAIL_TRANSPORT || 'none').trim().toLowerCase();
+  const refused = transport !== asked && TRANSPORTS.includes(asked);
   return {
-    configured: transport !== 'none',
+    // Whether an applicant flow can run here, which in production means real
+    // delivery. Deliberately not "a transport is set".
+    configured: configured(),
     transport,
-    // The honest sentence for an operator reading /api/health.
-    note: transport === 'none'
-      ? 'No mail provider is configured. Applicant email verification is unavailable, and the portal will not offer it.'
-      : transport === 'echo'
-        ? 'The test transport is active. Messages are returned to the caller and nothing is delivered.'
-        : 'Messages are written to the process log. Nothing is delivered to a real mailbox.'
+    // The field to read before a posting goes live. False on every deployment
+    // today: there is no provider yet.
+    productionCapable: productionCapable(),
+    refusedSetting: refused ? asked : null,
+    // The honest sentence for an operator reading /api/ready.
+    note: refused
+      ? 'SLATE_MAIL_TRANSPORT=' + asked + ' is a development transport and is refused in production. '
+        + 'Applicant email verification is unavailable, and the portal will not offer it.'
+      : transport === 'none'
+        ? 'No mail provider is configured. Applicant email verification is unavailable, and the portal will not offer it.'
+        : transport === 'echo'
+          ? 'The test transport is active. Messages are returned to the caller and nothing is delivered.'
+          : 'Messages are written to the process log. Nothing is delivered to a real mailbox.'
+        + (isProd ? ' The portal will not offer an email flow on this deployment.' : '')
   };
 }
 
@@ -88,6 +123,18 @@ async function deliver({ to, subject, body, kind }) {
     kind: String(kind || 'other'),
     subject: String(subject || ''),
     transport,
+    // Where this message actually got to. The stages are deliberately distinct
+    // because they are routinely conflated, and every one of them past
+    // `accepted` needs evidence from a provider that Slate does not have yet:
+    //
+    //   generated  the message exists
+    //   accepted   handed to a transport
+    //   delivered  a provider confirmed it
+    //   bounced    a provider said it could not be delivered
+    //   failed     the handoff itself did not work
+    //
+    // Nothing here can report better than `accepted`, and nothing pretends to.
+    state: transport === 'none' ? 'failed' : 'accepted',
     // Handed to a transport. Not the same as delivered, and never rendered as
     // if it were.
     accepted: transport !== 'none',
@@ -163,7 +210,7 @@ function receiptMessage({ reference, posting, submittedAt, returnUrl }) {
 }
 
 module.exports = {
-  TRANSPORTS, transportName, configured, status,
+  TRANSPORTS, PRODUCTION_CAPABLE, transportName, configured, productionCapable, status,
   deliver, outbox, clearOutbox,
   verificationMessage, receiptMessage
 };

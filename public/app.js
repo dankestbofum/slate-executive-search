@@ -254,6 +254,11 @@ const state = {
   // the phase groups the user has expanded or collapsed by hand, so a render
   // does not fight their choice.
   navOpen:false,
+  // Which navigation was in flight when the user last opened the drawer. A
+  // screen change closes the drawer, but only its own: a navigation that was
+  // already running when somebody opened the menu must not shut it again when
+  // it finally lands. See setNav() and go().
+  navOpenedDuring:null,
   railOpen:{},
   // Where each route was scrolled to, so Back returns to the same place.
   scrollMem:{},
@@ -1677,7 +1682,13 @@ async function go(view, extra={}, opts={}){
   const superseded = () => ticket !== navSeq;
   state.dirty = false;
   if (!opts.fromHistory) rememberScroll();
-  state.navOpen = false;
+  // The drawer is closed when this navigation commits, not here. Writing
+  // `navOpen = false` at the moment a move was *asked for* left the flag
+  // waiting for whichever render happened next, which on a slow connection is
+  // seconds later — long enough for somebody to open the menu in the meantime
+  // and have it torn down under their finger as the screen landed. On a phone
+  // the drawer is the only navigation there is, so that took the destinations
+  // and the theme controls with it. See closeNavFor() below.
   // Help is about the screen it was opened from. Carrying it to the next one
   // would leave somebody reading instructions for a page they have left.
   window.SlateHelp?.closeDrawer?.();
@@ -1750,6 +1761,7 @@ async function go(view, extra={}, opts={}){
     if (superseded()) return;
   }
   Object.assign(state, extra, { view });
+  closeNavFor(ticket);
   if (view === 'brochure' && brochureNeedsFill(state.search)){
     pushRoute(opts.replace);
     if (state.busy) {
@@ -1770,6 +1782,24 @@ async function go(view, extra={}, opts={}){
   pushRoute(opts.replace);
   render();
   settleView(opts);
+}
+
+/**
+ * Close the mobile drawer for the navigation that is now committing.
+ *
+ * Arriving somewhere closes the menu you left from — but only that menu. If
+ * the drawer was opened while this navigation was already in flight, the
+ * user's most recent deliberate act was opening it, and it stays open over the
+ * screen that has just landed. They close it themselves, by choosing a
+ * destination, tapping the scrim, or pressing Escape.
+ *
+ * The two cases are told apart by the navigation ticket, which setNav() stamps
+ * on the way open: a drawer opened before this move was asked for carries an
+ * earlier ticket, one opened during it carries this one.
+ */
+function closeNavFor(ticket){
+  if (state.navOpenedDuring === ticket) return;
+  state.navOpen = false;
 }
 
 // After a screen changes: put the page where the user expects it and move
@@ -7511,6 +7541,10 @@ function paint(root){
  */
 function setNav(open){
   state.navOpen = Boolean(open);
+  // Stamped with the navigation that was running when this was opened, so the
+  // screen change that eventually lands can tell "the user opened me before
+  // asking for this screen" from "the user opened me while it was loading".
+  if (state.navOpen) state.navOpenedDuring = navSeq;
   const shell = $('.shell');
   if (!shell) return;
   shell.classList.toggle('shell--navopen', state.navOpen);

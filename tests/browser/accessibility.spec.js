@@ -41,16 +41,47 @@ async function scan(page) {
   return results.violations;
 }
 
+/**
+ * Go to a screen, and wait until the application has actually arrived on it.
+ *
+ * These are same-document hash moves, so the screen being left is still on
+ * the page: its heading satisfies a visibility check on its own, and a scan
+ * started on the strength of that measures the screen being left rather than
+ * the one the test says it is scanning.
+ *
+ * Waiting on the router's own fetches is the reliable way to tell those
+ * apart. The obvious cheaper signal — the breadcrumb changing — is not
+ * sound: two views can share a label, so it hangs on exactly the transitions
+ * it is supposed to detect.
+ *
+ * This costs real time on WebKit, which is why the tests that use it are
+ * marked slow rather than trimmed. It is a duration, not a defect.
+ */
+async function goToView(page, path) {
+  await page.goto(path);
+  await page.waitForLoadState('networkidle');
+  await expect(page.locator('#main h1')).toBeVisible({ timeout: 10000 });
+}
+
 // Theme controls live in the rail, which is a drawer below the breakpoint.
 //
 // Buttons animate their background over 120ms, so a scan started immediately
 // after the switch measures a colour that is on its way from one palette to
 // the other and reports contrast that never actually settles on screen.
+//
+// The drawer is opened only when it is not already open. Toggling it blindly
+// asks the Menu button for the opposite of whatever state the drawer is in,
+// which is not what this helper wants from it: it wants the theme controls
+// reachable. The two are the same thing only when the drawer is known to be
+// closed, and it is not — a drawer opened while a screen was still loading is
+// legitimately still open when that screen lands.
 async function setTheme(page, theme) {
   const menu = page.getByRole('button', { name: 'Menu', exact: true });
   const inDrawer = await menu.isVisible().catch(() => false);
-  if (inDrawer) await menu.click();
-  await page.locator('button[data-theme="' + theme + '"]').click();
+  if (inDrawer && (await menu.getAttribute('aria-expanded')) !== 'true') await menu.click();
+  const control = page.locator('button[data-theme="' + theme + '"]');
+  await expect(control).toBeVisible();
+  await control.click();
   if (inDrawer) await page.keyboard.press('Escape');
   await page.waitForTimeout(300);
 }
@@ -243,6 +274,14 @@ test('printing a document drops the editing chrome and keeps the document', asyn
 });
 
 test('a populated workspace screen has no WCAG 2.1 AA violations, in either theme', async ({ page }) => {
+  // Six axe runs across three populated surfaces, each reached by a settled
+  // navigation (goToView). On WebKit that sits at roughly two thirds of the
+  // default timeout on a slow machine, and a test that close to its budget is
+  // a test that will go flaky on a busy runner. Marked slow rather than
+  // trimmed, for the same reason the record-keeping test below is: the
+  // surfaces are the point, and dropping one to save seconds would leave a
+  // populated screen unscanned.
+  test.slow();
   await installClerk(page);
   await page.goto('/');
   await page.waitForLoadState('networkidle');
@@ -271,8 +310,7 @@ test('a populated workspace screen has no WCAG 2.1 AA violations, in either them
   // theme change, which is when the invalid ARIA appeared.
   for (const view of ['screen', 'profile', 'new']) {
     const path = view === 'new' ? '/#/new' : '/#/s/' + search.id + '/' + view;
-    await page.goto(path);
-    await expect(page.locator('#main h1')).toBeVisible({ timeout: 10000 });
+    await goToView(page, path);
 
     for (const theme of ['light', 'dark']) {
       await setTheme(page, theme);
@@ -327,8 +365,7 @@ test('the record-keeping screens have no WCAG 2.1 AA violations, in either theme
     ['person/' + candidate.id, 'Outcome']
   ];
   for (const [view, tab] of surfaces) {
-    await page.goto('/#/s/' + search.id + '/' + view);
-    await expect(page.locator('#main h1')).toBeVisible({ timeout: 10000 });
+    await goToView(page, '/#/s/' + search.id + '/' + view);
     if (tab) await page.getByRole('tab', { name: tab }).click();
 
     for (const theme of ['light', 'dark']) {

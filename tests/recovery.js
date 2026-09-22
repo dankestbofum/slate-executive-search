@@ -23,6 +23,17 @@ function check(name, fn) {
   catch (error) { failed += 1; console.error('FAIL  Recovery: ' + name + '\n      ' + error.message); }
 }
 
+// The scheduler is async, so a check against it has to be awaited or its
+// assertions land after the summary has already been printed — which reads as
+// a pass whatever it found. Queued here and drained before the totals.
+const pending = [];
+function checkAsync(name, fn) {
+  pending.push((async () => {
+    try { await fn(); passed += 1; console.log('PASS  Recovery: ' + name); }
+    catch (error) { failed += 1; console.error('FAIL  Recovery: ' + name + '\n      ' + error.message); }
+  }));
+}
+
 function tmpdir(label) {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'slate-' + label + '-'));
 }
@@ -266,6 +277,195 @@ check('the retention window is configurable and never drops below one', () => {
   assert.strictEqual(backup.keepDays({ SLATE_BACKUP_KEEP_DAYS: 'nonsense' }), 14);
 });
 
+/* --- the scheduled window -------------------------------------------------
+ *
+ * The sweep used to recognise only `YYYY-MM-DD`, which is the name
+ * ensureDaily() writes. The hourly snapshots server/recovery.js takes are
+ * named for a timestamp, matched nothing, and so were walked past every time:
+ * they accumulated for ever on the volume they were meant to protect. These
+ * pin the corrected taxonomy and prove the growth is bounded.
+ * ------------------------------------------------------------------------ */
+
+check('a scheduled snapshot is recognised as one, and a hand-labelled copy is not', () => {
+  assert.strictEqual(backup.classify('2026-09-21'), 'daily');
+  assert.strictEqual(backup.classify(recovery.snapshotName(new Date('2026-09-21T04:30:00.000Z'))), 'scheduled',
+    'the name the scheduler actually writes is not recognised by the sweep that has to bound it');
+  assert.strictEqual(backup.classify('pre-migration-7-to-8-1758300000000'), 'protected');
+  assert.strictEqual(backup.classify('before-the-council-meeting'), 'protected');
+  assert.strictEqual(backup.classify('legal-hold-2026-09'), 'protected');
+});
+
+check('scheduled snapshots are swept to a bounded number, newest kept', () => {
+  const source = seedWithMaterials();
+  const made = [];
+  for (let hour = 0; hour < 72; hour += 1) {
+    const at = new Date(Date.UTC(2026, 8, 21, 0, 0, 0) + hour * 3600000);
+    const name = recovery.snapshotName(at);
+    backup.snapshot(source, path.join(source, 'backups', name));
+    made.push(name);
+  }
+  const before = backup.snapshotUsage(source);
+  const result = backup.pruneSnapshots(source, { daily: 14, scheduled: 24 });
+  const after = backup.snapshotUsage(source);
+  const left = fs.readdirSync(path.join(source, 'backups')).sort();
+
+  assert.strictEqual(left.length, 24, 'the scheduled window did not bound the pile');
+  assert.strictEqual(result.removed.length, 48);
+  assert.strictEqual(left[left.length - 1], made[made.length - 1], 'the sweep removed the newest snapshot');
+  assert.strictEqual(left[0], made[made.length - 24], 'the sweep kept the wrong end of the range');
+  assert.ok(after.bytes < before.bytes, 'the sweep freed nothing');
+  console.log('      bounded growth: ' + made.length + ' created, ' + left.length + ' retained, '
+    + result.removed.length + ' deleted; ' + before.bytes + ' bytes before, ' + after.bytes + ' bytes after');
+});
+
+check('the sweep leaves the daily window alone while it bounds the scheduled one', () => {
+  const source = seedWithMaterials();
+  for (let day = 1; day <= 10; day += 1) {
+    backup.snapshot(source, path.join(source, 'backups', '2026-09-' + String(day).padStart(2, '0')));
+  }
+  for (let hour = 0; hour < 30; hour += 1) {
+    const at = new Date(Date.UTC(2026, 8, 21, 0, 0, 0) + hour * 3600000);
+    backup.snapshot(source, path.join(source, 'backups', recovery.snapshotName(at)));
+  }
+  backup.pruneSnapshots(source, { daily: 14, scheduled: 24 });
+  const left = fs.readdirSync(path.join(source, 'backups'));
+  assert.strictEqual(left.filter(n => backup.classify(n) === 'daily').length, 10,
+    'dailies inside their own window were swept by the scheduled window');
+  assert.strictEqual(left.filter(n => backup.classify(n) === 'scheduled').length, 24);
+});
+
+check('the sweep never removes the newest snapshot, whatever the window says', () => {
+  const source = seedWithMaterials();
+  const at = new Date(Date.UTC(2026, 8, 21, 0, 0, 0));
+  const newest = recovery.snapshotName(at);
+  backup.snapshot(source, path.join(source, 'backups', '2026-09-01'));
+  backup.snapshot(source, path.join(source, 'backups', newest));
+  backup.pruneSnapshots(source, { daily: 1, scheduled: 1 });
+  assert.ok(fs.existsSync(path.join(source, 'backups', newest)),
+    'the most recent recovery point was swept away');
+});
+
+check('the sweep never removes a hand-labelled or held copy', () => {
+  const source = seedWithMaterials();
+  for (let hour = 0; hour < 30; hour += 1) {
+    const at = new Date(Date.UTC(2026, 8, 21, 0, 0, 0) + hour * 3600000);
+    backup.snapshot(source, path.join(source, 'backups', recovery.snapshotName(at)));
+  }
+  const held = ['pre-migration-7-to-8-1758300000000', 'legal-hold-jones-2026', 'before-council'];
+  for (const name of held) {
+    const dir = path.join(source, 'backups', name);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'slate.json'), '{}');
+  }
+  const result = backup.pruneSnapshots(source, { daily: 14, scheduled: 4 });
+  for (const name of held) {
+    assert.ok(fs.existsSync(path.join(source, 'backups', name)), name + ' was swept away');
+  }
+  assert.strictEqual(result.protected.length, 3, 'held copies were not reported as protected');
+});
+
+check('the sweep only ever touches directories inside the backups directory', () => {
+  const source = seedWithMaterials();
+  backup.snapshot(source, path.join(source, 'backups', '2026-09-01'));
+  backup.snapshot(source, path.join(source, 'backups', '2026-09-02'));
+  backup.pruneSnapshots(source, { daily: 1, scheduled: 1 });
+  // Everything the data directory is for is still there.
+  assert.ok(fs.existsSync(path.join(source, 'slate.json')), 'the sweep removed the store');
+  assert.ok(fs.existsSync(path.join(source, 'media', 'sr-recover', 'cover.0123456789abcdef.jpg')),
+    'the sweep removed brochure media');
+  assert.ok(fs.existsSync(path.join(source, 'application-files', 'apl-abc123', 'a'.repeat(32) + '.pdf')),
+    'the sweep removed applicant materials');
+});
+
+checkAsync('a scheduled run sweeps, and only after its own snapshot has verified', async () => {
+  const source = seedWithMaterials();
+  for (let hour = 0; hour < 30; hour += 1) {
+    const at = new Date(Date.UTC(2026, 8, 20, 0, 0, 0) + hour * 3600000);
+    backup.snapshot(source, path.join(source, 'backups', recovery.snapshotName(at)));
+  }
+  await recovery.runOnce({ dataDir: source, intervalMs: 3600000 });
+  const left = fs.readdirSync(path.join(source, 'backups')).filter(n => backup.classify(n) === 'scheduled');
+  assert.strictEqual(left.length, backup.keepSnapshots({}),
+    'the scheduled run created a snapshot and left the pile unbounded');
+  const status = backup.pruneStatus();
+  assert.strictEqual(status.ran, true);
+  assert.ok(status.removed > 0, 'the sweep reported nothing removed');
+  assert.deepStrictEqual(status.failed, [], 'the sweep reported a failure');
+});
+
+check('the recovery window is configurable and never drops below one', () => {
+  assert.strictEqual(backup.keepSnapshots({}), 24);
+  assert.strictEqual(backup.keepSnapshots({ SLATE_RECOVERY_KEEP_SNAPSHOTS: '48' }), 48);
+  assert.strictEqual(backup.keepSnapshots({ SLATE_RECOVERY_KEEP_SNAPSHOTS: '0' }), 24,
+    'a zero would have meant keeping no recovery point at all');
+  assert.strictEqual(backup.keepSnapshots({ SLATE_RECOVERY_KEEP_SNAPSHOTS: 'nonsense' }), 24);
+});
+
+check('what the volume is carrying is reportable, with uploads counted separately', () => {
+  const source = seedWithMaterials();
+  backup.snapshot(source, path.join(source, 'backups', '2026-09-01'));
+  const usage = backup.dataUsage(source);
+  assert.ok(usage.storeBytes > 0, 'the store reported as costing nothing');
+  assert.ok(usage.applicationFileBytes > 0, 'applicant materials reported as costing nothing');
+  assert.ok(usage.backupBytes > 0, 'snapshots reported as costing nothing');
+  assert.strictEqual(usage.backupCount, 1);
+  assert.ok(usage.totalBytes >= usage.storeBytes + usage.applicationFileBytes + usage.backupBytes);
+  assert.strictEqual(usage.retention.keepDays, backup.keepDays());
+  assert.strictEqual(usage.retention.keepSnapshots, backup.keepSnapshots());
+});
+
+check('the volume is sampled, not walked again on every readiness poll', () => {
+  const source = seedWithMaterials();
+  for (let i = 1; i <= 6; i += 1) {
+    backup.snapshot(source, path.join(source, 'backups', '2026-09-0' + i));
+  }
+  backup.forgetUsage(source);
+  const first = backup.dataUsage(source);
+  // Change what is on disk behind the sample. A cached answer is the point:
+  // readiness wants recent, not a filesystem walk per request, and walking
+  // every file in every snapshot is what that would cost.
+  backup.snapshot(source, path.join(source, 'backups', '2026-09-09'));
+  assert.strictEqual(backup.dataUsage(source).backupCount, first.backupCount,
+    'the volume was re-measured on the second call');
+  assert.ok(Date.parse(first.measuredAt), 'the sample does not say when it was taken');
+  // Asking for a fresh reading gets one.
+  assert.strictEqual(backup.dataUsage(source, { maxAgeMs: 0 }).backupCount, first.backupCount + 1,
+    'a caller that asked for a fresh reading got the stale one');
+  // And a sweep that removes something invalidates it, so the next reader is
+  // not told the disk still holds what was just deleted.
+  backup.dataUsage(source);
+  backup.pruneSnapshots(source, { daily: 1, scheduled: 1 });
+  assert.ok(backup.dataUsage(source).backupCount < first.backupCount + 1,
+    'the sample survived a sweep that deleted snapshots');
+});
+
+check('storage pressure is measured from the filesystem, and names no platform', () => {
+  const source = seedWithMaterials();
+  backup.snapshot(source, path.join(source, 'backups', '2026-09-01'));
+  const pressure = backup.storagePressure(source, { uploadsEnabled: true });
+  assert.ok(pressure.space === null || pressure.space.totalBytes > 0,
+    'the volume reported a size of zero rather than declining to answer');
+  assert.strictEqual(typeof pressure.pressured, 'boolean');
+  assert.ok(Array.isArray(pressure.reasons));
+  assert.strictEqual(pressure.copies, backup.keepDays() + backup.keepSnapshots());
+  assert.ok(!/render|heroku|aws|fly\.io/i.test(JSON.stringify(pressure)),
+    'a hosting platform was named in a generic storage module');
+});
+
+check('an incomplete backup is never treated as valid', () => {
+  const source = seedWithMaterials();
+  const dest = path.join(tmpdir('snap'), 'partial');
+  backup.snapshot(source, dest);
+  // The record naming the document survives; the document itself is gone.
+  fs.rmSync(path.join(dest, 'application-files', 'apl-abc123', 'a'.repeat(32) + '.pdf'));
+  assert.throws(() => backup.verify(dest), /file list does not match/,
+    'a snapshot missing an applicant document verified as sound');
+  const restored = tmpdir('restored-partial');
+  fs.rmSync(restored, { recursive: true, force: true });
+  assert.throws(() => backup.restore(dest, restored),
+    'an incomplete snapshot was restored');
+});
+
 check('snapshot usage is reportable, so the disk filling is visible before it does', () => {
   const source = seedWithMaterials();
   backup.snapshot(source, path.join(source, 'backups', '2026-09-01'));
@@ -279,5 +479,8 @@ check('status reports state, never record contents', () => {
   assert.doesNotMatch(text, /Recovery County|Dana Ruiz|My answer/, 'record contents leaked into backup status');
 });
 
-console.log(passed + ' recovery checks passed' + (failed ? ', ' + failed + ' failed' : '') + '.');
-process.exitCode = failed ? 1 : 0;
+(async () => {
+  for (const run of pending) await run();
+  console.log(passed + ' recovery checks passed' + (failed ? ', ' + failed + ' failed' : '') + '.');
+  process.exitCode = failed ? 1 : 0;
+})();

@@ -3,6 +3,24 @@ const { test, expect } = require('@playwright/test');
 const AxeBuilder = require('@axe-core/playwright').default;
 const { installClerk } = require('./clerk');
 
+/**
+ * Change the viewer's colour scheme and let the palette arrive.
+ *
+ * `.btn` transitions background-color and border-color over 120ms
+ * (public/styles.css), so a scan started the instant the scheme flips measures
+ * a colour that is on its way from one palette to the other and reports
+ * contrast that never actually settles on screen. That is what this used to
+ * do, and it failed intermittently on a loaded machine with a primary button
+ * at 4.38:1 — `#4d7eb8`, which is not in either palette: it is the midpoint
+ * between the light accent `#1D4E89` and the dark one `#84B4EE`.
+ *
+ * The scan is for the colour a person sees, so wait for that one.
+ */
+async function setColorScheme(page, colorScheme) {
+  await page.emulateMedia({ colorScheme });
+  await page.waitForTimeout(300);
+}
+
 test('the public home explains the product and connects hiring, candidate, and subscription paths', async ({ page }, testInfo) => {
   await installClerk(page, { signedIn:false, organization:null });
   await page.goto('/');
@@ -13,7 +31,7 @@ test('the public home explains the product and connects hiring, candidate, and s
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
   await page.screenshot({ path:testInfo.outputPath('welcome.png'), fullPage:true });
-  await page.emulateMedia({ colorScheme:'dark' });
+  await setColorScheme(page, 'dark');
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   await page.screenshot({ path:testInfo.outputPath('welcome-dark.png'), fullPage:true });
   await page.getByRole('link', { name:'View subscription information' }).click();
