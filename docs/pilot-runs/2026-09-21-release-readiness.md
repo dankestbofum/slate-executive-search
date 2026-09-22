@@ -102,6 +102,19 @@ machine, both diagnosed rather than retried:
    which had the same pattern. `tests/browser/accessibility.spec.js` already
    guarded against this and documents why; these two did not.
 
+3. **The settle added to the two scanning tests costs real time on WebKit, and
+   is paid for rather than hidden.** Making the scans measure the screen that
+   was asked for — rather than the one being left, which a same-document hash
+   move leaves on the page — means waiting on the router's own fetches. On
+   WebKit that roughly doubles both tests. A cheaper signal was tried and
+   rejected on evidence: waiting for the breadcrumb's current-page label to
+   change hangs whenever two views share a label, which they do. Both tests are
+   therefore marked `test.slow()`, which the record-keeping test already was
+   for exactly this reason. Measured on this machine (~3x slower than CI at
+   WebKit): 23.6s and 37.3s against 90s budgets. This is a duration, not a
+   defect, and it is not the fix for the CI failure in §1 — that is fixed in
+   the application.
+
 ### Baseline for comparison (commit `1bea001`, before this work)
 
 | Command | Result |

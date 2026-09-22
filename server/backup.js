@@ -217,6 +217,9 @@ function pruneSnapshots(dataDir, keep = keepDays()) {
   }
   result.kept.sort();
   lastPrune = result;
+  // The sweep just changed what is on the volume, so the sampled figures
+  // are stale by definition.
+  if (result.removed.length) forgetUsage(dataDir);
   return result;
 }
 
@@ -292,7 +295,32 @@ function snapshotUsage(dataDir) {
  * Deliberately generic: it measures directories, and knows nothing about any
  * particular host's disk sizes or plans.
  */
-function dataUsage(dataDir) {
+/**
+ * Sampled, not measured on demand.
+ *
+ * Adding up the volume means walking every file in every snapshot, and the
+ * windows above hold up to 38 of them. With a posting's worth of applicant
+ * PDFs in each that measured at 700ms-1.1s a call on ordinary hardware — and
+ * /api/ready is the endpoint a platform monitor polls, so paying that per
+ * request would keep the disk busy reading the very volume it is reporting on,
+ * and would do it twice because the pressure judgement needs the same numbers.
+ *
+ * Readiness wants recent, not instantaneous: the disk does not fill between
+ * two polls a minute apart. The answer is cached per directory and carries the
+ * time it was taken, so nothing has to pretend it is live.
+ */
+const usageCache = new Map();
+const USAGE_TTL_MS = 60000;
+
+function dataUsage(dataDir, { maxAgeMs = USAGE_TTL_MS } = {}) {
+  const cached = usageCache.get(dataDir);
+  if (cached && Date.now() - cached.measuredAtMs < maxAgeMs) return cached.value;
+  const value = measureDataUsage(dataDir);
+  usageCache.set(dataDir, { measuredAtMs: Date.now(), value });
+  return value;
+}
+
+function measureDataUsage(dataDir) {
   const measure = relative => {
     const target = path.join(dataDir, relative);
     if (!fs.existsSync(target)) return 0;
@@ -315,8 +343,18 @@ function dataUsage(dataDir) {
     backupBytes: snapshots.bytes,
     backupCount: snapshots.snapshots,
     totalBytes: store + applicationFiles + media + snapshots.bytes,
-    retention: { keepDays: keepDays(), keepSnapshots: keepSnapshots() }
+    retention: { keepDays: keepDays(), keepSnapshots: keepSnapshots() },
+    // When these numbers were taken. Stated rather than implied, because they
+    // are a sample and an operator reading a full disk needs to know how old
+    // the reading is.
+    measuredAt: new Date().toISOString()
   };
+}
+
+/** Drop the sampled figures, so the next read measures. For tests and after a sweep. */
+function forgetUsage(dataDir) {
+  if (dataDir === undefined) usageCache.clear();
+  else usageCache.delete(dataDir);
 }
 
 /**
@@ -349,9 +387,8 @@ function volumeSpace(dataDir) {
  * host. The operator decides whether to grow the disk, shorten a window, or
  * turn uploads off.
  */
-function storagePressure(dataDir, { uploadsEnabled = false } = {}) {
+function storagePressure(dataDir, { uploadsEnabled = false, usage = dataUsage(dataDir) } = {}) {
   const space = volumeSpace(dataDir);
-  const usage = dataUsage(dataDir);
   const copies = keepDays() + keepSnapshots();
   // What one more full copy of the live data costs, and what the windows will
   // hold when they are full.
@@ -380,6 +417,6 @@ function storagePressure(dataDir, { uploadsEnabled = false } = {}) {
 module.exports = {
   snapshot, verify, restore, ensureDaily, PAYLOAD_DIRS,
   pruneSnapshots, pruneStatus, snapshotUsage, dataUsage,
-  volumeSpace, storagePressure,
+  volumeSpace, storagePressure, forgetUsage,
   classify, keepDays, keepSnapshots
 };

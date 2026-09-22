@@ -648,6 +648,7 @@ app.get('/api/ready', (_req, res) => {
   }
 
   const ready = !shuttingDown && storage.writable && db.db.schemaVersion === db.SCHEMA_VERSION;
+  const storageUsage = readinessStorage();
 
   res.status(ready ? 200 : 503).json({
     ready,
@@ -666,16 +667,14 @@ app.get('/api/ready', (_req, res) => {
       // numbers that decide whether the disk is big enough, and an operator
       // should not have to shell into the container to find them. Sizes and
       // counts only — never a filename, a candidate, or a record.
-      usage: backup.dataUsage(db.DATA_DIR),
+      // Measured once and used twice. Adding up the volume walks every file in
+      // every snapshot, so this is a sample with a time on it rather than a
+      // fresh reading per poll — see dataUsage() in server/backup.js.
+      usage: storageUsage.usage,
       // Whether the volume is plausibly big enough for what this deployment is
       // configured to put on it. A judgement and its reasons, never an
       // instruction, and it names no hosting platform.
-      pressure: (() => {
-        const { space, pressured, reasons, copies } = backup.storagePressure(db.DATA_DIR, {
-          uploadsEnabled: applicationFiles.uploadsEnabled()
-        });
-        return { space, pressured, reasons, retainedCopies: copies };
-      })(),
+      pressure: storageUsage.pressure,
       // What the last retention sweep actually did. Operational recovery
       // points only: this never applies a records retention policy, and it
       // never touches a pre-migration or hand-labelled copy. See
@@ -745,6 +744,21 @@ app.get('/api/ready', (_req, res) => {
     })
   });
 });
+
+/**
+ * What the volume is carrying, and whether that is a problem.
+ *
+ * One measurement feeding both answers. dataUsage() samples rather than
+ * measures per call, so a monitor polling readiness does not spend a second of
+ * disk reads walking every snapshot each time it asks.
+ */
+function readinessStorage(){
+  const usage = backup.dataUsage(db.DATA_DIR);
+  const { space, pressured, reasons, copies } = backup.storagePressure(db.DATA_DIR, {
+    uploadsEnabled: applicationFiles.uploadsEnabled(), usage
+  });
+  return { usage, pressure: { space, pressured, reasons, retainedCopies: copies } };
+}
 
 function aiConfigured(){
   return Boolean(String(process.env.ANTHROPIC_API_KEY || '').trim());

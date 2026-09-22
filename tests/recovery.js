@@ -414,6 +414,31 @@ check('what the volume is carrying is reportable, with uploads counted separatel
   assert.strictEqual(usage.retention.keepSnapshots, backup.keepSnapshots());
 });
 
+check('the volume is sampled, not walked again on every readiness poll', () => {
+  const source = seedWithMaterials();
+  for (let i = 1; i <= 6; i += 1) {
+    backup.snapshot(source, path.join(source, 'backups', '2026-09-0' + i));
+  }
+  backup.forgetUsage(source);
+  const first = backup.dataUsage(source);
+  // Change what is on disk behind the sample. A cached answer is the point:
+  // readiness wants recent, not a filesystem walk per request, and walking
+  // every file in every snapshot is what that would cost.
+  backup.snapshot(source, path.join(source, 'backups', '2026-09-09'));
+  assert.strictEqual(backup.dataUsage(source).backupCount, first.backupCount,
+    'the volume was re-measured on the second call');
+  assert.ok(Date.parse(first.measuredAt), 'the sample does not say when it was taken');
+  // Asking for a fresh reading gets one.
+  assert.strictEqual(backup.dataUsage(source, { maxAgeMs: 0 }).backupCount, first.backupCount + 1,
+    'a caller that asked for a fresh reading got the stale one');
+  // And a sweep that removes something invalidates it, so the next reader is
+  // not told the disk still holds what was just deleted.
+  backup.dataUsage(source);
+  backup.pruneSnapshots(source, { daily: 1, scheduled: 1 });
+  assert.ok(backup.dataUsage(source).backupCount < first.backupCount + 1,
+    'the sample survived a sweep that deleted snapshots');
+});
+
 check('storage pressure is measured from the filesystem, and names no platform', () => {
   const source = seedWithMaterials();
   backup.snapshot(source, path.join(source, 'backups', '2026-09-01'));
