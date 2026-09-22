@@ -227,18 +227,23 @@ From `tests/recovery.js`, the synthetic scheduled-snapshot test:
 
 | Check | Status |
 |---|---|
-| Image builds | `[PENDING CI]` |
-| Refuses to start without persistent storage | `[PENDING CI]` |
-| Boots on a writable volume | `[PENDING CI]` |
-| Runs as a non-root process | `[PENDING CI]` |
-| Restart retains data | `[PENDING CI]` |
-| SIGTERM drains cleanly | `[PENDING CI]` |
-| Write lock released | `[PENDING CI]` |
-| Release identity correct | `[PENDING CI]` |
+| Image builds | **pass** |
+| Refuses to start without persistent storage | **pass** |
+| Boots on a writable volume (Clerk-only identity) | **pass** |
+| Runs as a non-root process | **pass** |
+| Restart retains data | **pass** |
+| SIGTERM drains cleanly | **pass** |
+| Write lock released on restart | **pass** |
+| Release identity recorded | **pass** |
 
-All eight are covered by the `Container build and boot` job. **Not run on this
-machine** — Docker was not exercised locally, so none of these may be recorded
-as passing from this record until a CI run on the release commit is observed.
+All eight are the named steps of the `Container build and boot` job, observed
+green on CI run [35678579927](https://github.com/dankestbofum/slate-executive-search/actions/runs/35678579927)
+(job 106590469430, 25s) against commit `3b15982` on this branch — not run on the
+development machine, which has no Docker in this session.
+
+> This is CI evidence for the branch head, not for a release commit. When this
+> merges, the squashed or merged commit is a different SHA and needs its own
+> green run before anything is deployed on the strength of it.
 
 ---
 
