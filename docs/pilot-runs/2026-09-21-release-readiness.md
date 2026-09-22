@@ -7,7 +7,8 @@ support it.
 
 ## Gate reached
 
-> **Engineering checks complete. Hosted verification pending. Human pilot pending.**
+> **Engineering checks complete, and green on CI against the release commit.**
+> **Hosted verification pending. Human pilot pending.**
 
 Not "controlled pilot ready". Six of the twelve conditions in the Definition of
 Pilot Ready cannot be established from this machine at all, and two of them are
@@ -20,9 +21,9 @@ provider and a malware scanner).
 
 | Field | Value |
 |---|---|
-| Branch | `production-readiness` |
+| Branch | `production-readiness`, merged to `main` 2026-09-22 |
 | Baseline commit | `1bea001` (`main` at start of work) |
-| Release commit | `[TO RECORD on merge — this record is not valid for any other commit]` |
+| Release commit | `efef1b6` (merge of PR #9 into `main`) |
 | Tree state | Working tree; see the change list in the pull request |
 | Node (local) | v22.18.0 |
 | Node (CI / container) | 24.x — `package.json` `engines` requires `>=24` |
@@ -43,8 +44,18 @@ provider and a malware scanner).
 
 ## Automated evidence
 
-All four run on this branch's tree, sequentially, with nothing else competing
-for the machine.
+**Authoritative result: CI run [35679015163](https://github.com/dankestbofum/slate-executive-search/actions/runs/35679015163)
+against `efef1b6` on `main` — all three jobs green.** This is the first green
+`main` run after two consecutive failures, and it includes the `mobile-chrome`
+accessibility job that was failing.
+
+| Job | Result |
+|---|---|
+| Syntax and isolated suite | **pass** — 0 vulnerabilities |
+| Container build and boot | **pass** — all eight steps |
+| Browser, accessibility and policy | **pass** — 320 passed, 0 failed, 28 skipped, 11.6m |
+
+The local figures below corroborate it and do not substitute for it.
 
 | Command | Result | Recorded |
 |---|---|---|
@@ -345,8 +356,8 @@ decisions themselves are not engineering's to make.
 
 | # | Condition | Status |
 |---|---|---|
-| 1 | Current CI is fully green | **Locally yes; pending a CI run on the release commit** |
-| 2 | The release commit is identifiable | **Mechanism yes** (`releaseIdentity` on `/api/health` and `/api/ready`); **unverified on a deployment** |
+| 1 | Current CI is fully green | **YES** — all three jobs green on `efef1b6`, run 35679015163 |
+| 2 | The release commit is identifiable | **Mechanism yes** (`releaseIdentity` on `/api/health` and `/api/ready`); `efef1b6` is the release commit; **unverified on the deployment** |
 | 3 | Direct red pushes to `main` are prevented | **NO** — settings written out in `docs/release-process.md` §3, not applied |
 | 4 | Backup growth is bounded | **YES** — fixed and tested; see the synthetic run above |
 | 5 | Off-volume recovery has been proven | **NO** — mechanism tested in CI; no destination configured, no hosted drill |
@@ -358,7 +369,7 @@ decisions themselves are not engineering's to make.
 | 11 | Candidate uploads disabled **or** protected by a real scanner | **Enforceable, not decided.** No scanner exists; `accept-all` is now refused in production, so a production deployment cannot silently serve unscanned files to reviewers. The engagement still has to choose |
 | 12 | Public intake disabled **or** backed by a real mail provider and approved procedures | **Enforceable, not decided.** No provider exists; a production portal now offers no email flow at all, so it cannot collect an address and go quiet. The engagement still has to choose |
 
-Four of twelve. Conditions 4 and 8 were closed by this work; 11 and 12 moved
+Five of twelve. Conditions 1, 4 and 8 were closed by this work; 11 and 12 moved
 from "silently possible to get wrong" to "impossible to get wrong by accident,
 still undecided".
 
