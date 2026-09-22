@@ -49,25 +49,26 @@ for the machine.
 | Command | Result | Recorded |
 |---|---|---|
 | `npm run check` | **pass** | 101 files parsed, 0 failed; every runtime require present in the image |
-| `npm test` | **pass** | 769 checks, 0 failed, exit 0 |
+| `npm test` | **pass** | 770 checks, 0 failed, exit 0 |
 | `npm run test:browser` | **pass** | 320 passed, 0 failed, 28 skipped, across `desktop-chrome`, `desktop-safari`, `mobile-chrome` |
 | `npm audit --omit=dev` | **pass** | 0 vulnerabilities |
 
 `npm test` by suite: organizations 21 · billing (pass, untotalled) · baseline
 258 · jurisdictions 30 · security 28 · roles 26 · authority 28 · storage 22 ·
-recovery 27 · monitoring 19 · export 24 · candidates 21 · disposition 19 ·
+recovery 28 · monitoring 19 · export 24 · candidates 21 · disposition 19 ·
 AI 18 · research 55 · research UI 18 · integrity 40 · committee 28 · help 16 ·
 portal 67.
 
-**+21 checks against the baseline** (748 → 769), all new coverage for the
+**+22 checks against the baseline** (748 → 770), all new coverage for the
 defects fixed here:
 
-- `tests/recovery.js` 16 → **27** (+11): snapshot taxonomy; the scheduled
+- `tests/recovery.js` 16 → **28** (+12): snapshot taxonomy; the scheduled
   window and bounded growth; the daily window left alone; the newest snapshot
   never removed; hand-labelled and held copies never removed; deletes confined
   to the backups directory; the scheduled run sweeping only after its own
   snapshot verified; the window's configuration floor; volume usage reporting;
-  storage-pressure measurement; and an incomplete backup never verifying.
+  storage-pressure measurement; the volume being sampled rather than walked per
+  readiness poll; and an incomplete backup never verifying.
 - `tests/portal.js` 60 → **67** (+7): the pilot scanner refused in production;
   no deployment claiming a production-capable scanner; a scan result recording
   only what was established; an applicant never told a scan happened; scan
@@ -114,6 +115,33 @@ machine, both diagnosed rather than retried:
    WebKit): 23.6s and 37.3s against 90s budgets. This is a duration, not a
    defect, and it is not the fix for the CI failure in §1 — that is fixed in
    the application.
+
+### A regression this work introduced, found by measurement and fixed
+
+Adding storage reporting to `/api/ready` made that endpoint walk every file in
+every snapshot — and do it **twice**, because the pressure judgement recomputed
+the same figures the usage block had just produced.
+
+Measured with the retention windows full (14 daily + 24 scheduled = 38
+snapshots, each carrying a posting's worth of applicant PDFs, 959 MB total):
+
+```
+cold readiness cost: 974ms   (959MB over 38 snapshots)   <- after the fix
+warm readiness cost:   0ms
+warm readiness cost:   0ms
+
+before the fix: 700ms-1.1s per walk, twice per request
+```
+
+`/api/ready` is documented as the endpoint a platform monitor polls. Left
+alone, it would have spent roughly two seconds of disk reads per poll reading
+the very volume it was reporting on. The figures are now sampled per directory
+with a minute's life, carry `measuredAt` so nothing pretends they are live, and
+are measured once and used for both answers; a sweep that deletes something
+drops the sample. Pinned by `tests/recovery.js`.
+
+Worth stating plainly: this was introduced by the remediation, not found in the
+existing code, and it was caught by measuring rather than by a test failing.
 
 ### Baseline for comparison (commit `1bea001`, before this work)
 
