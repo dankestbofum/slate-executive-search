@@ -255,6 +255,7 @@ const articles = [
     ],
     who: 'Every member of the search committee, including the consultants on the file. Your own answers are counted in the tally too.',
     before: [
+      'The organization administrator may skip the committee questionnaire for this search. If the screen says it was skipped, no response is required; you can still review candidates later.',
       'The intake window has to be open. If it is not, the screen says so and the search manager opens it.',
       'Nothing else. There is no preparation and no right answer; the profile is built from what the room actually says.'
     ],
@@ -287,7 +288,7 @@ const articles = [
   {
     id: 'adopt-the-profile',
     title: 'Adopt the candidate profile',
-    summary: 'Turn what the committee said into the criteria every candidate is scored against.',
+    summary: 'Build the criteria every candidate is scored against, using committee input when the questionnaire is included.',
     audience: ['consultant'],
     screens: ['profile', 'intake'],
     steps: ['profile', 'intake'],
@@ -299,7 +300,8 @@ const articles = [
     ],
     who: 'The search manager adopts the profile. Consultants can prepare and preview it.',
     before: [
-      'Enough committee members have submitted that the tally means something. The screen shows who has and has not.',
+      'The questionnaire is optional per search. After confirming the roster, an organization administrator can select **Skip questionnaire and continue** in Step 2. Write and weight the profile directly, then select **Save profile**. To collect input later, return to Step 2 and select **Include committee questionnaire**, then have the account manager open the window.',
+      'When collecting committee input, enough members have submitted that the tally means something. The screen shows who has and has not.',
       'The intake window closed, using **Close and read the room**. Rebuilding from committee is unavailable while it is open.'
     ],
     doThis: [

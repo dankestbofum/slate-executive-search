@@ -1663,6 +1663,34 @@ app.put('/api/searches/:id/intake/qualities', ...requireWorkspace, requireSearch
   res.json(painted(req, req.search));
 });
 
+// This per-search choice belongs to the organization administrator, including
+// when a different consultant manages the search. It changes no roster roles.
+app.put('/api/searches/:id/intake/participation', ...requireWorkspace, requireSearch, (req, res) => {
+  if (!req.access.capabilities.admin) return res.status(403).json({ error:'Only an organization administrator chooses whether to include the committee questionnaire.' });
+  const enabled = req.body?.enabled;
+  if (typeof enabled !== 'boolean') return res.status(400).json({ error:'Choose whether to include the committee questionnaire.' });
+  const intake = req.search.intake;
+  if (enabled) {
+    if (!intake.skipped) return res.json(painted(req, req.search));
+    intake.skipped = null;
+    intake.completedEmpty = null;
+    intake.status = 'draft';
+    intake.closedAt = null;
+  } else {
+    if (intake.skipped) return res.json(painted(req, req.search));
+    if (!req.search.team?.confirmedAt) return res.status(409).json({ error:'Confirm the search roster before continuing without the questionnaire.', code:'ROSTER_UNCONFIRMED' });
+    if (committee.finishedSubmissions(req.search).length) return res.status(409).json({ error:'Committee answers have already been submitted. Review those answers and close the response window instead of skipping it.', code:'INTAKE_HAS_SUBMISSIONS' });
+    const decision = { at:db.now(), by:req.user.id, byName:req.user.name };
+    intake.skipped = decision;
+    intake.completedEmpty = { ...decision, reason:'The organization administrator chose to skip the committee questionnaire.' };
+    intake.status = 'closed';
+    intake.closedAt = decision.at;
+  }
+  db.touch(req.search, req.user, enabled ? 'included the committee questionnaire' : 'skipped the committee questionnaire');
+  db.persist();
+  res.json(painted(req, req.search));
+});
+
 app.post('/api/searches/:id/intake/status', ...requireWorkspace, requireSearch, requireManager, (req, res) => {
   const want = String(req.body?.status || '');
   if (!['draft', 'open', 'closed'].includes(want)) {
@@ -1672,6 +1700,7 @@ app.post('/api/searches/:id/intake/status', ...requireWorkspace, requireSearch, 
     return res.status(400).json({ error:'Confirm the roster first. People added later would miss the window.' });
   }
   const intake = req.search.intake;
+  if (intake.skipped) return res.status(409).json({ error:'The committee questionnaire is skipped. An organization administrator can include it again first.', code:'INTAKE_SKIPPED' });
   const agg = tallyOf(req.search);
   if (want === 'closed' && intake.status !== 'closed') {
     // A roster that moved mid-window means the denominator moved. The manager

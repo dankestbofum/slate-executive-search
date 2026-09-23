@@ -33,6 +33,13 @@ Engineering work for phases 1-3 is in the working tree, uncommitted. Nothing bel
 
 ## Delivery sequence
 
+### Optional committee questionnaire follow-up (local, not deployed)
+
+- The organization administrator can select **Skip questionnaire and continue** in Step 2 after the roster is confirmed, including when another consultant manages the search. The choice is recorded by name and date, marks Step 2 as skipped, and opens the candidate profile without requiring questionnaire responses.
+- Members see that no response is required, and their getting-started checklist omits the skipped questionnaire. Saved private drafts remain private and are retained. Administrators can select **Include committee questionnaire** to return it to draft; the search manager then opens the window normally.
+- Submitted answers are not discarded or relabeled as skipped: once answers exist, review them and close the response window. Server authorization, revision checks, payment gates, and roster checks remain enforced.
+- Validation: syntax/packaging and full isolated server suites passed locally. Browser coverage exercises skipping, persistence, member messaging, re-enabling, and normal submission across desktop Chrome, WebKit, and mobile Chrome. These checks use substitute identity providers and local Node 22; no deployment is included in this follow-up.
+
 ### Committee qualities and owner navigation follow-up (September 23)
 
 Implemented locally, not deployed:
