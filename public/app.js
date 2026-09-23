@@ -303,7 +303,7 @@ function deskNote(desk){
 const STEP_FLOW = ['team','intake','profile','community','survey1','guide','survey2','plan','brochure','ads','sourcing','screen','send2','video','finalists','schedule','references','contract','bar'];
 const STEP_NAME = {
   team:'Search committee',
-  intake:'Committee input',
+  intake:'Candidate profile input',
   profile:'Candidate profile',
   community:'Community',
   survey1:'Initial survey',
@@ -2276,6 +2276,19 @@ async function loadSearches(){ state.searches = await api('/api/searches'); stat
  * do.
  */
 async function enterWorkspace(orgId, destination){
+  if (isInvitationPage() && orgId) {
+    const params = new URLSearchParams(location.search);
+    const searchId = params.get('organization') === orgId ? params.get('search') : null;
+    destination = '#/o/' + encodeURIComponent(orgId) + (searchId ? '/s/' + encodeURIComponent(searchId) : '/home');
+    state.orgBusy = true; state.orgError = null;
+    try {
+      if (orgId !== window.SlateAuth.organizationId) await window.SlateAuth.setActiveOrganization(orgId);
+      location.assign('/' + destination);
+    } catch (error) {
+      state.orgBusy = false; state.orgError = error.message; render();
+    }
+    return;
+  }
   if (!orgId || orgId === state.org?.id) return;
   const target = (state.workspaces || []).find(w => w.id === orgId);
   if (state.dirty && !confirm('Switch to ' + (target?.name || 'another workspace')
@@ -2623,7 +2636,9 @@ function homeIcon(){
 function publicFrame(body){
   const controls = window.SlateAuth.signedIn
     ? '<div class="row"><a class="btn btn--secondary" href="/#/home">My workspace</a><button class="btn btn--ghost" data-act="logout">Sign out</button></div>'
-    : `<div class="row"><button class="btn btn--ghost" data-act="sign-in" ${state.authError?'disabled':''}>Sign in</button><button class="btn btn--primary" data-act="sign-up" ${state.authError?'disabled':''}>Sign up</button></div>`;
+    : isInvitationPage()
+      ? `<div class="row"><a class="btn btn--ghost" href="/join/sign-in${esc(location.search)}">Sign in</a><a class="btn btn--primary" href="/join/sign-up${esc(location.search)}">Sign up</a></div>`
+      : `<div class="row"><button class="btn btn--ghost" data-act="sign-in" ${state.authError?'disabled':''}>Sign in</button><button class="btn btn--primary" data-act="sign-up" ${state.authError?'disabled':''}>Sign up</button></div>`;
   return `<div class="gate welcome"><a class="skip" href="#main">Skip to content</a>
     <header class="gate__bar"><a class="rail__brand" href="/" aria-label="Slate home">${homeIcon()}<span class="rail__name">Slate</span></a>
       <button type="button" class="btn btn--ghost" data-act="public-nav-toggle" aria-expanded="${state.publicNavOpen}" aria-controls="public-nav">Menu</button>
@@ -2667,6 +2682,31 @@ function vPricing(){
     </section>`);
 }
 
+function isInvitationPage(){ return /^\/join(?:\/|$)/.test(location.pathname); }
+
+function vInvitation(){
+  const params = new URLSearchParams(location.search);
+  const signup = location.pathname.startsWith('/join/sign-up')
+    || (!location.pathname.startsWith('/join/sign-in') && params.get('__clerk_status') === 'sign_up');
+  const failure = state.authError ? `<p role="alert">${esc(state.authError)}</p><button class="btn" data-act="auth-retry">Try again</button>` : '';
+  const workspaces = (state.workspaces || []).filter(w => w.role && (!params.get('organization') || w.id === params.get('organization')));
+  return publicFrame(`<div class="welcome__grid"><section class="stack">
+    <p class="t-label">Search team invitation</p><h1 class="t-title">Join your search team</h1>
+    <p class="t-body">Your team uses Slate to organize the search, share materials, and evaluate candidates.</p>
+    <ol class="welcome__steps invitation__steps"><li><strong>Use your invited email</strong><span>Sign in or create an account with the address that received the invitation.</span></li><li><strong>Join the workspace</strong><span>Accept your invitation, then open the workspace your team invited you to.</span></li><li><strong>Open your assigned search</strong><span>Confirm your name if prompted. Your team sets your role and search access.</span></li></ol>
+    <p class="t-small">Link expired or invitation missing? Ask the person who invited you to send a new invitation to the email you use here.</p>
+    </section><section class="welcome__card stack" aria-label="Join your team">
+    ${!state.user ? `${failure || `<h2 class="t-section">${signup ? 'Create your account' : 'Sign in to join'}</h2><div data-clerk-auth="${signup ? 'sign-up' : 'sign-in'}"></div>`}
+      <a href="/join/${signup ? 'sign-in' : 'sign-up'}${esc(location.search)}">${signup ? 'Already have an account? Sign in' : 'New to Slate? Create an account'}</a>`
+      : `<h2 class="t-section">Your team access</h2><p>Signed in as <strong>${esc(state.user.email)}</strong></p>
+      ${state.orgError ? `<p role="alert">${esc(state.orgError)}</p>` : ''}
+      ${state.workspacesError ? `<p role="alert">${esc(state.workspacesError)}</p>` : ''}
+      ${inviteList()}
+      ${workspaces.map(w => `<div class="stack stack--tight"><strong>${esc(w.name)}</strong><span>${esc(w.roleLabel)}</span><button class="btn btn--primary" data-act="switch-workspace" data-org="${esc(w.id)}" ${state.orgBusy?'disabled':''}>Continue to workspace</button></div>`).join('')}
+      <div class="row"><button class="btn btn--secondary" data-act="check-invites" ${state.orgBusy?'disabled':''}>Check invitations</button><button class="btn btn--ghost" data-act="logout">Use a different account</button></div>`}
+    </section></div>`);
+}
+
 function vGate(){
   const authPage = /^\/(sign-up|sign-in)(?:\/|$)/.exec(location.pathname)?.[1];
   const failure = state.authError ? `<p role="alert">${esc(state.authError)}</p><button class="btn" data-act="auth-retry">Try again</button>` : '';
@@ -2689,7 +2729,7 @@ function vGate(){
       <div class="welcome__grid">
         <article class="welcome__card stack"><p class="t-label">For hiring teams</p><h3 class="t-section">I’m conducting a search</h3>
           <p>Set up your organization, choose a search workflow, invite your team, and follow a guided process from planning through selection.</p>
-          <a class="btn btn--primary" href="/sign-up">Set up an organization</a><p class="t-small">Already invited? Sign in with the email on your invitation.</p></article>
+          <a class="btn btn--primary" href="/sign-up">Set up an organization</a><p class="t-small">Already invited? <a href="/join">Join your search team</a> with the email on your invitation.</p></article>
         <article class="welcome__card stack"><p class="t-label">For candidates</p><h3 class="t-section">I’m looking for a position</h3>
           <p>Explore published openings, review requirements, and apply with your verified email. Save a draft and return to finish it.</p>
           <a class="btn btn--secondary" href="/careers">Browse openings</a><p class="t-small">Have a questionnaire invitation? Open the private link your search team sent you.</p></article>
@@ -3472,7 +3512,7 @@ function outstandingPanel(s){
   const pending = s.consensus?.pending || [];
   if (s.intake?.status === 'open' && pending.length){
     items.push({ t: pending.length+' committee member'+(pending.length===1?' has':'s have')+' not answered intake',
-      b: pending.map(p => esc(p.name || p)).join(', '), key:'intake', cta:'Open committee input' });
+      b: pending.map(p => esc(p.name || p)).join(', '), key:'intake', cta:'Open candidate profile input' });
   }
   for (const [key, warning] of Object.entries(s.staleArtifacts || {})){
     if (!stepOf(key)) continue;
@@ -3615,11 +3655,11 @@ function checklistItems(s){
   });
   items.push({
     done: s.intake?.status === 'closed',
-    label: 'Collect committee input and close the window',
+    label: 'Collect candidate profile input and close the window',
     note: s.intake?.status === 'open'
       ? 'Open now. Closing it publishes submitted answers to everyone on the search.'
       : s.intake?.status === 'closed' ? 'Closed.' : 'Not opened yet.',
-    go: canOpenStep('intake') ? 'intake' : null, goLabel: 'Open committee input'
+    go: canOpenStep('intake') ? 'intake' : null, goLabel: 'Open candidate profile input'
   });
   items.push({
     done: has('profile'),
@@ -3828,7 +3868,7 @@ function vCommittee(){
         ? `<button class="btn btn--primary" data-go="intake-mine">Answer your questionnaire</button>` : '')}
     <div class="band"><div class="wrap stack">
       ${rosterPanel(s)}
-      <div class="spec"><div class="spec__bar">Committee input</div>
+      <div class="spec"><div class="spec__bar">Candidate profile input</div>
         <div class="spec__body stack stack--tight">
           ${hubRow('Intake window',
             open ? `Open${due?' · due '+esc(due):''}. ${answered} of ${roster.length} answered. Saved drafts stay private to whoever wrote them.`
@@ -4509,8 +4549,9 @@ function intakeGroup(kind){
   const named = rows.filter(x => String(x.it.label||'').trim()).length;
   const suggKey = 'isugg-'+kind;
   const suggOpen = state.open[suggKey] === undefined ? named === 0 : Boolean(state.open[suggKey]);
-  return `<section id="intake-sec-${kind}" class="spec profgroup"><div class="spec__bar">${esc(ask.t)} · ${named} named</div>
+  return `<section id="intake-sec-${kind}" class="spec profgroup"><div class="spec__bar">${esc(KIND[kind].plural)} · ${named} named</div>
     <div class="spec__body stack">
+      <p><strong>${esc(ask.t)}</strong></p>
       <p class="t-small">${esc(ask.hint)} Add as many as you want. Rate each 1 to 5 for how much it matters to you.</p>
       ${rows.map(x => intakeRow(x.it, x.i)).join('') || '<p class="t-small">Nothing here yet. Write your own, or open the suggestions.</p>'}
       <div class="row">
@@ -4562,10 +4603,11 @@ function vIntakeAnswer(){
   const closed = intake.status === 'closed';
   const count = d.items.filter(i => String(i.label||'').trim()).length;
   return shell(`
-    ${head('Step '+stepNo('intake'), 'What are you looking for?',
-      'Answer for yourself. Anything you save without submitting stays yours alone. Once you submit, the search team can read your '
-      + 'answer while they facilitate, and the rest of the committee reads it after the account manager closes the window.')}
+    ${head('Step '+stepNo('intake'), 'Candidate profile input',
+      'Describe the candidate you want to hire: essential skills, leadership traits, current challenges, and future opportunities. '
+      + 'Rate how much each priority matters to you. The account manager uses the committee’s submitted answers to build and adopt the candidate profile in Step '+stepNo('profile')+'.')}
     <div class="band"><div class="wrap stack">
+      <p class="t-small">Answer for yourself. Saved drafts are private to you. Submitted answers are visible to the search team; the rest of the committee can read them after the account manager closes the response window.</p>
       ${intakeConflictPanel()}
       ${!open ? `<div class="notice notice--${closed?'ok':'info'}"><div>
         <div class="notice__t">${closed ? 'Intake is closed' : 'Intake has not opened yet'}</div>
@@ -4732,13 +4774,18 @@ function vIntakeManage(){
   const mine = mySubmission();
   const waiting = agg?.pending || [];
   return shell(`
-    ${head('Step '+stepNo('intake'), 'Committee input',
-      'Each member answers on their own, before anyone drafts a profile. You see who has responded while the window is open, and what they said once you close it.',
+    ${head('Step '+stepNo('intake'), 'Candidate profile input',
+      'Collect what each committee member wants in the candidate profile: essential skills, leadership traits, current challenges, and future opportunities. In Step '+stepNo('profile')+', review these priorities together and adopt the profile used to evaluate candidates.',
       `${!open && !closed ? `<button class="btn btn--primary" data-act="intake-open" ${confirmed?'':'disabled'}>Open the window</button>` : ''}
        ${open ? `<button class="btn btn--primary" data-act="intake-close">Close and read the room</button>` : ''}
        ${closed ? `<button class="btn btn--secondary" data-act="intake-open">Reopen the window</button>` : ''}
        ${nextBtn('intake')}`)}
     <div class="band"><div class="wrap stack">
+      ${you().member ? `<section class="spec"><div class="spec__bar">Your input for the candidate profile</div>
+        <div class="spec__body stack stack--tight"><p>Use your form to name the priorities you want included and rate how much each matters. Your submitted answers contribute alongside the committee’s.</p>
+          ${open ? `<div class="row"><button class="btn btn--primary" data-go="intake-mine">${mine ? 'Review my profile input' : 'Add my profile input'}</button></div>`
+            : `<p class="t-small">${closed ? 'The response window is closed. Submitted priorities are shown below.' : 'The input form becomes available when the response window opens.'}</p>`}
+        </div></section>` : ''}
       ${!confirmed ? `<div class="notice notice--info"><div>
         <div class="notice__t">Confirm the roster first</div>
         <div class="notice__b">Anyone added after the window opens would miss it. Finish Step ${stepNo('team')}, then open intake.</div>
@@ -4763,11 +4810,6 @@ function vIntakeManage(){
         <div class="spec__body"><div class="waiting">${waiting.map(p => `<span class="chip">${esc(p.name||'A member')}</span>`).join('')}</div>
         <p class="t-small">You can close the window without them. They can still score candidates later.</p>
         </div></div>` : ''}
-
-      ${!mine && you().member ? `<div class="notice notice--info"><div>
-        <div class="notice__t">You have not answered yet</div>
-        <div class="notice__b">Your own answers are counted in the tally too. <button class="btn btn--ghost btn--sm" data-go="intake-mine">Answer now</button></div>
-      </div></div>` : ''}
 
       ${intake.rosterChangedAt && open ? `<div class="notice notice--stop"><div>
         <div class="notice__t">The roster changed while the window is open</div>
@@ -5014,7 +5056,7 @@ function vProfile(){
   const aiReady = Boolean(state.health?.hasKey);
 
   return shell(`
-    ${head('Step '+stepNo('profile'),'Candidate profile','This is the spine. Built from what the committee said in Step '+stepNo('intake')+', then edited by you. Recruiting markets it. Surveys test it. Interviews evidence it.')}
+    ${head('Step '+stepNo('profile'),'Candidate profile','Review and adopt the candidate profile from the priorities submitted in Step '+stepNo('intake')+' · Candidate profile input. Refine the criteria and weights here. The adopted profile guides recruiting, screening, and interviews.')}
     <div class="band"><div class="wrap stack">
       ${s.sourceChanged ? `<div class="notice notice--stop"><div>
         <div class="notice__t">Committee input has changed since this profile was adopted</div>
@@ -7419,6 +7461,7 @@ function vTeamAccess(){
  */
 function page(){
   if (location.pathname.startsWith('/apply/')) return vApply();
+  if (isInvitationPage()) return vInvitation();
   if (location.pathname === '/pricing' || location.pathname === '/subscriptions') return vPricing();
   if (location.pathname === '/how-it-works' || (location.pathname === '/' && !location.hash && !state.user)) return vGate();
   if (!state.user) return vGate();
@@ -8451,7 +8494,10 @@ document.addEventListener('click', async e => {
 
   if (act==='check-invites') {
     state.orgBusy = true; state.invitesError = null; render();
-    try { state.invites = await window.SlateAuth.invitations(); }
+    try {
+      state.invites = await window.SlateAuth.invitations();
+      if (isInvitationPage()) await loadMe();
+    }
     catch (error) { state.invites = null; state.invitesError = error.message || 'Invitations could not be read.'; }
     finally { state.orgBusy = false; render(); }
     return;
@@ -9522,6 +9568,11 @@ window.addEventListener('hashchange', async () => {
 $('#lookup-cancel')?.addEventListener('click', () => { if (showWait._cancel) showWait._cancel(); });
 
 (async function boot(){
+  // Older email redirects may still point at Home. Keep Clerk's ticket intact.
+  if (!location.pathname.startsWith('/apply/') && !isInvitationPage()
+      && new URLSearchParams(location.search).has('__clerk_ticket')) {
+    history.replaceState(null, '', '/join' + location.search);
+  }
   // The guide reads the staff catalog through the same session as everything
   // else. Configured before anything can ask for it; the catalog itself is
   // fetched on first use, not at boot, because most sessions never open it.
@@ -9546,6 +9597,7 @@ $('#lookup-cancel')?.addEventListener('click', () => { if (showWait._cancel) sho
         location.reload();
       },
       nextOrganization => {
+        if (isInvitationPage() && state.orgBusy) return;
         // The active workspace changed somewhere this tab did not ask — another
         // tab, or Clerk resolving a task. Whatever is on screen belongs to the
         // workspace we were in, so it comes down before anything else happens.
@@ -9562,6 +9614,20 @@ $('#lookup-cancel')?.addEventListener('click', () => { if (showWait._cancel) sho
     return;
   }
   const signedIn = await loadMe();
+  if (isInvitationPage()) {
+    // A stable component path survives Clerk's verification/callback steps,
+    // even when their query string no longer includes the invitation status.
+    if (!window.SlateAuth.signedIn && location.pathname === '/join') {
+      const kind = new URLSearchParams(location.search).get('__clerk_status') === 'sign_up' ? 'sign-up' : 'sign-in';
+      history.replaceState(null, '', '/join/' + kind + location.search);
+    }
+    if (signedIn) {
+      try { state.invites = await window.SlateAuth.invitations(); }
+      catch (error) { state.invitesError = error.message || 'Invitations could not be read. Try again.'; }
+    }
+    render();
+    return;
+  }
   if (location.pathname === '/subscriptions') history.replaceState(null, '', '/pricing');
   if (location.pathname === '/pricing') { await loadBilling(); return; }
   if (signedIn && location.pathname === '/how-it-works') { render(); return; }

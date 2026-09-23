@@ -1187,7 +1187,7 @@ app.post('/api/organization/invitations', ...requireOrgAdmin, async (req, res) =
   }
   const invitation = await auth.directory.invite(req.access.orgId, {
     email, role, inviterClerkUserId: req.access.clerkUserId,
-    redirectUrl: auth.config.invitationRedirectUrl || undefined
+    redirectUrl: invitationLanding(req)
   });
   res.json({
     invitation: { ...invitation, roleLabel: organizations.ROLE_LABEL[role], heldPlaces: organizations.pendingForEmail(db.db, email).filter(p => p.orgId === req.access.orgId).length },
@@ -1462,7 +1462,7 @@ app.post('/api/searches/:id/members', ...requireWorkspace, requireSearch, requir
     try {
       invitation = await auth.directory.invite(orgId, {
         email, role: organizations.COMMITTEE, inviterClerkUserId: req.access.clerkUserId,
-        redirectUrl: auth.config.invitationRedirectUrl || undefined
+        redirectUrl: invitationLanding(req, req.search.id)
       });
     } catch (error) {
       // An address that already has an invitation out is not a failure of this
@@ -3407,6 +3407,14 @@ function publicBase(req){
   return scheme + '://' + req.get('host');
 }
 
+function invitationLanding(req, searchId) {
+  if (auth.config.invitationRedirectUrl) return auth.config.invitationRedirectUrl;
+  const url = new URL('/join', publicBase(req));
+  url.searchParams.set('organization', req.access.orgId);
+  if (searchId) url.searchParams.set('search', searchId);
+  return url.href;
+}
+
 function postingResponse(req){
   const posting = postings.of(req.search);
   return {
@@ -4179,7 +4187,7 @@ app.get('/careers/:firmSlug/:postingSlug/apply', portalReadLimit, (_req, res) =>
 // Real authentication paths let Clerk keep verification and callback steps on
 // the same page. They never enter the offline shell cache.
 app.get('/subscriptions', (_req, res) => res.redirect(308, '/pricing'));
-app.get(['/sign-up', '/sign-up/*path', '/sign-in', '/sign-in/*path', '/pricing', '/how-it-works'], (_req, res) => {
+app.get(['/join', '/join/*path', '/sign-up', '/sign-up/*path', '/sign-in', '/sign-in/*path', '/pricing', '/how-it-works'], (_req, res) => {
   res.set('Cache-Control', 'no-store, private');
   res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
 });

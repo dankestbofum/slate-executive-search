@@ -444,7 +444,7 @@ function fixtureDirectory(store) {
       return tables().invitations.filter(i => i.orgId === orgId && i.status === 'pending').map(i => ({ ...i }));
     },
 
-    async invite(orgId, { email, role, inviterClerkUserId }) {
+    async invite(orgId, { email, role, inviterClerkUserId, redirectUrl }) {
       const t = tables();
       const address = normalizeEmail(email);
       if (t.memberships.some(m => m.orgId === orgId && m.email === address)) {
@@ -456,7 +456,7 @@ function fixtureDirectory(store) {
       t.seq += 1;
       const invitation = {
         id: 'orginv_' + t.seq, orgId, email: address, role, status: 'pending',
-        invitedBy: inviterClerkUserId || null,
+        invitedBy: inviterClerkUserId || null, redirectUrl,
         createdAt: now(), expiresAt: new Date(Date.now() + 30 * 86400000).toISOString()
       };
       t.invitations.push(invitation);

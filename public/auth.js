@@ -114,7 +114,18 @@ window.SlateAuth = (() => {
       const authElement = root.querySelector('[data-clerk-auth]');
       if (authElement && clerk && !clerk.user) {
         const kind = authElement.dataset.clerkAuth;
-        const props = { routing: 'path', path: '/' + kind, signInUrl: '/sign-in', signUpUrl: '/sign-up', fallbackRedirectUrl: '/' };
+        const joining = /^\/join(?:\/|$)/.test(location.pathname);
+        const context = new URLSearchParams();
+        for (const key of ['organization', 'search']) {
+          const value = new URLSearchParams(location.search).get(key);
+          if (value) context.set(key, value);
+        }
+        const complete = '/join' + (context.size ? '?' + context : '');
+        const props = joining
+          ? { routing: 'path', path: /^\/join\/(sign-in|sign-up)/.exec(location.pathname)?.[0] || '/join',
+              signInUrl: '/join/sign-in' + location.search, signUpUrl: '/join/sign-up' + location.search,
+              forceRedirectUrl: complete, signInForceRedirectUrl: complete, signUpForceRedirectUrl: complete }
+          : { routing: 'path', path: '/' + kind, signInUrl: '/sign-in', signUpUrl: '/sign-up', fallbackRedirectUrl: '/' };
         if (kind === 'sign-up') clerk.mountSignUp(authElement, props);
         else clerk.mountSignIn(authElement, props);
         authMounted = { kind, element: authElement };

@@ -243,13 +243,13 @@ const articles = [
   {
     id: 'submit-committee-input',
     title: 'Save and submit your committee input',
-    summary: 'Write what you are looking for in this hire. Save privately as often as you like; submit when you are ready for staff to read it.',
+    summary: 'In Step 2, contribute the skills, traits, challenges, and opportunities you want in the candidate profile. The search manager reviews the committee’s answers and adopts the profile in Step 3.',
     audience: ['committee', 'consultant'],
     screens: ['intake', 'intake-mine', 'committee'],
     steps: ['intake'],
     checklist: [
       'Open your questionnaire from the search.',
-      'Answer the four questions.',
+      'Name your priorities for the four candidate profile categories and rate how much each matters.',
       'Use Save and finish later while you are still thinking.',
       'Use Submit my answers when you want them counted.'
     ],
@@ -260,6 +260,7 @@ const articles = [
     ],
     doThis: [
       { do: 'Open the search and select **Answer your questionnaire**, or **Open your questionnaire** if you have started one.' },
+      { do: 'If you are managing Step 2, select **Add my profile input**, or **Review my profile input** after submitting.', note: 'The response window must be open. These are your individual priorities; the shared candidate profile is reviewed and adopted in Step 3.' },
       { do: 'Answer the four questions: what this person must already know how to do, what kind of person works here, what they are walking into, and what they could build.' },
       { do: 'Select **Save and finish later** at any point.', note: 'This is a private draft. It changes nothing that you have already submitted, and nobody else can read it.' },
       { do: 'When you are ready, select **Submit my answers**.', note: 'After a first submission the same control reads **Update my answers**. Updating replaces your submitted answer; the previous one stays in the record.' }

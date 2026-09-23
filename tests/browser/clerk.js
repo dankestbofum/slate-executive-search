@@ -134,7 +134,7 @@ function clerkStub(tokens, workspaces, email, signedInByDefault, startingOrg) {
     id: 'inv_' + w.id,
     role: w.role,
     publicOrganizationData: { id: w.id, name: w.name },
-    accept: async () => { rememberOrg(w.id); emit(); }
+    accept: async () => { w.invited = false; }
   }));
   window.Clerk = {
     get user() {
@@ -162,14 +162,16 @@ function clerkStub(tokens, workspaces, email, signedInByDefault, startingOrg) {
     // is what a real instance does with an account that has one.
     openSignIn() { remember(true); if (!orgId) rememberOrg(${JSON.stringify(startingOrg)}); emit(); },
     openSignUp() { remember(true); if (!orgId) rememberOrg(${JSON.stringify(startingOrg)}); emit(); },
-    mountSignUp(element) {
+    mountSignUp(element, props) {
+      window.__authMount = { kind: 'sign-up', props };
       const button = document.createElement('button');
       button.textContent = 'Create test account';
       button.onclick = () => window.Clerk.openSignUp();
       element.append(button);
     },
     unmountSignUp(element) { element.replaceChildren(); },
-    mountSignIn(element) {
+    mountSignIn(element, props) {
+      window.__authMount = { kind: 'sign-in', props };
       const button = document.createElement('button');
       button.textContent = 'Sign in to test account';
       button.onclick = () => window.Clerk.openSignIn();

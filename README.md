@@ -230,6 +230,15 @@ notes and authorship stay on the record under their name; somebody who manages a
 search has to hand it over first. The last administrator cannot be removed or
 demoted.
 
+Invitation emails default to Slate's `/join` page. Invitees sign in or create
+an account using their invited email, accept the workspace invitation, and
+continue to their assigned search. The page also handles existing members and
+offers recovery guidance for missing or expired invitations. Set
+`SLATE_PUBLIC_URL` to the deployed HTTPS origin; leave
+`SLATE_INVITATION_REDIRECT_URL` unset to use this flow. An explicit redirect
+override is still honored. Older links carrying a Clerk invitation ticket to
+Home are routed into the join page without discarding the ticket.
+
 A search manager who is not an administrator can still prepare a committee: the
 place is held against the address and shown under **Waiting to join** as
 **Invitation needed** until an administrator sends the invitation. Slate never

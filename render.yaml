@@ -56,7 +56,7 @@ services:
       - key: CLERK_AUTHORIZED_PARTIES
         sync: false
       # Optional. Where Clerk sends somebody who follows an organization
-      # invitation; unset uses the instance default.
+      # invitation; unset uses Slate's /join page at SLATE_PUBLIC_URL.
       - key: SLATE_INVITATION_REDIRECT_URL
         sync: false
       # Who may create a new firm workspace here, comma-separated. Empty means
