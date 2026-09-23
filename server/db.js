@@ -109,6 +109,7 @@ function blankSearch(input, user, organizationId){
       dueBy: '',
       prompt: '',
       qualities: [],
+      skipped: null,
       openedAt: null,
       closedAt: null,
       // One record per person: their private draft and their committed
@@ -867,7 +868,8 @@ function decorate(search, access){
   const steps = catalog.map(s => {
     const status = stepStatus(search, s, cache);
     const lock = blocked(search, s, catalog, cache);
-    return { ...s, status: lock && status!=='done' ? 'idle' : status, blocked: lock && status!=='done' };
+    return { ...s, status: lock && status!=='done' ? 'idle' : status, blocked: lock && status!=='done',
+      ...(s.key === 'intake' && search.intake?.skipped ? { skipped:true } : {}) };
   });
   const done = steps.filter(s=>s.status==='done').length;
   const next = steps.find(s=>!s.blocked && s.status==='now')
@@ -926,6 +928,7 @@ function decorate(search, access){
       closedAt: intake.closedAt || null,
       legacy: intake.legacy,
       completedEmpty: intake.completedEmpty || null,
+      skipped: intake.skipped || null,
       rosterChangedAt: intake.rosterChangedAt || null,
       responses: committee.visibleResponses(search, {
         userId: uid,

@@ -2546,7 +2546,7 @@ function shell(body){
       ${stages.filter(([key]) => canOpenStep(key)).map(([key,label]) => {
         const st = stepState(key);
         return `<button type="button" data-go="${peopleView(key)}" ${isCurrentStep(key)?'aria-current="step"':''}
-          class="${st.status==='done'?'is-done':''}">${esc(label)}${st.status==='done'?' · Done':st.blocked?' · Waiting':''}</button>`;
+          class="${st.status==='done'?'is-done':''}">${esc(label)}${st.skipped?' · Skipped':st.status==='done'?' · Done':st.blocked?' · Waiting':''}</button>`;
       }).join('')}
     </nav></div>` + body;
   }
@@ -3415,6 +3415,7 @@ function stepState(key){
 }
 function statusPill(st){
   if (!st) return pill('idle','Not on file');
+  if (st.skipped) return pill('idle','Skipped');
   if (st.status==='done') return pill('ok','Done');
   if (st.blocked) return pill('idle','Waiting');
   if (st.status==='now') return pill('wait','In progress');
@@ -3728,7 +3729,7 @@ function checklistItems(s){
   if (isCommittee()){
     const mine = s.you?.intake;
     const open = s.intake?.status === 'open';
-    items.push({
+    if (!s.intake?.skipped) items.push({
       done: Boolean(mine?.submitted),
       label: 'Submit what you are looking for in this hire',
       note: open
@@ -3757,8 +3758,8 @@ function checklistItems(s){
   });
   items.push({
     done: s.intake?.status === 'closed',
-    label: 'Collect candidate profile input and close the window',
-    note: s.intake?.status === 'open'
+    label: s.intake?.skipped ? 'Committee questionnaire skipped' : 'Collect candidate profile input and close the window',
+    note: s.intake?.skipped ? 'The organization administrator chose to proceed directly to the candidate profile.' : s.intake?.status === 'open'
       ? 'Open now. Closing it publishes submitted answers to everyone on the search.'
       : s.intake?.status === 'closed' ? 'Closed.' : 'Not opened yet.',
     go: canOpenStep('intake') ? 'intake' : null, goLabel: 'Open candidate profile input'
@@ -3973,7 +3974,8 @@ function vCommittee(){
       <div class="spec"><div class="spec__bar">Candidate profile input</div>
         <div class="spec__body stack stack--tight">
           ${hubRow('Intake window',
-            open ? `Open${due?' · due '+esc(due):''}. ${answered} of ${roster.length} answered. Saved drafts stay private to whoever wrote them.`
+            s.intake?.skipped ? 'Optional questionnaire skipped by the organization administrator. Continue with the candidate profile.'
+              : open ? `Open${due?' · due '+esc(due):''}. ${answered} of ${roster.length} answered. Saved drafts stay private to whoever wrote them.`
                  : s.intake?.completedEmpty
                    ? 'Completed without committee input. No responses were collected; the reason is on the record.'
                    : s.intake?.status === 'closed'
@@ -3981,7 +3983,7 @@ function vCommittee(){
                      : 'Not opened yet.',
             statusPill(intake),
             openBtn('intake', you().consultant ? 'Manage intake' : 'Open the questionnaire', open && !you().consultant))}
-          ${onSearch ? hubRow('Your answers',
+          ${onSearch && !s.intake?.skipped ? hubRow('Your answers',
             mine
               ? (intakeHasUnsubmitted()
                 ? 'Submitted and counted. You have saved edits that are not submitted yet.'
@@ -4912,6 +4914,33 @@ function collectSharedQualities(){
     String(text).split(/\r?\n/).map(label => label.trim()).filter(Boolean).map(label => ({ kind, label })));
 }
 
+function questionnaireChoice(){
+  if (!isAdmin()) return '';
+  const skipped = Boolean(state.search.intake?.skipped);
+  const submitted = state.search.consensus?.submitted || 0;
+  const confirmed = Boolean(state.search.team?.confirmedAt);
+  return `<section class="spec"><div class="spec__bar">Committee questionnaire · Optional</div>
+    <div class="spec__body stack stack--tight"><p>As organization administrator, choose whether this search collects committee priorities. You can proceed directly to writing the candidate profile when the questionnaire is not needed.</p>
+      <div class="row">${skipped
+        ? '<button type="button" class="btn btn--secondary" data-act="include-questionnaire">Include committee questionnaire</button>'
+        : `<span class="t-small">Included in this search.</span><button type="button" class="btn btn--secondary" data-act="skip-questionnaire" ${!confirmed || submitted?'disabled':''}>Skip questionnaire and continue</button>`}</div>
+      ${!skipped && !confirmed ? '<p class="t-small">Confirm the roster in Step 1 first. A search can have just the account manager.</p>' : ''}
+      ${!skipped && submitted ? '<p class="t-small">Answers have already been submitted. Review them and close the response window to continue.</p>' : ''}
+    </div></section>`;
+}
+
+function vIntakeSkipped(){
+  const decision = state.search.intake.skipped;
+  return shell(`${head('Step '+stepNo('intake'), 'Candidate profile input', 'The committee questionnaire is optional for this search.')}
+    <div class="band"><div class="wrap stack">
+      <div class="notice notice--info"><div><div class="notice__t">Committee questionnaire skipped</div>
+        <div class="notice__b">${esc(decision.byName || 'The organization administrator')} chose to skip it on ${esc(String(decision.at || '').slice(0,10))}.
+          No questionnaire response is required. Any saved drafts remain private. The search team can write the candidate profile and continue to recruiting.</div></div></div>
+      ${questionnaireChoice()}
+      <div class="row">${openBtn('profile', canEdit() ? 'Continue to candidate profile' : 'View candidate profile', true)}</div>
+    </div></div>`);
+}
+
 function vIntakeManage(){
   const s = state.search;
   const intake = s.intake || {};
@@ -4929,6 +4958,7 @@ function vIntakeManage(){
        ${closed ? `<button class="btn btn--secondary" data-act="intake-open">Reopen the window</button>` : ''}
        ${nextBtn('intake')}`)}
     <div class="band"><div class="wrap stack">
+      ${questionnaireChoice()}
       ${sharedQualitiesPanel()}
       ${you().member ? `<section class="spec"><div class="spec__bar">Your input for the candidate profile</div>
         <div class="spec__body stack stack--tight"><p>Use your form to name the priorities you want included and rate how much each matters. Your submitted answers contribute alongside the committee’s.</p>
@@ -5005,6 +5035,7 @@ function vIntakeManage(){
 }
 
 function vIntake(){
+  if (state.search.intake?.skipped) return vIntakeSkipped();
   // A committee member only ever has the answer page. A consultant gets the
   // facilitator view, and reaches their own form from the prompt on it.
   if (!you().consultant || state.view === 'intake-mine') return vIntakeAnswer();
@@ -5205,7 +5236,9 @@ function vProfile(){
   const aiReady = Boolean(state.health?.hasKey);
 
   return shell(`
-    ${head('Step '+stepNo('profile'),'Candidate profile','Review and adopt the candidate profile from the priorities submitted in Step '+stepNo('intake')+' · Candidate profile input. Refine the criteria and weights here. The adopted profile guides recruiting, screening, and interviews.')}
+    ${head('Step '+stepNo('profile'),'Candidate profile',s.intake?.skipped
+      ? 'Choose the candidate qualities and their weights for this search. The profile guides recruiting, screening, and interviews.'
+      : 'Review and adopt the candidate profile from the priorities submitted in Step '+stepNo('intake')+' · Candidate profile input. Refine the criteria and weights here. The adopted profile guides recruiting, screening, and interviews.')}
     <div class="band"><div class="wrap stack">
       ${s.sourceChanged ? `<div class="notice notice--stop"><div>
         <div class="notice__t">Committee input has changed since this profile was adopted</div>
@@ -5227,8 +5260,10 @@ function vProfile(){
           Matching is by wording, so “Budgeting” and “Financial management” stay separate entries.
           <button type="button" class="btn btn--ghost btn--sm" data-go="intake">See what they said</button></div>
       </div></div>` : `<div class="notice notice--info"><div>
-        <div class="notice__t">No committee input on file</div>
-        <div class="notice__b">Step ${stepNo('intake')} collects what each member is looking for, and this matrix is normally built from it. You can still write the profile by hand.</div>
+        <div class="notice__t">${s.intake?.skipped ? 'Committee questionnaire skipped' : 'No committee input on file'}</div>
+        <div class="notice__b">${s.intake?.skipped
+          ? 'No questionnaire responses are needed. Add and weight the criteria below, then save the profile to continue. An organization administrator can include the questionnaire again in Step '+stepNo('intake')+'.'
+          : 'Step '+stepNo('intake')+' collects what each member is looking for, and this matrix is normally built from it. You can still write the profile by hand.'}</div>
       </div></div>`}
       ${nav}
       ${groups}
@@ -8940,6 +8975,20 @@ document.addEventListener('click', async e => {
     return;
   }
   /* --- Step 2, the intake window ------------------------------------------ */
+  if (act==='skip-questionnaire' || act==='include-questionnaire'){
+    const enabled = act==='include-questionnaire';
+    if (state.dirty && !confirm('Discard unsaved edits on this page and change the questionnaire option? Saved member drafts will be kept.')) return;
+    await withBusy(async () => {
+      state.search = await api('/api/searches/'+state.search.id+'/intake/participation', {
+        method:'PUT', body:{ enabled }
+      });
+      state.intake = null;
+      state.intakeConflict = null;
+      toast(enabled ? 'Committee questionnaire included. The account manager can open the response window.' : 'Committee questionnaire skipped. Continue with the candidate profile.');
+    }, waitSave(enabled ? 'Including the questionnaire' : 'Skipping the questionnaire'));
+    if (!enabled && state.search.intake?.skipped) await go('profile');
+    return;
+  }
   if (act==='copy-profile-qualities'){
     const form = $('#sharedqualities');
     if (!form) return;

@@ -605,6 +605,41 @@ const archive = (id, abe) => write('/api/searches/' + id, { auth: abe, id, metho
 
   /* --- CA-03: empty intake and roster changes --------------------------- */
 
+  await check('only the organization administrator can skip intake, preserving private drafts and unblocking the profile', async () => {
+    const { id, abe, people } = await standUp('Optional questionnaire', ['alice']);
+    const endpoint = '/api/searches/' + id + '/intake/participation';
+    try {
+      for (const auth of [people.alice.auth, sign.headers('mike@slate.local')]) {
+        assert.strictEqual((await write(endpoint, {auth, id, method:'PUT', body:{enabled:false}})).status, 403);
+      }
+      assert.strictEqual((await write(endpoint, {auth:abe, id, method:'PUT', body:{enabled:'false'}})).status, 400);
+      await saveDraft(id, people.alice, [{kind:'skill', label:'PRIVATE_OPTIONAL_DRAFT', weight:4}]);
+      const skipped = await write(endpoint, {auth:abe, id, method:'PUT', body:{enabled:false}});
+      assert.strictEqual(skipped.status, 200);
+      assert.ok(skipped.json.intake.skipped.by);
+      assert.strictEqual(skipped.json.intake.status, 'closed');
+      assert.strictEqual(skipped.json.steps.find(s => s.key === 'intake').skipped, true);
+      assert.strictEqual(skipped.json.steps.find(s => s.key === 'profile').blocked, false);
+      assert.doesNotMatch(JSON.stringify(skipped.json), /PRIVATE_OPTIONAL_DRAFT/);
+      assert.match(JSON.stringify((await read(id, people.alice.auth)).intake.responses), /PRIVATE_OPTIONAL_DRAFT/);
+      assert.strictEqual((await openIntake(id, abe)).json.code, 'INTAKE_SKIPPED');
+      assert.strictEqual((await submit(id, people.alice, [{kind:'skill', label:'Budgeting', weight:5}])).status, 400);
+      const saved = await write('/api/searches/' + id + '/profile', { auth:abe, id, method:'PUT', body:{criteria:[
+        {id:'S1',kind:'skill',label:'Budgeting',weight:5}, {id:'S2',kind:'skill',label:'Communication',weight:4}, {id:'S3',kind:'skill',label:'Staff leadership',weight:4}
+      ]}});
+      assert.strictEqual(saved.status, 200, JSON.stringify(saved.json));
+      const enabled = await write(endpoint, {auth:abe, id, method:'PUT', body:{enabled:true}});
+      assert.strictEqual(enabled.status, 200);
+      assert.strictEqual(enabled.json.intake.skipped, null);
+      assert.strictEqual(enabled.json.intake.status, 'draft');
+      assert.strictEqual(enabled.json.intake.completedEmpty, null);
+      assert.strictEqual((await openIntake(id, abe)).status, 200);
+      assert.strictEqual((await submit(id, people.alice, [{kind:'skill', label:'Budgeting', weight:5}])).status, 200);
+      assert.strictEqual((await write(endpoint, {auth:abe, id, method:'PUT', body:{enabled:false}})).json.code, 'INTAKE_HAS_SUBMISSIONS');
+      assert.strictEqual((await read(id, abe)).consensus.submitted, 1);
+    } finally { await archive(id, abe); }
+  });
+
   await check('completing without committee input is a recorded decision', async () => {
     const { id, abe } = await standUp('Empty Intake', []);
     try {
@@ -616,6 +651,25 @@ const archive = (id, abe) => write('/api/searches/' + id, { auth: abe, id, metho
       assert.match(closed.json.intake.completedEmpty.reason, /prior profile/);
       assert.match(closed.json.activity[0].x, /without input/);
     } finally { await archive(id, abe); }
+  });
+
+  await check('the organization administrator can choose optional intake on another manager\'s search', async () => {
+    const abe = sign.headers('abe@slate.local'), mike = sign.headers('mike@slate.local');
+    const made = await api('/api/searches', {auth:mike, method:'POST', body:{client:'Optional intake authority',position:'City Manager'}});
+    assert.strictEqual(made.status, 200);
+    const id = made.json.id;
+    const endpoint = '/api/searches/' + id + '/intake/participation';
+    try {
+      assert.strictEqual((await write(endpoint, {auth:abe,id,method:'PUT',body:{enabled:false}})).json.code, 'ROSTER_UNCONFIRMED');
+      await write('/api/searches/' + id + '/team/confirm', {auth:mike,id,body:{confirmed:true}});
+      assert.strictEqual((await write(endpoint, {auth:mike,id,method:'PUT',body:{enabled:false}})).status, 403);
+      const skipped = await write(endpoint, {auth:abe,id,method:'PUT',body:{enabled:false}});
+      assert.strictEqual(skipped.status, 200);
+      assert.strictEqual(skipped.json.you.canManage, false);
+      assert.strictEqual(skipped.json.steps.find(s => s.key === 'profile').blocked, false);
+      assert.strictEqual((await write(endpoint, {auth:mike,id,method:'PUT',body:{enabled:true}})).status, 403);
+      assert.strictEqual((await write(endpoint, {auth:abe,id,method:'PUT',body:{enabled:true}})).status, 200);
+    } finally { await archive(id, mike); }
   });
 
   await check('a roster change during the window has to be reconfirmed before closing', async () => {

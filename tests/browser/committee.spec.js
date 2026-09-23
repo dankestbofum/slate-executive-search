@@ -73,6 +73,40 @@ async function namePriorities(page, searchId, priorities) {
 const nameOnePriority = (page, searchId, label, weight) =>
   namePriorities(page, searchId, [[label, weight]]);
 
+test('the administrator can skip the questionnaire and enable it again without asking members to respond', async ({ browser }, testInfo) => {
+  test.slow();
+  const {search, manager, managerContext, members} = await openIntake(browser, testInfo, ['ada'], {draft:true});
+  try {
+    await manager.setViewportSize(testInfo.project.use.viewport || {width:1280, height:720});
+    await manager.goto('/#/s/' + search.id + '/intake');
+    await manager.getByRole('button', {name:'Skip questionnaire and continue', exact:true}).click();
+    await expect(manager).toHaveURL(/\/profile$/);
+    await expect(manager.getByRole('navigation', {name:'Search stages'})).toContainText('Committee rankings · Skipped');
+    const skipped = await (await manager.request.get('/api/searches/' + search.id)).json();
+    expect(skipped.steps.find(s => s.key === 'profile').blocked).toBe(false);
+
+    await members.ada.page.goto('/#/s/' + search.id + '/intake');
+    await expect(members.ada.page.locator('.notice__t')).toHaveText('Committee questionnaire skipped');
+    await expect(members.ada.page.getByRole('button', {name:'Submit my answers', exact:true})).toHaveCount(0);
+    await expect(members.ada.page.getByRole('button', {name:'Include committee questionnaire', exact:true})).toHaveCount(0);
+    await members.ada.page.goto('/#/s/' + search.id + '/overview');
+    await expect(members.ada.page.locator('h1')).toBeVisible();
+    await expect(members.ada.page.getByText('Submit what you are looking for in this hire', {exact:true})).toHaveCount(0);
+
+    await manager.goto('/#/s/' + search.id + '/intake');
+    await expect(manager.locator('.notice__t')).toHaveText('Committee questionnaire skipped');
+    await manager.getByRole('button', {name:'Include committee questionnaire', exact:true}).click();
+    await expect(manager.getByRole('button', {name:'Open the window', exact:true})).toBeVisible();
+    await manager.getByRole('button', {name:'Open the window', exact:true}).click();
+    await expect(manager.locator('#toast')).toContainText('Intake is open');
+    await nameOnePriority(members.ada.page, search.id, 'Budgeting', 5);
+    await members.ada.page.getByRole('button', {name:'Submit my answers', exact:true}).click();
+    await expect(members.ada.page.locator('#toast')).toContainText('Your answers are in');
+  } finally {
+    await Promise.all([managerContext.close(), members.ada.context.close()]);
+  }
+});
+
 test('shared qualities reach every member and the owner can navigate from aggregate to recruiting and review', async ({ browser }, testInfo) => {
   test.slow();
   const { search, manager, managerContext, members } = await openIntake(browser, testInfo, ['ada', 'bo'], { draft:true });
