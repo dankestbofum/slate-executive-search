@@ -1,0 +1,132 @@
+{
+  "checkedAt": "2026-09-23T01:45:33.505Z",
+  "localDate": "2026-09-22 America/Phoenix",
+  "base": "https://slate-executive-search.onrender.com",
+  "head": "8fe844bc202cd2a9387f89f73e3e8eced8c1e46a",
+  "browserInspection": "Unavailable: no enabled browser surfaces; iab and chrome creation both returned Browser is not available.",
+  "rows": [
+    {
+      "path": "/",
+      "status": 200,
+      "type": "text/html; charset=utf-8"
+    },
+    {
+      "path": "/sign-up",
+      "status": 200,
+      "type": "text/html; charset=utf-8"
+    },
+    {
+      "path": "/sign-in",
+      "status": 200,
+      "type": "text/html; charset=utf-8"
+    },
+    {
+      "path": "/subscriptions",
+      "status": 200,
+      "type": "text/html; charset=utf-8"
+    },
+    {
+      "path": "/careers",
+      "status": 200,
+      "type": "text/html; charset=utf-8"
+    },
+    {
+      "path": "/api/health",
+      "status": 200,
+      "type": "application/json; charset=utf-8",
+      "observed": {
+        "ok": true,
+        "release": "16df65715938811ea650e0a82b0236ea2b694903",
+        "releaseStamped": true,
+        "releaseSource": "build",
+        "node": "24.20.0"
+      }
+    },
+    {
+      "path": "/api/ready",
+      "status": 200,
+      "type": "application/json; charset=utf-8",
+      "observed": {
+        "ready": true,
+        "releaseIdentity": {
+          "id": "16df65715938811ea650e0a82b0236ea2b694903",
+          "source": "build",
+          "build": "16df65715938811ea650e0a82b0236ea2b694903",
+          "platform": "8fe844bc202cd2a9387f89f73e3e8eced8c1e46a",
+          "stamped": true,
+          "agrees": false
+        },
+        "schemaVersion": 8,
+        "aiResearch": {
+          "verified": false,
+          "observed": "not yet verified",
+          "jobs": 0,
+          "succeeded": 0,
+          "partial": 0,
+          "failed": 0,
+          "cancelled": 0,
+          "last": null,
+          "failingSince": 0,
+          "recent": []
+        },
+        "researchLimits": {
+          "totalMs": 180000,
+          "crawlMs": 25000,
+          "roundMs": 60000,
+          "maxRounds": 4,
+          "synthesisReserveMs": 30000,
+          "retries": 0
+        },
+        "model": "claude-sonnet-5",
+        "premiumModel": "claude-opus-5",
+        "mail": {
+          "configured": false,
+          "transport": "none",
+          "productionCapable": false,
+          "refusedSetting": null,
+          "note": "No mail provider is configured. Applicant email verification is unavailable, and the portal will not offer it."
+        },
+        "uploads": false,
+        "scanner": "none",
+        "offVolumeCopy": "NOT CONFIGURED",
+        "alertsDestination": "NOT CONFIGURED"
+      }
+    },
+    {
+      "path": "/api/public/billing/plans",
+      "status": 200,
+      "type": "application/json; charset=utf-8",
+      "observed": {
+        "mode": "off",
+        "status": "disabled",
+        "plans": []
+      }
+    },
+    {
+      "path": "/app.js",
+      "status": 200,
+      "type": "text/javascript; charset=utf-8",
+      "matchesLocalNormalized": true,
+      "matchesGitHead": true,
+      "normalizedSha256": "3a49e2a90085bd7b714fa75450b3af74cb4697347ef7643a76d32ee331f42e2f",
+      "publicFrameHasHomeLink": true,
+      "publicFrameHasMenu": false
+    },
+    {
+      "path": "/auth.js",
+      "status": 200,
+      "type": "text/javascript; charset=utf-8",
+      "matchesLocalNormalized": true,
+      "matchesGitHead": true,
+      "normalizedSha256": "76945790e962dbd7f085de9eae79c9fae342f02f977dc9d524c64f81ab8d0258"
+    },
+    {
+      "path": "/app.css",
+      "status": 200,
+      "type": "text/css; charset=utf-8",
+      "matchesLocalNormalized": true,
+      "matchesGitHead": true,
+      "normalizedSha256": "bf7d30339eb23ef34ad182a9ac32cfbedfdc35027a485964faa12e25480f0abc"
+    }
+  ]
+}

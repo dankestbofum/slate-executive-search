@@ -1353,14 +1353,14 @@ async function run(){
   // than the handful of phrases that used to carry it.
   record('The word "seat" appears nowhere in the client', !/\bseat(s|ed|ing)?\b/i.test(appJs));
 
-  record('New search opens on the search committee', /go\('team'\)/.test(appJs) && /Add the committee first/.test(appJs));
+  record('New search opens on project payment', /go\('billing'\)/.test(appJs) && /Review its project payment/.test(appJs));
 
   record('Search facts retains an operational workflow choice',
     /function packageChoice/.test(appJs) && /name="package"/.test(appJs)
       && /packageChoice\(s\.package\)/.test(appJs) && /Search workflow/.test(appJs));
   record('Hardcoded commercial plan comparison and samples are removed',
     !/function packageMatrix|function demoSearch|What each pay level includes|Potential fee/.test(appJs)
-      && !/data-go="packages"/.test(appJs) && /Plans have moved/.test(appJs));
+      && !/data-go="packages"/.test(appJs) && /Project fees/.test(appJs));
 
   record('Navigating to a step outside the package lands on the overview', /function offPackage/.test(appJs) && /offPackage\(view\)/.test(appJs));
 

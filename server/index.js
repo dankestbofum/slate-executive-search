@@ -14,6 +14,9 @@ const crypto = require('crypto');
 const db = require('./db');
 const auth = require('./auth').createAuth(db);
 const billing = require('./billing').create({ provider: require('@clerk/express').clerkClient.billing });
+const projectBillingModule = require('./project-billing');
+const projectEntitlements = require('./project-entitlements');
+const projectBilling = projectBillingModule.create({ db });
 const ai = require('./ai');
 const committee = require('./committee');
 const integrity = require('./integrity');
@@ -28,6 +31,7 @@ const candidates = require('./candidates');
 const disposition = require('./disposition');
 const authority = require('./authority');
 const aibudget = require('./aibudget');
+const aiAllowance = require('./ai-allowance').create({ db });
 const researchOp = require('./research-op');
 const researchJobs = require('./research-jobs');
 const organizations = require('./organizations');
@@ -51,9 +55,10 @@ const {
  * down this file; nothing calls them until a request arrives.
  */
 const jobs = researchJobs.create({
-  db, ai, telemetry, aibudget,
+  db, ai, telemetry, aibudget, allowance: aiAllowance,
   apply: (search, user, payload) => applyResearch(search, user, payload),
   authorize: job => authorizeJob(job),
+  preflight: job => authorizeJob(job),
   research: (input, op) => ai.researchCity(input, op)
 });
 
@@ -133,6 +138,17 @@ app.use(http.securityHeaders);
 // Logged after correlate so every line carries the same reference the client
 // was given, which is what makes a support request traceable to a log entry.
 app.use(telemetry.requests());
+
+// Verify Stripe against the raw bytes before JSON parsing and Clerk middleware.
+app.post('/api/webhooks/stripe', express.raw({ type: 'application/json', limit: '256kb' }), async (req, res) => {
+  const event = projectBillingModule.verifyWebhook(req.body, req.get('Stripe-Signature'), process.env.STRIPE_WEBHOOK_SECRET);
+  if (!event) return res.status(400).json({ error: 'Invalid Stripe signature.' });
+  try { await projectBilling.handleEvent(event); res.json({ received: true }); }
+  catch (error) {
+    telemetry.log.warn('stripe-webhook-failed', { eventId: event.id, message: error.message });
+    res.status(503).json({ error: 'Payment reconciliation will retry.' });
+  }
+});
 
 const PHOTO_SLOTS = new Set(['cover', 'place', 'org']);
 // Content-addressed names written by server/media.js, plus the legacy
@@ -289,6 +305,8 @@ function profilePublished(search){
 
 function painted(req, search){
   const out = db.decorate(search, req.access);
+  out.projectPayment = projectBilling.publicPayment(search);
+  out.projectAccess = projectEntitlements.status(search, db.db.projectPurchases);
   out.consensus = consensusFor(search, req.access);
   const staff = db.isStaff(req.access);
   // Both data paths, not just the page: hiding the profile screen while the
@@ -553,6 +571,16 @@ function requireSearch(req, res, next){
   if (!db.canView(s, req.access)) return res.status(404).json({ error:'Search not found.' });
   req.search = s;
   const reads = ['GET', 'HEAD'].includes(req.method);
+  if (!reads && !projectEntitlements.allows(s, db.db.projectPurchases, 'work')) {
+    const rootFacts = req.method === 'PATCH' && /^\/api\/searches\/[^/]+\/?$/.test(req.path)
+      && Object.keys(req.body || {}).every(key => [
+        'jurisdictionType', 'client', 'position', 'state', 'website', 'fog',
+        'population', 'budget', 'salary', 'opened', 'firstReview', 'notes', 'package'
+      ].includes(key));
+    const paymentRoute = /^\/api\/searches\/[^/]+\/(checkout|payment\/reconcile)\/?$/.test(req.path);
+    if (!rootFacts && !paymentRoute) return res.status(402).json({ code: 'PROJECT_PAYMENT_REQUIRED',
+      error: 'Complete this search’s project payment before starting work.' });
+  }
   // Stopping work already underway is not an edit to the search. A consultant
   // must be able to cancel research whose search has changed under them, or
   // been closed, without first reloading to collect a fresh revision — the
@@ -602,7 +630,8 @@ function requireEditor(req, res, next){
 function stillAuthorized(req){
   const current = db.findSearch(req.search.id);
   if (!current || current !== req.search) return false;
-  return db.canEdit(current, req.access);
+  return db.canEdit(current, req.access)
+    && projectEntitlements.allows(current, db.db.projectPurchases, 'work');
 }
 
 /** Rostering, the intake window, and adoption sit with the account manager. */
@@ -782,8 +811,8 @@ function entitlement(){
   return {
     checkedHere: false,
     command: 'npm run preflight',
-    model: String(process.env.CLAUDE_MODEL || 'claude-sonnet-5'),
-    premiumModel: String(process.env.CLAUDE_MODEL_PREMIUM || 'claude-opus-5'),
+    model: ai.MODEL,
+    premiumModel: ai.MODEL,
     note: 'Entitlement is not checked by this endpoint. Run the preflight in this deployment, or read the research outcomes below.'
   };
 }
@@ -1010,8 +1039,8 @@ app.get('/api/me', requireUser, async (req, res) => {
     workspacesError: workspaces ? null : 'We could not list your workspaces. Try again shortly.',
     users: visibleUsers(req.access).map(db.publicUser),
     health: {
-      model: process.env.CLAUDE_MODEL || 'claude-sonnet-5',
-      premium: process.env.CLAUDE_MODEL_PREMIUM || 'claude-opus-5',
+      model: ai.MODEL,
+      premium: ai.MODEL,
       hasKey: Boolean(String(process.env.ANTHROPIC_API_KEY || '').trim())
     }
   });
@@ -1297,6 +1326,36 @@ app.post('/api/searches', ...requireWorkspace, (req, res) => {
 
 app.get('/api/searches/:id', ...requireWorkspace, requireSearch, (req, res) => {
   res.json(painted(req, req.search));
+});
+
+app.get('/api/public/project-offer', (_req, res) => res.json(projectBillingModule.publicOffer()));
+
+app.get('/api/searches/:id/payment', ...requireWorkspace, requireSearch, (req, res) => {
+  res.json(projectBilling.publicPayment(req.search));
+});
+
+app.post('/api/searches/:id/checkout', ...requireWorkspace, requireSearch, async (req, res) => {
+  if (!req.access.capabilities.manageMembers) return res.status(403).json({ error: 'A workspace administrator purchases a search.' });
+  const origin = String(process.env.SLATE_PUBLIC_URL || '').replace(/\/$/, '');
+  if (!/^https:\/\/[^/]+$/.test(origin)) return res.status(503).json({ error: 'Checkout return address is not configured.' });
+  try {
+    const result = await projectBilling.checkout(req.search, origin);
+    res.status(result.status).json(result.payment ? { ...result.payment, reused: result.reused } : result);
+  } catch (error) {
+    telemetry.log.warn('project-checkout-failed', { searchId: req.search.id, message: error.message });
+    res.status(502).json({ error: 'Checkout could not start. Try again or contact support.' });
+  }
+});
+
+app.post('/api/searches/:id/payment/reconcile', ...requireWorkspace, requireSearch, async (req, res) => {
+  if (!db.canEdit(req.search, req.access)) return res.status(403).json({ error: 'Only the search team can check payment.' });
+  const p = projectBilling.purchaseFor(req.search);
+  if (!p?.checkoutSessionId) return res.json(projectBilling.publicPayment(req.search));
+  try { await projectBilling.reconcile(p); res.json(projectBilling.publicPayment(req.search)); }
+  catch (error) {
+    telemetry.log.warn('project-payment-reconcile-failed', { purchaseId: p.id, message: error.message });
+    res.status(502).json({ error: 'Payment verification is unavailable. Please try again.' });
+  }
 });
 
 /* ---------------------------------------------------------------------------
@@ -2470,6 +2529,10 @@ app.post('/api/searches/:id/generate', ...requireWorkspace, requireSearch, requi
   // could not be applied must not be bought.
   const blockedNow = kind === 'profile' ? publicationBlock(req.search) : null;
   if (blockedNow) return res.status(blockedNow.status).json({ error: blockedNow.error, code: blockedNow.code });
+  const aiOperationId = 'gen-' + crypto.randomUUID();
+  const reserved = aiAllowance.reserve(req.search, aiOperationId, 'draft');
+  if (!reserved.ok) return res.status(reserved.status).json({ code:reserved.code, error:reserved.error });
+  if (!reserved.legacy) db.persist();
   const sourceAtStart = kind === 'profile' ? committee.sourceFingerprint(req.search) : null;
   try {
     // The profile draft writes from what the committee said, not from one
@@ -2486,12 +2549,14 @@ app.post('/api/searches/:id/generate', ...requireWorkspace, requireSearch, requi
       out = await ai.generate(kind, snapshot, { premium, notes: req.body?.notes||'', committee: room });
       telemetry.recordAi({ ok: true, ms: Date.now() - aiStartedAt, usage: out.usage, kind });
       aibudget.record({ searchId: req.search.id, model: out.model, usage: out.usage, ok: true });
+      aiAllowance.settle(aiOperationId, out.model, out.usage, true);
     } catch (error) {
       // Counted even though the work is lost: a failed call can still have
       // been billed, and an outage has to be visible in the numbers.
       telemetry.recordAi({ ok: false, ms: Date.now() - aiStartedAt, kind, code: error.code });
       // Counted with unknown usage: a failed call may still have been billed.
       aibudget.record({ searchId: req.search.id, model: null, usage: null, ok: false });
+      aiAllowance.settle(aiOperationId, null, null, true);
       throw error;
     }
     if (!stillAuthorized(req)) {
@@ -2577,7 +2642,9 @@ function researchInput(req){
       premium: Boolean(body.premium),
       position: req.search.position,
       state: req.search.state,
-      jurisdictionType: req.search.jurisdictionType
+      jurisdictionType: req.search.jurisdictionType,
+      organizationId: req.search.organizationId,
+      refreshEvidence: Boolean(body.refreshEvidence)
     }
   };
 }
@@ -2613,7 +2680,6 @@ function applyResearch(search, user, { city, website, out }){
 
   search.website = website;
   if (keep('client', 'jurisdiction name')) search.client = facts.client;
-  else if (!search.client) search.client = city;
   for (const [k, label] of [['state','state'],['fog','form of government'],['population','population'],['budget','budget'],['salary','salary']]) {
     if (keep(k, label)) search[k] = facts[k];
   }
@@ -2639,6 +2705,7 @@ function applyResearch(search, user, { city, website, out }){
     website,
     sources: out.sources || [],
     model: out.model,
+    fieldEvidence: out.json?.fieldEvidence || {},
     // A reviewed partial is recorded as partial, with the gaps it was accepted
     // with. Nothing on this file should look more researched than it is.
     partial: partial || undefined,
@@ -2662,7 +2729,13 @@ app.post('/api/searches/:id/research', ...requireWorkspace, requireSearch, requi
   const input = parsed.input;
   const revision = req.search.revision;
 
-  const op = researchOp.begin({ searchId: req.search.id });
+  const coreLimits = researchOp.limits();
+  if (!input.premium) { coreLimits.totalMs = Math.min(coreLimits.totalMs, 90000);
+    coreLimits.crawlMs = Math.min(coreLimits.crawlMs, 20000); }
+  const op = researchOp.begin({ searchId: req.search.id, limits:coreLimits });
+  const reserved = aiAllowance.reserve(req.search, op.id, 'research');
+  if (!reserved.ok) { op.end(); return res.status(reserved.status).json({ code:reserved.code, error:reserved.error }); }
+  if (!reserved.legacy) db.persist();
   // While one request holds the work, losing the browser means nobody is
   // waiting for it, so it is stopped rather than left to finish and bill.
   // `close` fires on a completed response too, hence the guard: a successful
@@ -2675,6 +2748,7 @@ app.post('/api/searches/:id/research', ...requireWorkspace, requireSearch, requi
   const settle = (ok, out) => {
     if (settled) return;
     settled = true;
+    if (out?.reused) { aibudget.release(); aiAllowance.settle(op.id, null, null, false); return; }
     telemetry.recordAi({ ok, ms: Date.now() - startedAt, usage: out && out.usage, kind: 'research', code: out && out.code });
     // Recorded on the attempt, and with unknown usage marked as unknown: a
     // failed round may still have been billed.
@@ -2684,6 +2758,7 @@ app.post('/api/searches/:id/research', ...requireWorkspace, requireSearch, requi
       usage: op.usageKnown ? op.usage : null,
       ok
     });
+    aiAllowance.settle(op.id, (out && out.model) || null, op.usageKnown ? op.usage : null, true);
   };
 
   aibudget.begin();
@@ -2794,6 +2869,9 @@ function jobStoreVerdict(job){
   }
   if (disposition.isFrozen(search)) {
     return { ok: false, code: 'SEARCH_CLOSED', error: 'This search was ' + disposition.lifecycleOf(search) + ' while research was running, so nothing was saved.' };
+  }
+  if (!projectEntitlements.allows(search, db.db.projectPurchases, 'ai')) {
+    return { ok:false, code:'PROJECT_PAYMENT_REQUIRED', error:'This search no longer has AI access.' };
   }
   const user = db.findUserById(job.requestedBy);
   if (!user || !job.requestedByClerkId) {
@@ -2931,7 +3009,8 @@ app.post('/api/searches/:id/research-jobs/:jobId/apply', ...requireWorkspace, re
   if (!job.result || !job.result.json || job.result.applied) {
     return res.status(409).json({ error: 'There is nothing from this research to apply.', code: 'NOTHING_TO_APPLY' });
   }
-  const out = jobs.applyReviewed(job, { search: req.search, user: req.user });
+  const out = jobs.applyReviewed(job, { search: req.search, user: req.user,
+    selectedFields: req.body?.selectedFields });
   if (out.error) return res.status(out.status).json({ error: out.error, code: out.code });
   res.json({
     search: painted(req, req.search),
@@ -4099,7 +4178,8 @@ app.get('/careers/:firmSlug/:postingSlug/apply', portalReadLimit, (_req, res) =>
 
 // Real authentication paths let Clerk keep verification and callback steps on
 // the same page. They never enter the offline shell cache.
-app.get(['/sign-up', '/sign-up/*path', '/sign-in', '/sign-in/*path', '/subscriptions'], (_req, res) => {
+app.get('/subscriptions', (_req, res) => res.redirect(308, '/pricing'));
+app.get(['/sign-up', '/sign-up/*path', '/sign-in', '/sign-in/*path', '/pricing', '/how-it-works'], (_req, res) => {
   res.set('Cache-Control', 'no-store, private');
   res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
 });
@@ -4164,7 +4244,7 @@ const server = app.listen(PORT, HOST, () => {
     console.warn('Slate: Node ' + process.versions.node + ' is below the supported floor (>=' + ENGINE_FLOOR
       + '). Production runs Node ' + ENGINE_FLOOR + '; behaviour here may not match it.');
   }
-  console.log('Default model:', process.env.CLAUDE_MODEL || 'claude-sonnet-5');
+  console.log('Default model:', ai.MODEL);
   console.log('API key:', String(process.env.ANTHROPIC_API_KEY || '').trim() ? 'present' : 'MISSING — set ANTHROPIC_API_KEY');
   try {
     recoveryConfig = recovery.start(db.DATA_DIR, process.env);
@@ -4199,6 +4279,25 @@ const server = app.listen(PORT, HOST, () => {
     if (interrupted) console.log('Slate: ' + interrupted + ' research job(s) marked interrupted after restart.');
   } catch (error) {
     console.error('Slate: research job recovery failed: ' + error.message);
+  }
+  // Webhooks are the primary fulfillment path. Recheck pending sessions after
+  // restart and while the buyer is away so a lost callback cannot strand access.
+  if (process.env.STRIPE_SECRET_KEY) {
+    let running = false;
+    const reconcilePending = async () => {
+      if (running) return;
+      running = true;
+      try {
+        const pending = db.db.projectPurchases.filter(p => p.checkoutSessionId
+          && ['checkout-open', 'processing'].includes(p.state)).slice(0, 10);
+        for (const p of pending) {
+          try { await projectBilling.reconcile(p); }
+          catch (error) { telemetry.log.warn('project-payment-reconcile-failed', { purchaseId:p.id, message:error.message }); }
+        }
+      } finally { running = false; }
+    };
+    setImmediate(reconcilePending);
+    setInterval(reconcilePending, 60000).unref();
   }
   telemetry.watchEventLoop();
   watchAlerts();

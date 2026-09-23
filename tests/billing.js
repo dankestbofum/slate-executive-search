@@ -69,9 +69,10 @@ const fail = code => { throw { errors: [{ code, message: 'Provider secrets must 
     assert.equal((await get('/api/billing/subscription', sign.headers('abe@slate.local'))).status, 200);
     assert.equal((await get('/api/billing/subscription', sign.headers('mike@slate.local', { org_role: 'org:admin' }))).status, 403, 'claimed administrator role cannot override verified membership');
     assert.equal((await get('/api/billing/subscription', sign.headers('outsider@example.test'))).status, 403);
-    const page = await get('/subscriptions');
-    assert.ok(page.headers.get('content-security-policy').includes('https://js.stripe.com'));
+    const page = await get('/pricing');
+    assert.ok(!page.headers.get('content-security-policy').includes('https://js.stripe.com'));
     assert.ok(page.headers.get('cache-control').includes('no-store'));
+    assert.equal((await get('/subscriptions')).url, base + '/pricing');
     for (const route of ['/', '/careers', '/apply/test']) {
       assert.ok(!(await get(route)).headers.get('content-security-policy').includes('stripe.com'));
     }

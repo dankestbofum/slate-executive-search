@@ -230,12 +230,15 @@ const as = (base, email, route = '/api/me') => fetch(base + route, { headers: si
     await stop();
 
     const upgraded = JSON.parse(fs.readFileSync(file, 'utf8'));
-    assert.equal(upgraded.schemaVersion, 8);
+    assert.equal(upgraded.schemaVersion, 9);
+    assert.deepEqual(upgraded.projectPurchases, []);
+    assert.deepEqual(upgraded.stripeEvents, []);
     // 7 -> 8 added public postings and the applicant tables. Every existing
     // search is left unpublished: inferring "this search is advertising" from
     // an ad plan would put a client's search on the public internet because
     // somebody upgraded the application.
     for (const search of [...upgraded.searches, ...upgraded.archivedSearches]) {
+      assert.equal(search.paymentAccess, 'legacy');
       assert.ok(search.posting, 'a migrated search has no posting record at all');
       assert.equal(search.posting.state, 'draft', 'a migrated search came back advertising');
       assert.equal(search.posting.published, null, 'a migrated search came back published');
@@ -275,7 +278,7 @@ const as = (base, email, route = '/api/me') => fetch(base + route, { headers: si
     assert.equal(upgraded.sessions, undefined, 'the session table survived the migration');
     assert.ok(upgraded.users.every(u => !('pin' in u) && !('pinHash' in u)));
     assert.equal(upgraded.archivedSearches[0].archivedUsers[0].pinHash, undefined);
-    assert.ok(fs.readdirSync(path.join(directory, 'backups')).some(n => n.startsWith('pre-migration-1-to-8-')));
+    assert.ok(fs.readdirSync(path.join(directory, 'backups')).some(n => n.startsWith('pre-migration-1-to-9-')));
     console.log('PASS  Account linking, disabled accounts, public sign-up, workspace creation, and migration to organization ownership');
   } finally { await stop(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

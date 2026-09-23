@@ -1,0 +1,8 @@
+{
+  "command": "node tests/run.js",
+  "node": "v22.18.0",
+  "exitCode": 0,
+  "signal": null,
+  "error": null,
+  "log": "test-results/pilot-plan-server-check-verified.log"
+}

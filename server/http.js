@@ -49,16 +49,6 @@ const CLERK_CSP = clerkOrigin ? CSP_DIRECTIVES.map(directive => {
   return extra ? directive + ' ' + extra : directive;
 }).concat('frame-src ' + clerkOrigin + ' https://challenges.cloudflare.com https://*.protect.clerk.com').join('; ') : CSP;
 
-// Stripe Elements is needed only where an organization buys a subscription.
-const BILLING_CSP = CLERK_CSP.split('; ').map(directive => {
-  const extra = {
-    'script-src': 'https://js.stripe.com https://*.js.stripe.com',
-    'connect-src': 'https://api.stripe.com',
-    'frame-src': 'https://js.stripe.com https://*.js.stripe.com https://hooks.stripe.com'
-  }[directive.split(' ')[0]];
-  return extra ? directive + ' ' + extra : directive;
-}).join('; ');
-
 // Bearer-link pages are opened by members of the public. A referrer would
 // leak the candidate's token to any site they navigate to next.
 const BEARER_PATH = /^\/(api\/)?apply(\/|$)/;
@@ -71,7 +61,7 @@ const PUBLIC_PATH = /^\/(careers(\/|$)|api\/(public|applications)(\/|$))/;
 
 function securityHeaders(req, res, next) {
   const narrow = BEARER_PATH.test(req.path) || PUBLIC_PATH.test(req.path);
-  res.set('Content-Security-Policy', narrow ? CSP : req.path === '/subscriptions' ? BILLING_CSP : CLERK_CSP);
+  res.set('Content-Security-Policy', narrow ? CSP : CLERK_CSP);
   res.set('X-Content-Type-Options', 'nosniff');
   // frame-ancestors covers modern browsers; this is the legacy companion.
   res.set('X-Frame-Options', 'DENY');

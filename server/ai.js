@@ -8,6 +8,10 @@ const desk = require('./desk');
 const budget = require('./aibudget');
 const researchOp = require('./research-op');
 const jurisdictions = require('./jurisdictions');
+const db = require('./db');
+const researchCache = require('./research-cache').create({ db });
+const researchCore = require('./research-core');
+const census = require('./census');
 
 // Prompts name their own step number so a draft can say which step it belongs
 // to. Reading it off the catalog means renumbering the process cannot leave a
@@ -17,8 +21,8 @@ function stepNo(key){
   return s ? s.n : '?';
 }
 
-const MODEL = process.env.CLAUDE_MODEL || 'claude-sonnet-5';
-const PREMIUM = process.env.CLAUDE_MODEL_PREMIUM || 'claude-opus-5';
+const MODEL = 'claude-opus-5-5';
+const PREMIUM = MODEL;
 
 const SYSTEM = `You are the writing desk inside Slate, software used by a local-government executive-search firm.
 
@@ -68,7 +72,7 @@ function client({ forResearch = false } = {}){
 }
 
 function pickModel(wantPremium){
-  return wantPremium ? PREMIUM : MODEL;
+  return MODEL;
 }
 
 function isAbortError(err){
@@ -521,7 +525,13 @@ function addUsage(sum, usage){
   if (!usage) return sum || { input_tokens: 0, output_tokens: 0 };
   return {
     input_tokens: (sum && sum.input_tokens || 0) + (usage.input_tokens || 0),
-    output_tokens: (sum && sum.output_tokens || 0) + (usage.output_tokens || 0)
+    output_tokens: (sum && sum.output_tokens || 0) + (usage.output_tokens || 0),
+    cache_read_input_tokens: (sum?.cache_read_input_tokens || 0) + (usage.cache_read_input_tokens || 0),
+    cache_creation_input_tokens: (sum?.cache_creation_input_tokens || 0) + (usage.cache_creation_input_tokens || 0),
+    cache_creation: { ephemeral_1h_input_tokens: (sum?.cache_creation?.ephemeral_1h_input_tokens || 0)
+      + (usage.cache_creation?.ephemeral_1h_input_tokens || 0) },
+    server_tool_use: { web_search_requests: (sum?.server_tool_use?.web_search_requests || 0)
+      + (usage.server_tool_use?.web_search_requests || 0) }
   };
 }
 
@@ -916,7 +926,7 @@ async function generate(kind, search, { premium=false, notes='', committee=null,
       msg = await ask({
         model,
         max_tokens: 8000,
-        output_config: { effort: premium ? 'medium' : 'low' },
+        output_config: { effort: 'medium' },
         system: SYSTEM,
         messages
       });
@@ -995,11 +1005,13 @@ function collectSources(msg, extra=[]){
  * route and the job runner pass their own so cancellation and status reporting
  * reach the same deadline the work is running under.
  */
-async function researchCity({ city, website, position, state, jurisdictionType='municipality', premium=false }={}, op=null){
+async function researchCity({ city, website, position, state, jurisdictionType='municipality', premium=false,
+  organizationId=null, refreshEvidence=false }={}, op=null){
   publicUrl(website);
   const operation = op || researchOp.begin({ searchId: null });
   try {
-    return await runResearch({ city, website, position, state, jurisdictionType, premium }, operation);
+    return await runResearch({ city, website, position, state, jurisdictionType, premium,
+      organizationId, refreshEvidence }, operation);
   } finally {
     // Release the deadline timer only if this call owns the operation; a caller
     // that supplied one is still using it to report the outcome.
@@ -1007,20 +1019,46 @@ async function researchCity({ city, website, position, state, jurisdictionType='
   }
 }
 
-async function runResearch({ city, website, position, state, jurisdictionType, premium }, op){
+async function runResearch({ city, website, position, state, jurisdictionType, premium,
+  organizationId, refreshEvidence }, op){
   const anthropic = client({ forResearch: true });
   const model = pickModel(premium);
 
   op.stageIs('crawling');
   let site = { canonical: website, pages: [], truncated: false };
-  try { site = await fetchCitySite(website, jurisdictions.typeOf(jurisdictionType), op); }
+  const kind = jurisdictions.typeOf(jurisdictionType);
+  const cached = organizationId && !refreshEvidence
+    ? researchCache.evidence(organizationId, website, kind) : null;
+  if (cached) site = cached;
+  else try { site = await fetchCitySite(website, kind, op); }
   catch (err) {
     if (err.code === 'BAD_URL') throw err;
     // The crawl deadline or a cancellation ends the operation; an unreachable
     // site does not, and research continues from the web tools.
     if (operationEnded(err)) throw normalizeClaudeError(err, op);
   }
+  if (!cached && process.env.SLATE_CENSUS_API_KEY) {
+    try {
+      const population = await census.populationEvidence({ city, state, jurisdictionType:kind });
+      if (population) site.pages = [population, ...(site.pages || [])].slice(0, 4);
+    } catch { /* Census availability is optional; other captured sources remain usable. */ }
+  }
+  if (!cached && organizationId && site.pages.length) {
+    site = researchCache.saveEvidence(organizationId, website, kind, site);
+  }
   op.throwIfDone();
+
+  if (!premium) {
+    const cacheKey = organizationId && researchCache.resultKey({ organizationId,
+      city, state:state || '', jurisdictionType:kind, position:position || '', model, site });
+    const previous = cacheKey && !refreshEvidence ? researchCache.result(cacheKey) : null;
+    if (previous) return { ...previous, reused:true,
+      usage:{ input_tokens:0, output_tokens:0 }, usageKnown:true };
+    const out = await researchCore.extract({ site, city, state, jurisdictionType:kind, position,
+      model, op, call:(request,options) => anthropic.messages.create(request,options) });
+    if (cacheKey) researchCache.saveResult(cacheKey, out);
+    return out;
+  }
 
   const pageBlock = site.pages.length
     ? site.pages.map(p => untrusted(p.url, p.text)).join('\n\n')
@@ -1042,15 +1080,15 @@ ${pageBlock}
 ${RESEARCH_CHECKLIST}`;
 
   const tools = [
-    { type: 'web_search_20260209', name: 'web_search', max_uses: 8 },
-    { type: 'web_fetch_20260209', name: 'web_fetch', max_uses: 6, max_content_tokens: 20000 },
+    { type: 'web_search_20260209', name: 'web_search', max_uses: 3 },
+    { type: 'web_fetch_20260209', name: 'web_fetch', max_uses: 2, max_content_tokens: 5000 },
     SUBMIT_TOOL
   ];
 
   const request = {
     model,
     max_tokens: 8000,
-    output_config: { effort: premium ? 'high' : 'medium' },
+    output_config: { effort: 'low' },
     system: [{ type: 'text', text: RESEARCH_AGENT + UNTRUSTED_RULE, cache_control: { type: 'ephemeral' } }],
     messages: [{ role: 'user', content: prompt }],
     tools

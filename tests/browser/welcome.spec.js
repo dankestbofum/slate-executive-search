@@ -34,9 +34,10 @@ test('the public home explains the product and connects hiring, candidate, and s
   await setColorScheme(page, 'dark');
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   await page.screenshot({ path:testInfo.outputPath('welcome-dark.png'), fullPage:true });
-  await page.getByRole('link', { name:'View subscription information' }).click();
-  await expect(page.getByRole('heading', { name:'Subscriptions', exact:true })).toBeVisible();
-  await expect(page.getByText(/Subscriptions are not available for purchase yet/)).toBeVisible();
+  await page.getByRole('link', { name:'View search pricing' }).click();
+  await expect(page.getByRole('heading', { name:'Search pricing', exact:true })).toBeVisible();
+  await expect(page.getByText(/Checkout is not open yet/)).toBeVisible();
+  await page.getByRole('link', { name:'Slate home' }).click();
   await page.getByRole('link', { name:'Browse openings', exact:true }).click();
   await expect(page).toHaveURL(/\/careers$/);
 });
@@ -46,6 +47,7 @@ test('dedicated sign-up connects a new account to organization setup and its fir
   page.on('pageerror', error => errors.push(error.message));
   await installClerk(page, { email:`welcome-owner-${testInfo.project.name}@example.test`, signedIn:false, organization:null });
   await page.goto('/');
+  await page.getByRole('button', { name:'Menu', exact:true }).click();
   await page.getByRole('button', { name:'Sign up', exact:true }).click();
   await expect(page).toHaveURL(/\/sign-up$/);
   await expect(page.getByRole('heading', { name:'Create your Slate account' })).toBeVisible();

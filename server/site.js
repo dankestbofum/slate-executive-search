@@ -19,6 +19,8 @@ const PAGE_TIMEOUT_MS = 12000;
 // that deadline is discarded rather than used to open a socket.
 const DNS_TIMEOUT_MS = 5000;
 const MAX_BYTES = 1500000;
+const MAX_PDF_BYTES = 5000000;
+const MAX_PDF_PAGES = 8;
 
 function isPrivateIp(ip){
   if (!ip) return true;
@@ -213,6 +215,26 @@ function htmlToText(html){
     .trim();
 }
 
+function selectPassages(text, limit = 3500){
+  const seen = new Set();
+  const rows = String(text || '').split(/\n+/).flatMap((line, index) =>
+    (line.match(/.{1,500}/g) || []).map(part => ({ line:part.trim(), index })))
+    .filter(row => row.line.length >= 20 && !/^\s*(menu|skip to|privacy|copyright|contact us)\b/i.test(row.line))
+    .filter(row => { const key = row.line.toLowerCase(); if (seen.has(key)) return false; seen.add(key); return true; });
+  const scored = rows.map(row => ({ ...row, score:
+    (/\b(adopted|budget|fiscal|general fund|population|census|salary|compensation)\b/i.test(row.line) ? 4 : 0)
+    + (/\b(government|manager|administrator|council|supervisors|community)\b/i.test(row.line) ? 2 : 0)
+    + (row.index < 3 ? 1 : 0) }));
+  scored.sort((a,b) => b.score - a.score || a.index - b.index);
+  const selected = [];
+  let length = 0;
+  for (const row of scored) {
+    if (length + row.line.length > limit) continue;
+    selected.push(row); length += row.line.length + 1;
+  }
+  return selected.sort((a,b) => a.index - b.index).map(row => row.line).join('\n');
+}
+
 // Pages worth reading on any local-government site.
 const SHARED_LINKS = 'budget|finance|about|government|community|department|census';
 
@@ -243,20 +265,26 @@ function extractLinks(html, base, jurisdictionType){
   const wanted = linkPattern(jurisdictionType);
   const preferred = jurisdictionType === 'county' ? new RegExp(COUNTY_LINKS) : new RegExp(MUNICIPAL_LINKS);
   const ranked = [];
-  const re = /href\s*=\s*["']([^"'#]+)["']/gi;
+  const re = /<a\b([^>]*)>([\s\S]*?)<\/a>/gi;
   let m;
   while ((m = re.exec(String(html||'')))) {
+    const href = /\bhref\s*=\s*["']([^"']+)["']/i.exec(m[1])?.[1];
+    if (!href || href.startsWith('#')) continue;
     let u;
-    try { u = new URL(m[1], base); } catch { continue; }
-    const hay = (u.pathname + ' ' + decodeURIComponent(u.pathname)).toLowerCase();
+    try { u = publicUrl(new URL(href, base).toString()); } catch { continue; }
+    const title = /\btitle\s*=\s*["']([^"']+)["']/i.exec(m[1])?.[1] || '';
+    let decoded = '';
+    try { decoded = decodeURIComponent(u.pathname); } catch { decoded = u.pathname; }
+    const hay = (u.pathname + ' ' + decoded + ' ' + u.search + ' ' + title + ' ' + htmlToText(m[2])).toLowerCase();
     if (!wanted.test(hay)) continue;
-    const key = u.origin + u.pathname.replace(/\/$/, '');
+    const key = urlKey(u);
     if (seen.has(key)) continue;
     seen.add(key);
     // Pages matching this jurisdiction's own vocabulary come first, so the
     // fetch budget is spent on them rather than on generic pages that happen
     // to appear earlier in the markup.
-    ranked.push({ url: u.toString(), score: preferred.test(hay) ? 0 : 1 });
+    ranked.push({ url: u.toString(), score: preferred.test(hay) ? 0
+      : /\b(adopted|budget|fiscal)\b/.test(hay) ? 1 : 2 });
   }
   ranked.sort((a, b) => a.score - b.score);
   for (const item of ranked) {
@@ -264,6 +292,39 @@ function extractLinks(html, base, jurisdictionType){
     if (out.length >= 8) break;
   }
   return out;
+}
+
+function urlKey(u){
+  const query = new URLSearchParams(u.search);
+  for (const key of [...query.keys()]) if (/^utm_|^(fbclid|gclid)$/i.test(key)) query.delete(key);
+  query.sort();
+  return u.origin + u.pathname.replace(/\/$/, '') + (query.size ? '?' + query.toString() : '');
+}
+
+async function pdfText(buf, signal){
+  const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const task = getDocument({ data:new Uint8Array(buf), useSystemFonts:true,
+    disableAutoFetch:true, stopAtErrors:true, isEvalSupported:false });
+  const timer = setTimeout(() => { void task.destroy(); }, 5000);
+  const onAbort = () => { void task.destroy(); };
+  signal?.addEventListener('abort', onAbort, { once:true });
+  try {
+    const pdf = await task.promise;
+    const lines = [];
+    for (let pageNo = 1; pageNo <= Math.min(pdf.numPages, MAX_PDF_PAGES); pageNo++) {
+      if (signal?.aborted) throw signal.reason || new Error('PDF extraction stopped.');
+      const page = await pdf.getPage(pageNo);
+      const content = await page.getTextContent();
+      lines.push('Page ' + pageNo + ': ' + content.items.map(item => item.str || '').join(' '));
+      page.cleanup();
+      if (lines.join('').length >= 20000) break;
+    }
+    return selectPassages(lines.join('\n').slice(0,20000));
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', onAbort);
+    await task.destroy().catch(() => {});
+  }
 }
 
 /**
@@ -332,7 +393,7 @@ async function fetchOnce(url, hops, jurisdictionType, ctx){
       dispatcher: safeAgent,
       headers: {
         'user-agent': 'SlateSearch/1.0 (executive-search research)',
-        'accept': 'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.1'
+        'accept': 'text/html,application/xhtml+xml,application/pdf,text/plain;q=0.9,*/*;q=0.1'
       }
     });
   } catch (error) {
@@ -352,21 +413,29 @@ async function fetchOnce(url, hops, jurisdictionType, ctx){
   }
   if (!res.ok) { await discard(res); return null; }
   const ct = (res.headers.get('content-type') || '').toLowerCase();
-  if (!ct.includes('html') && !ct.includes('text') && !ct.includes('xml')) {
+  const isPdf = ct.includes('pdf');
+  if (!isPdf && !ct.includes('html') && !ct.includes('text') && !ct.includes('xml')) {
     await discard(res);
     return null;
   }
 
   let buf;
   try {
-    buf = await readBounded(res.body, MAX_BYTES);
+    buf = await readBounded(res.body, isPdf ? MAX_PDF_BYTES : MAX_BYTES);
   } catch (error) {
     if (operationEnded(error)) throw error;
     return null;
   }
   if (!buf) return null;
+  if (isPdf) {
+    let text = '';
+    try { text = await pdfText(buf, ctx.signal); }
+    catch (error) { if (operationEnded(error)) throw error; }
+    return { url:url.toString(), text:text || '(Official PDF is scanned or unreadable. Open this source manually.)',
+      links:[], unreadable:!text };
+  }
   const html = buf.toString('utf8');
-  const text = htmlToText(html).slice(0, 9000);
+  const text = selectPassages(htmlToText(html));
   if (!text) return null;
   return { url: url.toString(), text, links: extractLinks(html, url, jurisdictionType) };
 }
@@ -408,11 +477,11 @@ function extraPaths(jurisdictionType){
     : [...MUNICIPAL_PATHS, ...SHARED_PATHS];
 }
 
-const PAGE_LIMIT = 6;
-const FETCH_CONCURRENCY = 4;
+const PAGE_LIMIT = 4;
+const FETCH_CONCURRENCY = 2;
 // Successes used to be the only thing counted, so a site where most pages 404
 // could keep opening fresh batches. Attempts are bounded too.
-const ATTEMPT_LIMIT = 16;
+const ATTEMPT_LIMIT = 6;
 
 /**
  * Read a jurisdiction's website inside a bounded budget.
@@ -437,7 +506,7 @@ async function fetchCitySite(raw, jurisdictionType = 'municipality', op = null){
   let attempts = 0;
   let truncated = false;
   const markSeen = (u) => {
-    const key = u.origin + u.pathname.replace(/\/$/, '');
+    const key = urlKey(u);
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -469,7 +538,8 @@ async function fetchCitySite(raw, jurisdictionType = 'municipality', op = null){
   let reached = 0;
   for (let i = 0; i < candidates.length && pages.length < PAGE_LIMIT; i += FETCH_CONCURRENCY) {
     if (budgetGone()) break;
-    const batch = candidates.slice(i, i + FETCH_CONCURRENCY);
+    const batch = candidates.slice(i, i + Math.min(FETCH_CONCURRENCY, ATTEMPT_LIMIT - attempts));
+    if (!batch.length) { truncated = true; break; }
     attempts += batch.length;
     reached = i + batch.length;
     const results = await Promise.all(batch.map(url => fetchPage(url, jurisdictionType, ctx)));
@@ -484,7 +554,7 @@ async function fetchCitySite(raw, jurisdictionType = 'municipality', op = null){
 }
 
 module.exports = {
-  publicUrl, fetchCitySite, extractLinks, extraPaths, htmlToText,
+  publicUrl, fetchCitySite, extractLinks, extraPaths, htmlToText, selectPassages, pdfText,
   assertPublicHost, resolvePublic, operationEnded,
   PAGE_LIMIT, ATTEMPT_LIMIT, PAGE_TIMEOUT_MS, DNS_TIMEOUT_MS, MAX_BYTES
 };

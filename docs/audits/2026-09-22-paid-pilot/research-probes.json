@@ -1,0 +1,13 @@
+{
+  "note": "Offline synthetic probes of existing code; no provider calls.",
+  "documentCenterBudget": [],
+  "queryDistinctBudgets": [
+    "https://example.gov/budget?year=2026"
+  ],
+  "searchToolOnlyEstimate": {
+    "known": true,
+    "usd": 0,
+    "model": "claude-sonnet-5",
+    "basis": "estimate from published per-token rates as of 2026-06-24"
+  }
+}

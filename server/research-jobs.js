@@ -48,7 +48,7 @@ function enabled(env = process.env){
  * race tests can drive it with a fake clock and a provider that never answers
  * without standing up a server or spending anything.
  */
-function create({ db, ai, telemetry, aibudget, apply, authorize, research, clock = Date.now, limits = null }){
+function create({ db, ai, telemetry, aibudget, allowance = null, preflight = null, apply, authorize, research, clock = Date.now, limits = null }){
   // Operations for jobs currently running in this process. Not persisted:
   // an abort signal does not survive a restart, which is exactly why a
   // restart marks running jobs interrupted rather than pretending to resume.
@@ -187,6 +187,7 @@ function create({ db, ai, telemetry, aibudget, apply, authorize, research, clock
     }
 
     const lim = researchLimits();
+    if (!input.premium) { lim.totalMs = Math.min(lim.totalMs, 90000); lim.crawlMs = Math.min(lim.crawlMs, 20000); }
     const createdAt = new Date(clock()).toISOString();
     const job = {
       id: 'rj-' + crypto.randomBytes(6).toString('hex'),
@@ -203,7 +204,9 @@ function create({ db, ai, telemetry, aibudget, apply, authorize, research, clock
         premium: Boolean(input.premium),
         position: input.position || '',
         state: input.state || '',
-        jurisdictionType: input.jurisdictionType || 'municipality'
+        jurisdictionType: input.jurisdictionType || 'municipality',
+        organizationId: search.organizationId,
+        refreshEvidence: Boolean(input.refreshEvidence)
       },
       revisionAtStart: search.revision,
       createdAt,
@@ -221,6 +224,10 @@ function create({ db, ai, telemetry, aibudget, apply, authorize, research, clock
       result: null,
       failure: null
     };
+    if (allowance) {
+      const reserved = allowance.reserve(search, job.id, 'research');
+      if (!reserved.ok) return refuse(reserved.status, reserved.code, reserved.error);
+    }
     table().push(job);
     prune();
     db.persist();
@@ -296,6 +303,7 @@ function create({ db, ai, telemetry, aibudget, apply, authorize, research, clock
       attachLate(job, state, { result, usage, usageKnown, model, rounds });
       return;
     }
+    if (!job.startedAt) allowance?.settle(job.id, null, null, false);
     job.state = state;
     job.stage = state === 'succeeded' ? 'done' : job.stage;
     job.finishedAt = new Date(clock()).toISOString();
@@ -346,7 +354,8 @@ function create({ db, ai, telemetry, aibudget, apply, authorize, research, clock
     // time spent queued is inside the bound rather than added to it.
     const op = researchOp.begin({
       searchId: job.searchId,
-      limits: { ...researchLimits(), totalMs: left },
+      limits: { ...researchLimits(), totalMs: left,
+        crawlMs: job.input.premium ? researchLimits().crawlMs : Math.min(researchLimits().crawlMs, 20000) },
       onStage: stage => { if (job.state === 'running') stageOf(job, stage); }
     });
     live.set(job.id, op);
@@ -366,21 +375,34 @@ function create({ db, ai, telemetry, aibudget, apply, authorize, research, clock
     job.state = 'running';
     job.startedAt = new Date(clock()).toISOString();
     stageOf(job, 'starting');
+    aibudget.begin();
+
+    // A queued job may have lost its payer, role, or search revision while it
+    // waited. Ask again before the first provider request, then again before save.
+    if (preflight) {
+      let before;
+      try { before = await op.guard(preflight(job), 'the pre-spend access check'); }
+      catch (error) { aibudget.release(); allowance?.settle(job.id, null, null, false);
+        finish(job, 'failed', { failure: { code:error.code || 'RESEARCH_UNVERIFIED', error:'Research access could not be verified before it started.' } }); return; }
+      if (!before.ok) { aibudget.release(); allowance?.settle(job.id, null, null, false);
+        finish(job, 'failed', { failure: { code:before.code, error:before.error } }); return; }
+    }
 
     const startedAt = clock();
-    aibudget.begin();
     let settled = false;
-    const account = (ok, model) => {
+    const account = (ok, model, reused = false) => {
       if (settled) return;
       settled = true;
+      if (reused) { aibudget.release(); allowance?.settle(job.id, null, null, false); return; }
       telemetry.recordAi({ ok, ms: clock() - startedAt, usage: op.usageKnown ? op.usage : null, kind: 'research' });
       aibudget.record({ searchId: job.searchId, model: model || null, usage: op.usageKnown ? op.usage : null, ok });
+      allowance?.settle(job.id, model || null, op.usageKnown ? op.usage : null, true);
     };
 
     let out = null;
     try {
       out = await research(job.input, op);
-      account(true, out.model);
+      account(true, out.model, Boolean(out.reused));
     } catch (error) {
       const normalized = ai.normalizeClaudeError(error, op);
       account(false, null);
@@ -436,8 +458,8 @@ function create({ db, ai, telemetry, aibudget, apply, authorize, research, clock
     // path below reports the same cost and the same findings.
     const ledger = () => ({
       result: reviewableResult(out, { applied: false }),
-      usage: op.usageKnown ? op.usage : null,
-      usageKnown: op.usageKnown,
+      usage: out.reused ? out.usage : op.usageKnown ? op.usage : null,
+      usageKnown: out.reused || op.usageKnown,
       model: out.model,
       rounds: op.rounds
     });
@@ -528,8 +550,8 @@ function create({ db, ai, telemetry, aibudget, apply, authorize, research, clock
     }
     finish(job, 'succeeded', {
       result: { applied: true, partial: false, reviewable: false, warnings: [], sources: out.sources || [] },
-      usage: op.usageKnown ? op.usage : null,
-      usageKnown: op.usageKnown,
+      usage: out.reused ? out.usage : op.usageKnown ? op.usage : null,
+      usageKnown: out.reused || op.usageKnown,
       model: out.model,
       rounds: op.rounds
     });
@@ -619,6 +641,7 @@ function create({ db, ai, telemetry, aibudget, apply, authorize, research, clock
     }
     if (TERMINAL.has(job.state)) return { job };
     const op = live.get(job.id);
+    if (!op) allowance?.settle(job.id, null, null, false);
     // A job that never started has no run to conclude it, so its outcome is
     // recorded here. One that is running is recorded when its run finishes,
     // which is the same cancellation counted once rather than twice.
@@ -643,13 +666,28 @@ function create({ db, ai, telemetry, aibudget, apply, authorize, research, clock
    * inherited from whenever the job ran, and the result is marked applied in
    * the same persist that writes it to the search.
    */
-  function applyReviewed(job, { search, user }){
+  function applyReviewed(job, { search, user, selectedFields = null }){
     if (!job.result || !job.result.json || job.result.applied) {
       return { error: 'There is nothing from this research to apply.', code: 'NOTHING_TO_APPLY', status: 409 };
     }
+    const chosen = Array.isArray(selectedFields) ? new Set(selectedFields) : null;
+    const allowed = new Set(['client','state','fog','population','budget','salary','notes','community']);
+    if (chosen && (![...chosen].every(key => allowed.has(key)) || !chosen.size)) {
+      return { error:'Choose at least one supported field.', code:'BAD_RESEARCH_SELECTION', status:400 };
+    }
+    const json = structuredClone(job.result.json);
+    if (chosen) {
+      for (const key of ['client','state','fog','population','budget','salary','notes']) {
+        if (!chosen.has(key)) { json.facts[key] = ''; delete json.fieldEvidence?.[key]; }
+      }
+      if (!chosen.has('community')) {
+        json.community = {};
+        for (const key of ['lede','government','community']) delete json.fieldEvidence?.[key];
+      }
+    }
     const out = {
       model: job.result.model,
-      json: job.result.json,
+      json,
       sources: job.result.sources || [],
       usage: job.result.usage || null,
       partial: Boolean(job.result.partial),
@@ -685,6 +723,7 @@ function create({ db, ai, telemetry, aibudget, apply, authorize, research, clock
         changed += 1;
       } else if (job.state === 'queued') {
         if (Date.parse(job.deadlineAt) - clock() <= 1000) {
+          allowance?.settle(job.id, null, null, false);
           job.state = 'interrupted';
           job.finishedAt = new Date(clock()).toISOString();
           job.failure = { code: 'RESEARCH_INTERRUPTED', error: 'This research expired while Slate was restarting. Start it again.' };

@@ -71,6 +71,37 @@ services:
       # features stop.
       - key: ANTHROPIC_API_KEY
         sync: false
+      - key: CLAUDE_MODEL
+        value: claude-opus-5-5
+      - key: CLAUDE_MODEL_PREMIUM
+        value: claude-opus-5-5
+
+      # Checkout is deliberately off until the pilot offer, model access,
+      # spending limits, and Stripe test flow are verified.
+      - key: SLATE_PROJECT_BILLING_MODE
+        value: off
+      - key: SLATE_PROJECT_OFFER_VERSION
+        value: pilot-1
+      - key: SLATE_PROJECT_AMOUNT_CENTS
+        sync: false
+      - key: SLATE_PROJECT_CURRENCY
+        value: usd
+      - key: SLATE_PROJECT_STRIPE_PRICE_ID
+        sync: false
+      - key: SLATE_PROJECT_AI_ALLOWANCE_USD
+        sync: false
+      - key: SLATE_AI_RESERVATION_USD
+        sync: false
+      - key: SLATE_AI_DEPLOYMENT_CEILING_USD
+        sync: false
+      - key: SLATE_OPUS_55_VERIFIED
+        value: "0"
+      - key: SLATE_CENSUS_API_KEY
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
 
       # Research limits. Nonsecret, so they are set here rather than prompted
       # for: they bound one operation end to end (crawl, model rounds, write)

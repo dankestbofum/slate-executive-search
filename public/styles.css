@@ -92,6 +92,10 @@ a{color:var(--accent-deep); text-underline-offset:.18em; text-decoration-thickne
 
 /* ============================================================ shell */
 .shell{display:grid; grid-template-columns:var(--rail-w,250px) minmax(0,1fr); min-height:100vh}
+.shell--railclosed{grid-template-columns:minmax(0,1fr)}
+.shell--railclosed .rail{display:none}
+.shell--railclosed .page{grid-column:1}
+.appbar__rail-toggle{display:none}
 .skip{
   position:absolute; left:var(--s-3); top:var(--s-3); z-index:120;
   transform:translateY(-250%);
@@ -718,6 +722,8 @@ details.toggle[open] summary::before{transform:rotate(90deg) translateX(-1px)}
 
 @media (max-width:900px){
   .shell{grid-template-columns:minmax(0,1fr)}
+  .shell--railclosed .rail{display:flex}
+  .desktop-rail-toggle{display:none}
   .appbar{
     display:flex; align-items:center; gap:var(--s-3);
     position:sticky; top:0; z-index:40;

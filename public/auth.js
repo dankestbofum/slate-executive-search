@@ -3,7 +3,6 @@ window.SlateAuth = (() => {
   let clerk = null;
   let mounted = null;
   let authMounted = null;
-  let pricingMounted = null;
   function loadScript(src, publishableKey) {
     return new Promise((resolve, reject) => {
       const script = document.createElement('script');
@@ -76,13 +75,6 @@ window.SlateAuth = (() => {
     signUp() { if (clerk) location.assign('/sign-up'); },
     async signOut() { if (clerk) await clerk.signOut(); },
 
-    // Isolate Clerk's experimental drawer API here. Never fall back to a
-    // personal-account payer or the broader organization-management UI.
-    async manageSubscription(organizationId) {
-      if (!organizationId || clerk?.organization?.id !== organizationId) throw new Error('Select this workspace again before managing billing.');
-      if (typeof clerk.__internal_openSubscriptionDetails !== 'function') throw new Error('Subscription management could not load. Please refresh and try again.');
-      await clerk.__internal_openSubscriptionDetails({ for: 'organization' });
-    },
 
     /**
      * Move this session into a workspace.
@@ -110,8 +102,6 @@ window.SlateAuth = (() => {
     },
 
     unmount() {
-      if (pricingMounted && clerk) clerk.unmountPricingTable(pricingMounted);
-      pricingMounted = null;
       if (authMounted && clerk) {
         if (authMounted.kind === 'sign-up') clerk.unmountSignUp(authMounted.element);
         else clerk.unmountSignIn(authMounted.element);
@@ -121,17 +111,6 @@ window.SlateAuth = (() => {
       mounted = null;
     },
     mount(root) {
-      const pricing = root.querySelector('[data-clerk-pricing]');
-      if (pricing && clerk?.organization?.id === pricing.dataset.organization && clerk?.user) {
-        if (typeof clerk.mountPricingTable === 'function') {
-          try {
-            clerk.mountPricingTable(pricing, { for: 'organization', newSubscriptionRedirectUrl: '/subscriptions' });
-            pricingMounted = pricing;
-          } catch {
-            pricing.textContent = 'Checkout could not load. Please refresh and try again.';
-          }
-        } else pricing.textContent = 'Checkout could not load. Please refresh and try again.';
-      }
       const authElement = root.querySelector('[data-clerk-auth]');
       if (authElement && clerk && !clerk.user) {
         const kind = authElement.dataset.clerkAuth;

@@ -206,7 +206,9 @@ function begin({ id, onStage = null, limits: given = null, clock = Date.now, sea
       const output = Number(usage && usage.output_tokens) || 0;
       const cacheRead = Number(usage && usage.cache_read_input_tokens) || 0;
       const cacheWrite = Number(usage && usage.cache_creation_input_tokens) || 0;
-      if (!input && !output && !cacheRead && !cacheWrite) {
+      const cacheWrite1h = Number(usage?.cache_creation?.ephemeral_1h_input_tokens) || 0;
+      const searches = Number(usage?.server_tool_use?.web_search_requests) || 0;
+      if (!input && !output && !cacheRead && !cacheWrite && !searches) {
         state.unknownUsageAttempts += 1;
         return op;
       }
@@ -214,7 +216,11 @@ function begin({ id, onStage = null, limits: given = null, clock = Date.now, sea
         input_tokens: state.usage.input_tokens + input,
         output_tokens: state.usage.output_tokens + output,
         cache_read_input_tokens: (state.usage.cache_read_input_tokens || 0) + cacheRead,
-        cache_creation_input_tokens: (state.usage.cache_creation_input_tokens || 0) + cacheWrite
+        cache_creation_input_tokens: (state.usage.cache_creation_input_tokens || 0) + cacheWrite,
+        cache_creation: { ephemeral_1h_input_tokens:
+          (state.usage.cache_creation?.ephemeral_1h_input_tokens || 0) + cacheWrite1h },
+        server_tool_use: { web_search_requests:
+          (state.usage.server_tool_use?.web_search_requests || 0) + searches }
       };
       state.usageKnown = true;
       return op;

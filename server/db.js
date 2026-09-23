@@ -93,6 +93,9 @@ function blankSearch(input, user, organizationId){
     // would move the revision under a client that had only read the search.
     posting: postings.blank(),
     aiUsage: { input_tokens: 0, output_tokens: 0 },
+    // Project charging starts only when a priced pilot is deliberately enabled.
+    // Searches opened earlier remain on the legacy policy when it is enabled.
+    paymentAccess: ['test', 'live'].includes(process.env.SLATE_PROJECT_BILLING_MODE) ? 'unpaid' : 'legacy',
     createdBy: user.id,
     createdAt: now(),
     updatedAt: now(),
@@ -293,7 +296,7 @@ function releaseWriterLock(){
  * newer release is refused outright: rolling the application back onto a store
  * it does not understand is how a rollback turns into data loss.
  * ------------------------------------------------------------------ */
-const SCHEMA_VERSION = 8;
+const SCHEMA_VERSION = 9;
 
 function removeLegacyPins(store){
   const users = [...(store.users || []),
@@ -382,6 +385,18 @@ const MIGRATIONS = [
     store.applicantSessions ||= [];
     for (const s of [...(store.searches || []), ...(store.archivedSearches || [])]) {
       if (!s.posting) s.posting = postings.blank();
+    }
+  },
+  // 8 -> 9: existing work retains its access until the owner reconciles it.
+  // New searches are explicitly unpaid; no historical payment is invented.
+  store => {
+    store.projectPurchases ||= [];
+    store.stripeEvents ||= [];
+    store.aiReservations ||= [];
+    store.researchEvidence ||= [];
+    store.researchResults ||= [];
+    for (const s of [...(store.searches || []), ...(store.archivedSearches || [])]) {
+      if (!s.paymentAccess) s.paymentAccess = 'legacy';
     }
   }
 ];
@@ -480,6 +495,11 @@ function load(){
 function migrate(store){
   store.archivedSearches ||= [];
   store.researchJobs ||= [];
+  store.projectPurchases ||= [];
+  store.stripeEvents ||= [];
+  store.aiReservations ||= [];
+  store.researchEvidence ||= [];
+  store.researchResults ||= [];
   store.applications ||= [];
   store.applicants ||= [];
   store.applicantChallenges ||= [];

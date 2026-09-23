@@ -254,6 +254,8 @@ const state = {
   // the phase groups the user has expanded or collapsed by hand, so a render
   // does not fight their choice.
   navOpen:false,
+  publicNavOpen:false,
+  desktopRailClosed: localStorage.getItem('slate-rail-closed') === '1',
   // Which navigation was in flight when the user last opened the drawer. A
   // screen change closes the drawer, but only its own: a navigation that was
   // already running when somebody opened the menu must not shut it again when
@@ -712,7 +714,7 @@ function factsSaveUnsure(){
  * abort signal, so cancelling during the save does not leave a request in
  * flight with nobody waiting for it.
  */
-async function startResearch({ city, website, premium, patch }){
+async function startResearch({ city, website, premium, refreshEvidence, patch }){
   const s = state.search;
   if (!s) return;
   if (state.research.active) {
@@ -724,7 +726,7 @@ async function startResearch({ city, website, premium, patch }){
     token,
     searchId: s.id,
     orgId: state.org?.id || null,
-    city, website, premium,
+    city, website, premium, refreshEvidence,
     controller: new AbortController(),
     jobId: null,
     stage: 'starting',
@@ -775,13 +777,13 @@ async function startResearch({ city, website, premium, patch }){
       // exactly why waiting for the response cannot itself be unbounded (D05).
       timeoutMs: RESEARCH_START_TIMEOUT_MS,
       headers: { 'idempotency-key': active.key },
-      body: { city, website, premium }
+      body: { city, website, premium, refreshEvidence }
     });
   } catch (error) {
     if (error.aborted) return;
     // The job contract can be switched off for rollback. An already-open
     // client falls back to holding the connection itself.
-    if (error.code === 'RESEARCH_JOBS_OFF') { await researchInline(active, { city, website, premium }); return; }
+    if (error.code === 'RESEARCH_JOBS_OFF') { await researchInline(active, { city, website, premium, refreshEvidence }); return; }
     // No acknowledgement inside the bound. The operation may be running under
     // an id this tab never learned, so the key is kept and the outcome is
     // reconciled rather than guessed at.
@@ -1500,7 +1502,7 @@ function availableDests(){
 // Every view this build can render. A deep link to anything else lands on the
 // search overview rather than silently painting Home under a stale address.
 function knownView(view){
-  if (['home','new','archives','packages','overview','facts','verify','closeout','history','person','people','intake-mine','team-access','help'].includes(view)) return true;
+  if (['home','new','archives','packages','billing','overview','facts','verify','closeout','history','person','people','intake-mine','team-access','help'].includes(view)) return true;
   if (['posting','applications'].includes(view)) return true;
   if (HUB_VIEWS.includes(view)) return true;
   return STEP_FLOW.includes(view);
@@ -1738,6 +1740,13 @@ async function go(view, extra={}, opts={}){
   // search, like every other consultant-only screen.
   if (state.search && ['posting','applications'].includes(view) && !canEdit()) view = 'overview';
   try {
+    if (view === 'billing' && state.search && new URLSearchParams(location.search).get('payment') === 'return') {
+      try {
+        await api('/api/searches/'+state.search.id+'/payment/reconcile', { method:'POST', body:{} });
+        await loadSearch(state.search.id);
+      } catch (error) { toast('Payment verification is still pending. Use Check payment status to retry.'); }
+      history.replaceState(history.state, '', location.pathname + location.hash);
+    }
     if (view === 'home') await refreshSearches();
     if (view === 'archives') state.archives = await api('/api/archives');
     if (view === 'history') state.history = await api('/api/searches/'+state.search.id+'/history');
@@ -2117,7 +2126,7 @@ function packageChoice(selected){
   const list = packages();
   if (!list.length) return '';
   const on = list.some(p => p.key === selected) ? selected : state.health?.defaultPackage;
-  return '<div class="stack stack--tight"><p class="t-small">Choose the steps this search needs. Organization plans and payments are managed on <a href="/subscriptions">Subscriptions</a>.</p>' +
+  return '<div class="stack stack--tight"><p class="t-small">Choose the steps this search needs. Review the project fee on <a href="/pricing">Search pricing</a>.</p>' +
     '<label for="search-workflow">Search workflow</label><select id="search-workflow" class="input" name="package">' +
     list.map(p => '<option value="'+esc(p.key)+'"'+(p.key===on?' selected':'')+'>'+esc(p.label)+'</option>').join('') +
     '</select></div>';
@@ -2182,11 +2191,7 @@ function menu(key, label, items){
 }
 function modelToggle(){
   const h = state.health || {};
-  return `<label class="t-small u-inline-check">
-    <input type="checkbox" id="premium" ${state.premium?'checked':''}>
-    Use Opus 5 for this draft
-    ${pill(h.hasKey?'ok':'wait', h.hasKey?'API key ready':'No API key')}
-  </label>`;
+  return `<span class="t-small">Claude Opus 5.5 ${pill(h.hasKey?'ok':'wait', h.hasKey?'API key ready':'No API key')}</span>`;
 }
 
 async function loadHealth(){
@@ -2467,38 +2472,43 @@ function shell(body){
   // deliberate freeze and a page whose Save button mysteriously fails.
   const frozen = frozenNotice();
   if (frozen) body = frozen + body;
+  if (state.search?.projectAccess?.state === 'unpaid' && canEdit() && state.view !== 'billing') {
+    body = '<div class="notice notice--info" role="status">This search is a draft. Complete its project payment before research, publishing, or other search work. <button type="button" class="btn btn--secondary btn--sm" data-go="billing">Review project payment</button></div>' + body;
+  }
   const warning = state.search?.staleArtifacts?.[state.view];
   if (warning) body = `<div class="notice notice--info" role="status">${esc(warning)}</div>` + body;
   const u = state.user, s = state.view==='packages' ? null : state.search;
   const settingsOpen = Boolean(state.open.railmore);
-  return `<div class="shell${state.busy?' busy':''}${state.navOpen?' shell--navopen':''}">
+  return `<div class="shell${state.busy?' busy':''}${state.navOpen?' shell--navopen':''}${state.desktopRailClosed?' shell--railclosed':''}">
     <a class="skip" href="#main" data-act="skip">Skip to content</a>
     <header class="appbar">
       <button type="button" class="appbar__menu" data-act="nav-toggle" aria-expanded="${state.navOpen}" aria-controls="rail">
         <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M2 4h12M2 8h12M2 12h12"/></svg>
         <span>Menu</span>
       </button>
+      <button type="button" class="appbar__rail-toggle" data-act="rail-toggle" aria-expanded="${!state.desktopRailClosed}" aria-controls="rail">${state.desktopRailClosed?'Show':'Hide'} menu</button>
       <span class="appbar__ctx">${state.org ? `<span class="appbar__ws">${esc(state.org.name)}</span>` : ''}${esc(shellContext(s))}</span>
     </header>
     <div class="scrim" data-act="nav-close" ${state.navOpen?'':'hidden'}></div>
     <nav class="rail" id="rail" aria-label="Primary">
       <div class="rail__head">
-      <div class="rail__brand">
+      <a class="rail__brand" href="/" data-act="slate-home" aria-label="Slate home">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="u-accent" aria-hidden="true"><path d="M4 20h16M6 20V9l6-4 6 4v11M10 20v-5h4v5"/></svg>
         <span class="rail__name">Slate</span><span class="rail__ver">Live</span>
-      </div>
+      </a>
       <button type="button" class="rail__close" data-act="nav-close" aria-label="Close navigation">
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>
       </button>
       </div>
       ${railWorkspace()}
       <div class="rail__group"><div class="rail__label">This workspace</div>
-        <button class="rail__link" data-go="home" ${!s && state.view==='home'?'aria-current="page"':''}>Home</button>
+        <button class="rail__link" data-go="home" ${!s && state.view==='home'?'aria-current="page"':''}>Workspace home</button>
         <button class="rail__link" data-act="my-access">My access</button>
         ${state.caps?.manageMembers ? '<button class="rail__link" data-go="team-access" '+(state.view==='team-access'?'aria-current="page"':'')+'>Team &amp; access</button>' : ''}
         ${state.caps?.createSearch ? '<button class="rail__link" data-go="new" '+(state.view==='new'?'aria-current="page"':'')+'>New search</button>' : ''}
         ${state.caps?.viewArchives ? '<button class="rail__link" data-go="archives" '+(state.view==='archives'?'aria-current="page"':'')+'>Archived searches</button>' : ''}
-        <a class="rail__link" href="/subscriptions">Subscriptions</a>
+        ${s ? `<button class="rail__link" data-go="billing" ${state.view==='billing'?'aria-current="page"':''}>Project payment</button>` : ''}
+        <a class="rail__link" href="/pricing">Search pricing</a>
         <button class="rail__link" data-go="help" ${state.view==='help'?'aria-current="page"':''}>Help &amp; user guide</button>
       </div>
       ${s?`<div class="rail__group rail__group--dests">
@@ -2547,6 +2557,7 @@ function shell(body){
     <main class="page" id="main" tabindex="-1">
       <div class="masthead"><div class="wrap"><div class="masthead__in">
         <nav class="crumbs" id="crumbs" aria-label="Breadcrumb"></nav>
+        <button type="button" class="btn btn--ghost btn--sm desktop-rail-toggle" data-act="rail-toggle" aria-expanded="${!state.desktopRailClosed}" aria-controls="rail">${state.desktopRailClosed?'Show':'Hide'} menu</button>
         <span class="mono mast__id">${state.view==='packages'?'Subscriptions':(s?esc(s.no)+' · '+esc(s.position)+(s.package?' · '+esc(packageLabel(s.package)):''):'Slate')}</span>
       </div></div></div>
       ${body}
@@ -2605,21 +2616,31 @@ function crumbs(){
     : 'Slate — Executive Search';
 }
 
+function homeIcon(){
+  return '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M3 11 12 4l9 7M5 10v10h14V10M9 20v-7h6v7"/></svg>';
+}
+
 function publicFrame(body){
   const controls = window.SlateAuth.signedIn
-    ? '<div class="row"><a class="btn btn--secondary" href="/">My workspace</a><button class="btn btn--ghost" data-act="logout">Sign out</button></div>'
+    ? '<div class="row"><a class="btn btn--secondary" href="/#/home">My workspace</a><button class="btn btn--ghost" data-act="logout">Sign out</button></div>'
     : `<div class="row"><button class="btn btn--ghost" data-act="sign-in" ${state.authError?'disabled':''}>Sign in</button><button class="btn btn--primary" data-act="sign-up" ${state.authError?'disabled':''}>Sign up</button></div>`;
   return `<div class="gate welcome"><a class="skip" href="#main">Skip to content</a>
-    <header class="gate__bar"><a class="rail__name" href="/" aria-label="Slate home">Slate</a>
-      <nav class="row" aria-label="Welcome navigation"><a href="/careers">Find a position</a><a href="/subscriptions">Subscriptions</a>${controls}</nav></header>
+    <header class="gate__bar"><a class="rail__brand" href="/" aria-label="Slate home">${homeIcon()}<span class="rail__name">Slate</span></a>
+      <button type="button" class="btn btn--ghost" data-act="public-nav-toggle" aria-expanded="${state.publicNavOpen}" aria-controls="public-nav">Menu</button>
+      <nav id="public-nav" class="public-nav" aria-label="Site navigation" ${state.publicNavOpen?'':'hidden'}>
+        <a href="/" ${location.pathname==='/'?'aria-current="page"':''}>Home</a>
+        <a href="/how-it-works#welcome-how">How it works</a>
+        <a href="/pricing" ${location.pathname==='/pricing'?'aria-current="page"':''}>Search pricing</a>
+        <a href="/careers">Find a position</a>${controls}
+      </nav></header>
+    <button type="button" class="public-nav-scrim" data-act="public-nav-close" aria-label="Close menu" ${state.publicNavOpen?'':'hidden'}></button>
     <main id="main" class="wrap welcome__main stack" tabindex="-1">${body}</main>
     <footer class="wrap welcome__footer">Slate · Executive search for local government</footer></div>`;
 }
 
 function subscriptionInfo(){
-  return `<p>Organization subscriptions cover your shared workspace. A workspace administrator can review available plans and manage billing on the Subscriptions page.</p>
-    <p>Creating an account or workspace does not purchase a subscription. If your organization already uses Slate, ask its administrator about your access and agreement.</p>
-    <p class="t-small">Your search workflow controls which tasks appear on a search. Subscription plans and prices come from Clerk.</p>`;
+  return `<p>Each search project has a one-time payment before paid work begins. Creating an account or workspace does not charge you.</p>
+    <p>Choose a search workflow, review the project total, and have your workspace administrator complete checkout.</p>`;
 }
 
 async function loadBilling(){
@@ -2627,49 +2648,23 @@ async function loadBilling(){
   state.billingActionError = null;
   render();
   try {
-    const catalog = await api('/api/public/billing/plans');
-    let account = null;
-    if (catalog.status === 'ready' && state.org && isAdmin()) account = await api('/api/billing/subscription');
-    state.billing = { ...catalog, account };
+    state.billing = await api('/api/public/project-offer');
   } catch (error) { state.billing = { error: error.message }; }
   render();
 }
 
-function billingContent(){
-  const b = state.billing;
-  if (!b || b.loading) return '<p role="status">Loading subscriptions...</p>';
-  if (b.error) return `<p role="alert">${esc(b.error)}</p><button class="btn btn--secondary" data-act="refresh-billing">Try again</button>`;
-  const test = b.mode === 'test' ? '<p class="notice" role="status"><strong>Test billing.</strong> This checkout is for testing; no real payment will be collected.</p>' : '';
-  if (b.status !== 'ready') return test + '<p>Subscriptions are not available for purchase yet. Creating an account or workspace does not charge you.</p>';
-  const account = b.account;
-  if (account && account.status !== 'ready') return test + '<p role="alert">Workspace billing is unavailable. Please try again shortly.</p><button class="btn btn--secondary" data-act="refresh-billing">Try again</button>';
-  const canBuy = state.org && isAdmin() && account?.organizationId === state.org.id;
-  const summary = canBuy ? `<section class="stack"><h2 class="t-section">Billing for ${esc(state.org.name)}</h2>
-    ${account.subscription ? `<ul>${account.subscription.items.map(item => `<li>${esc(item.name)}: ${esc(item.status.replaceAll('_', ' '))}${item.isFreeTrial ? ' (free trial)' : ''}</li>`).join('')}</ul>
-    <button class="btn btn--secondary" data-act="manage-billing">Manage subscription</button>` : '<p>No subscription is recorded for this workspace.</p>'}
-    <button class="btn btn--ghost" data-act="refresh-billing">Refresh billing status</button></section>` : '';
-  const access = canBuy ? '' : state.org
-    ? '<p>Ask your workspace administrator to purchase or manage its subscription.</p>'
-    : `<p>Create or select an organization workspace before choosing a paid plan.</p><a class="btn btn--primary" href="${state.user ? '/' : '/sign-up'}">${state.user ? 'Continue setup or open workspace' : 'Create an organization account'}</a>`;
-  const plans = !b.plans.length ? '<p>Plans and prices have not been published yet.</p>' : canBuy
-    ? `<div data-clerk-pricing data-organization="${esc(state.org.id)}"><p>Loading secure checkout...</p></div>`
-    : `<div class="welcome__grid">${b.plans.map(p => `<section class="welcome__card stack"><h2 class="t-section">${esc(p.name)}</h2><p>${esc(p.description)}</p>
-      ${p.fee ? `<p><strong>${esc(p.fee.currency)} ${esc(p.fee.amountFormatted)}</strong> per month</p>` : ''}
-      ${p.annualFee ? `<p>${esc(p.annualFee.currency)} ${esc(p.annualFee.amountFormatted)} billed annually</p>` : ''}
-      ${p.freeTrialDays ? `<p>${esc(p.freeTrialDays)}-day free trial</p>` : ''}
-      ${p.features.length ? `<ul>${p.features.map(f => `<li>${esc(f.name)}</li>`).join('')}</ul>` : ''}</section>`).join('')}</div>`;
-  return test + summary + access + plans + (state.billingActionError ? `<p role="alert">${esc(state.billingActionError)}</p>` : '');
-}
-
-function vSubscriptions(){
-  document.title = 'Subscriptions · Slate';
-  return publicFrame(`<div><p class="t-label">Plans &amp; access</p><h1 class="t-title">Subscriptions</h1>
-    <p class="t-body">Choose a plan for your organization. Candidates can browse and apply for free.</p></div>
-    <section class="stack" aria-label="Organization subscriptions">${billingContent()}</section>
-    <div class="welcome__grid"><section class="welcome__card stack"><h2 class="t-section">Organizations &amp; search firms</h2>${subscriptionInfo()}
-      <a class="btn btn--primary" href="${state.user ? '/' : '/sign-up'}">${state.user ? 'Continue setup or open workspace' : 'Create an organization account'}</a></section>
-    <section class="welcome__card stack"><h2 class="t-section">Candidates</h2><p>Browse published openings without a staff account or an organization subscription. To apply, open a position and verify your email. Your application is saved separately from staff workspace access.</p>
-      <a class="btn btn--secondary" href="/careers">Browse openings</a></section></div>`);
+function vPricing(){
+  document.title = 'Search pricing · Slate';
+  const offer = state.billing || {};
+  const total = offer.configured ? `${esc(offer.currency.toUpperCase())} ${(offer.amount/100).toFixed(2)}` : 'Pricing available soon';
+  return publicFrame(`<div><p class="t-label">Project pricing</p><h1 class="t-title">Search pricing</h1>
+    <p class="t-body">A one-time fee applies to each search project. Candidates browse and apply for free.</p></div>
+    <section class="welcome__card stack" aria-label="Pilot search offer"><h2 class="t-section">Pilot search</h2>
+      <p><strong>${total}</strong> per search project</p>
+      <p>Includes the search workspace and an AI research and drafting allowance${offer.configured ? ' of $'+esc(offer.allowanceUsd.toFixed(2)) : ''}.</p>
+      ${!offer.configured ? '<p>Checkout is not open yet. Contact support for pilot terms.</p>' : ''}
+      <a class="btn btn--primary" href="${state.user ? '/#/home' : '/sign-up'}">${state.user ? 'My workspace' : 'Create account'}</a>
+    </section>`);
 }
 
 function vGate(){
@@ -2682,7 +2677,7 @@ function vGate(){
       <h1 class="t-title">${signup ? 'Create your Slate account' : 'Sign in to Slate'}</h1>
       <p class="t-body">${signup ? 'For organizations, search consultants, and invited committee members. After creating your account, confirm your name, choose how you will use Slate, and create or join a workspace.' : 'Use the email your search team knows to open your workspace and assignments.'}</p>
       <p>Looking for your next position? <a href="/careers">Browse openings and apply as a candidate</a>. You do not need a staff workspace.</p>
-      <p class="t-small">${signup ? 'Account creation does not purchase a subscription. ' : ''}<a href="/subscriptions">Subscription information</a></p></section>
+      <p class="t-small">${signup ? 'Account creation does not purchase a search. ' : ''}<a href="/pricing">Search pricing</a></p></section>
       <section aria-label="${signup ? 'Sign up' : 'Sign in'} form" class="welcome__auth">${failure || '<div data-clerk-auth="'+authPage+'"></div>'}</section></div>`);
   }
   document.title = 'Slate · Guided executive search';
@@ -2701,7 +2696,7 @@ function vGate(){
       </div></section>
     <section class="stack" aria-labelledby="welcome-how"><h2 id="welcome-how" class="t-section">How your team gets started</h2>
       <ol class="welcome__steps"><li><strong>Create your account</strong><span>Confirm your name and tell us how you will use Slate.</span></li><li><strong>Set up your workspace</strong><span>Create a space for your organization, or accept your team’s invitation.</span></li><li><strong>Start your first search</strong><span>Enter the position, choose a workflow, and assemble the committee.</span></li></ol></section>
-    <section class="welcome__card stack"><h2 class="t-section">Subscriptions</h2>${subscriptionInfo()}<a href="/subscriptions">View subscription information</a></section>`);
+    <section class="welcome__card stack"><h2 class="t-section">Search pricing</h2>${subscriptionInfo()}<a href="/pricing">View search pricing</a></section>`);
 }
 
 const ACCOUNT_PATHS = {
@@ -2714,7 +2709,7 @@ const ACCOUNT_PATHS = {
 function accountFrame(body){
   document.title = 'Account setup · Slate';
   return `<div class="gate onboarding"><a class="skip" href="#main">Skip to content</a>
-    <header class="gate__bar"><span class="rail__name">Slate</span><div class="auth-profile"><div data-clerk-user></div><button class="btn btn--ghost" data-act="logout">Sign out</button></div></header>
+    <header class="gate__bar"><a class="rail__brand" href="/" data-act="slate-home" aria-label="Slate home">${homeIcon()}<span class="rail__name">Slate</span></a><div class="auth-profile"><a href="/pricing">Search pricing</a><div data-clerk-user></div><button class="btn btn--ghost" data-act="logout">Sign out</button></div></header>
     <main id="main" class="onboarding__main stack" tabindex="-1">${body}</main></div>`;
 }
 
@@ -2826,7 +2821,7 @@ function vWorkspaceChooser(){
         : 'A workspace is your organization\u2019s shared space. You join one by invitation from an organization already using Slate.'}</p></div>
     ${state.workspacesError ? `<p role="alert">${esc(state.workspacesError)} <button class="btn btn--ghost btn--sm" data-act="check-account-access">Try again</button></p>` : ''}
     ${state.orgError ? `<p role="alert">${esc(state.orgError)}</p>` : ''}
-    <div class="row"><button class="btn btn--ghost" data-act="edit-account-setup">Change how I use Slate</button><a href="/subscriptions">Subscription information</a></div>
+    <div class="row"><button class="btn btn--ghost" data-act="edit-account-setup">Change how I use Slate</button><a href="/pricing">Search pricing</a></div>
     ${chooseBlock}
     ${blocked}
     ${!mayCreate
@@ -3018,7 +3013,7 @@ function workspaceQuickStart(){
   return `<section class="spec" aria-labelledby="workspace-start"><div class="spec__body stack"><h2 class="t-section" id="workspace-start">Get started with Slate</h2>
     <p>Plan the search, gather committee priorities, prepare recruiting materials, and evaluate candidates in one workspace. Your workspace is ready; start with the position you need to fill.</p>
     <ol class="welcome__steps"><li><strong>Open a search</strong><span>Enter the employer and position, then choose the workflow that fits the search.</span></li><li><strong>Assemble your team</strong><span>Invite colleagues to the workspace and add the committee to the search.</span></li><li><strong>Follow the next task</strong><span>Open the search overview for the next step and instructions.</span></li></ol>
-    <div class="row">${state.caps?.createSearch ? '<button class="btn btn--primary" data-go="new">Start your first search</button>' : ''}<button class="btn btn--secondary" data-go="help">Read the getting-started guide</button><a href="/subscriptions">Subscriptions</a></div></div></section>`;
+    <div class="row">${state.caps?.createSearch ? '<button class="btn btn--primary" data-go="new">Start your first search</button>' : ''}<button class="btn btn--secondary" data-go="help">Read the getting-started guide</button><a href="/pricing">Search pricing</a></div></div></section>`;
 }
 
 function vHome(){
@@ -3947,9 +3942,35 @@ function vDocuments(){
 
 // Old package bookmarks lead to the provider-backed subscription page.
 function vPackages(){
-  return shell(head('Subscriptions', 'Plans have moved',
-    'View current organization plans and manage billing on the Subscriptions page.',
-    '<a class="btn btn--primary" href="/subscriptions">View subscriptions</a>'));
+  return shell(head('Search pricing', 'Project fees',
+    'Each search has a one-time project payment.',
+    '<a class="btn btn--primary" href="/pricing">View search pricing</a>'));
+}
+
+function vProjectBilling(){
+  const s = state.search;
+  if (!s) return shell(head('Project payment', 'Choose a search', 'Open a search to review its payment.'));
+  const p = s.projectPayment || { state:'unpaid' };
+  const offer = p.offer || {};
+  const amount = p.amount ?? offer.amount;
+  const currency = p.currency || offer.currency || 'usd';
+  const total = amount == null ? 'Not available yet' : `${esc(currency.toUpperCase())} ${(amount/100).toFixed(2)}`;
+  const status = p.state === 'legacy' ? 'Legacy access pending owner review' : p.state.replaceAll('-', ' ');
+  const active = s.projectAccess?.state === 'paid' || s.projectAccess?.state === 'legacy';
+  return shell(`${head('Project payment', s.client || 'Search project', 'Review the one-time project total and payment status.')}
+    <div class="band"><div class="wrap stack"><section class="welcome__card stack">
+      <h2 class="t-section">${esc(s.position || 'Search')} · ${esc(s.client || 'Client')}</h2>
+      <p><strong>Selected workflow:</strong> ${esc(s.packageInfo?.label || s.package || '')}</p>
+      <p><strong>One-time total:</strong> ${total}</p>
+      <p><strong>Payment status:</strong> ${esc(status)}</p>
+      ${p.allowanceUsd || offer.allowanceUsd ? `<p><strong>Included AI allowance:</strong> $${esc(Number(p.allowanceUsd || offer.allowanceUsd).toFixed(2))}</p>` : ''}
+      ${p.paidAt ? `<p><strong>Amount paid:</strong> ${total} on ${esc(p.paidAt.slice(0,10))}</p>` : ''}
+      ${p.receiptUrl ? `<a href="${esc(p.receiptUrl)}" target="_blank" rel="noopener noreferrer">Receipt</a>` : ''}
+      ${!active && canEdit() ? `<div class="row">${isAdmin() && offer.configured !== false && !['processing','refunded','partially-refunded','disputed'].includes(p.state) ? '<button class="btn btn--primary" data-act="project-checkout">Continue to checkout</button>' : '<p>Contact support or ask your workspace administrator about payment.</p>'}
+        <button class="btn btn--secondary" data-act="project-reconcile">Check payment status</button></div>` : ''}
+      ${active ? `<p>${p.state === 'legacy' ? 'This existing search remains accessible under legacy terms while the owner reviews its payment status.' : 'Project access is active. You can continue the search.'}</p><button class="btn btn--primary" data-go="team">Continue search</button>` : ''}
+      <p class="t-small">Questions about a payment? Contact support with the search number.</p>
+    </section></div></div>`);
 }
 
 function vFacts(){
@@ -3987,6 +4008,8 @@ function vFacts(){
         researchAction('Research this ' + jurisdictionInfo().noun)
         + ` <button type="button" class="btn btn--ghost" data-go="verify">County fact verification${factGap(s)}</button>`
         + ` <button type="button" class="btn btn--ghost" data-go="profile">Candidate profile</button>`)}
+      <label class="t-small u-inline-check"><input type="checkbox" id="deeper-research">Find missing facts with additional web searches</label>
+      <label class="t-small u-inline-check"><input type="checkbox" id="refresh-evidence">Refresh public sources</label>
     </form></div></div>`);
 }
 
@@ -5687,6 +5710,9 @@ function researchEligibility(){
   if (!s) return { ok: false, why: 'Open a search first.' };
   // Research writes to the search file, which is the firm's work.
   if (isCommittee()) return { ok: false, why: 'Only the search team can run research on this file.' };
+  if (s.projectAccess?.state === 'unpaid') return {
+    ok:false, why:'Complete the project payment before running research.', go:'billing'
+  };
   if (isFrozen(s)) {
     return { ok: false, why: 'This search is ' + lifecycleOf(s) + ', so nothing new is written to it. Reopen it to research again.' };
   }
@@ -5777,10 +5803,27 @@ function researchReviewPanel(){
     ? `<ul class="t-small">${(job.sources||[]).slice(0,6).map(sx =>
         `<li><a href="${esc(safeHref(sx.url))}" target="_blank" rel="noopener">${esc(sx.title || sx.url)}</a></li>`).join('')}</ul>`
     : '';
+  const refs = job.result?.fieldEvidence || {};
+  const facts = job.result?.facts || {};
+  const labels = { client:'Jurisdiction', state:'State', fog:'Government', population:'Population',
+    budget:'Budget', salary:'Salary', notes:'Notes' };
+  const findings = Object.entries(labels).filter(([key]) => facts[key]).map(([key,label]) => {
+    const ref = refs[key];
+    const source = ref?.url ? `<a href="${esc(safeHref(ref.url))}" target="_blank" rel="noopener">Source ${esc(ref.evidenceId || '')}</a>` : 'Review against sources';
+    const current = state.search?.[key] ? `Current: ${esc(String(state.search[key]).slice(0,120))}` : 'Currently blank';
+    return `<label class="research-finding"><input type="checkbox" name="research-field" value="${key}" checked>
+      <span><strong>${label}:</strong> ${esc(String(facts[key]))}<br><small>${source}${ref?.year?' · '+esc(ref.year):''} · ${current}</small></span></label>`;
+  });
+  if (job.result?.community?.lede) {
+    const ref = refs.lede;
+    findings.push(`<label class="research-finding"><input type="checkbox" name="research-field" value="community" checked>
+      <span><strong>Community summary:</strong> ${esc(job.result.community.lede)}<br><small>${ref?.url ? `<a href="${esc(safeHref(ref.url))}" target="_blank" rel="noopener">Source ${esc(ref.evidenceId || '')}</a>` : 'Review against sources'}</small></span></label>`);
+  }
   return `<div class="notice notice--wait">
     <div>
-      <div class="notice__t">Research found part of the file</div>
-      <div class="notice__b">It has supported findings but not everything on the checklist, so nothing has been written yet. Applying it fills what is blank and keeps anything you have already entered.</div>
+      <div class="notice__t">Research ready for review</div>
+      <div class="notice__b">Choose the findings to apply. Existing manual entries stay in place.</div>
+      ${findings.join('')}
       ${missing}
       ${sources}
       <div class="row u-mt-3">
@@ -5824,6 +5867,8 @@ function vCommunity(){
         </form>
         <p class="t-small">A research agent reads the official site, Census, and budget documents, then fills the facts on this search. It will not invent numbers. Check the file before you use it in recruiting.</p>
         ${modelToggle()}
+        <label class="t-small u-inline-check"><input type="checkbox" id="deeper-research">Find missing facts with additional web searches</label>
+        <label class="t-small u-inline-check"><input type="checkbox" id="refresh-evidence">Refresh public sources</label>
         ${sourceList(s.research)}
         ${(s.population || s.budget || s.fog || s.state || s.salary) ? `<div class="tiles">
           ${s.state?`<div class="tile"><span class="tile__k">State</span><span class="tile__v u-fs-115">${esc(s.state)}</span></div>`:''}
@@ -7374,7 +7419,8 @@ function vTeamAccess(){
  */
 function page(){
   if (location.pathname.startsWith('/apply/')) return vApply();
-  if (location.pathname === '/subscriptions') return vSubscriptions();
+  if (location.pathname === '/pricing' || location.pathname === '/subscriptions') return vPricing();
+  if (location.pathname === '/how-it-works' || (location.pathname === '/' && !location.hash && !state.user)) return vGate();
   if (!state.user) return vGate();
   if (state.myAccess) return vMyAccess();
   if (state.onboarding?.required || state.editAccountSetup) return vOnboarding();
@@ -7388,6 +7434,7 @@ function page(){
   }
   if (state.view === 'help') return vHelp();
   if (state.view === 'team-access') return vTeamAccess();
+  if (state.view === 'billing') return vProjectBilling();
   if (state.view === 'posting') return vPosting();
   if (state.view === 'applications') return vApplications();
   if (state.view === 'community') return vCommunity();
@@ -7556,6 +7603,18 @@ function setNav(open){
   else menu?.focus();
 }
 
+function setPublicNav(open){
+  state.publicNavOpen = Boolean(open);
+  const nav = $('#public-nav');
+  const menu = $('[data-act="public-nav-toggle"]');
+  if (!nav || !menu) return;
+  nav.hidden = !state.publicNavOpen;
+  $('.public-nav-scrim').hidden = !state.publicNavOpen;
+  menu.setAttribute('aria-expanded', String(state.publicNavOpen));
+  if (state.publicNavOpen) nav.querySelector('a, button')?.focus();
+  else menu.focus();
+}
+
 /* --- tooltip runtime ------------------------------------------------------ */
 
 let tipTimer = null;
@@ -7628,6 +7687,14 @@ document.addEventListener('focusout', e => {
   hideTip();
 });
 document.addEventListener('keydown', e => {
+  if (state.publicNavOpen && e.key === 'Tab') {
+    const items = [...$$('#public-nav a, #public-nav button')].filter(el => !el.disabled);
+    if (items.length) {
+      const at = items.indexOf(document.activeElement);
+      if (e.shiftKey && at <= 0) { e.preventDefault(); items.at(-1).focus(); }
+      else if (!e.shiftKey && at === items.length - 1) { e.preventDefault(); items[0].focus(); }
+    }
+  }
   // A tablist is one stop in the tab order; the arrows move between sections.
   const tab = e.target.closest?.('[role="tab"][data-tab]');
   if (tab && ['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){
@@ -7652,6 +7719,7 @@ document.addEventListener('keydown', e => {
   }
   // Escape dismisses the description without activating anything.
   if (tipOpen){ hideTip(); e.stopPropagation(); return; }
+  if (state.publicNavOpen) { setPublicNav(false); return; }
   if (state.navOpen) setNav(false);
   // Escape also closes an open menu, and returns focus to the control that
   // opened it, so a keyboard user is not left inside a closed list.
@@ -8073,16 +8141,22 @@ document.addEventListener('click', async e => {
   }
 
   const act = t.dataset.act;
-  if (act === 'refresh-billing') { await loadBilling(); return; }
-  if (act === 'manage-billing') {
-    try {
-      if (!state.org || !isAdmin()) throw new Error('A workspace administrator must manage this subscription.');
-      // Recheck membership and active organization before opening Clerk's UI.
-      const account = await api('/api/billing/subscription');
-      if (account.status !== 'ready' || account.organizationId !== state.org.id) throw new Error('Workspace billing is unavailable. Please refresh and try again.');
-      await window.SlateAuth.manageSubscription(account.organizationId);
-    } catch (error) { state.billingActionError = error.message; render(); }
+  if (act === 'public-nav-toggle') { setPublicNav(!state.publicNavOpen); return; }
+  if (act === 'public-nav-close') { setPublicNav(false); return; }
+  if (act === 'project-checkout') {
+    await withBusy(async () => {
+      const p = await api('/api/searches/'+state.search.id+'/checkout', { method:'POST', body:{} });
+      if (!/^https:\/\/checkout\.stripe\.com\//.test(p.checkoutUrl || '')) throw new Error('Checkout returned an unexpected address.');
+      location.assign(p.checkoutUrl);
+    });
     return;
+  }
+  if (act === 'project-reconcile') {
+    await withBusy(async () => {
+      await api('/api/searches/'+state.search.id+'/payment/reconcile', { method:'POST', body:{} });
+      await loadSearch(state.search.id);
+    });
+    render(); return;
   }
   // Handled by the guide's own listener above, which deliberately does not
   // re-render the page.
@@ -8100,6 +8174,21 @@ document.addEventListener('click', async e => {
   }
   if (act==='back'){ await goBack(); return; }
   if (act==='nav-toggle'){ setNav(!state.navOpen); return; }
+  if (act==='rail-toggle'){
+    state.desktopRailClosed = !state.desktopRailClosed;
+    localStorage.setItem('slate-rail-closed', state.desktopRailClosed ? '1' : '0');
+    $('.shell')?.classList.toggle('shell--railclosed', state.desktopRailClosed);
+    $$('[data-act="rail-toggle"]').forEach(button => {
+      button.setAttribute('aria-expanded', String(!state.desktopRailClosed));
+      button.textContent = state.desktopRailClosed ? 'Show menu' : 'Hide menu';
+    });
+    return;
+  }
+  if (act==='slate-home'){
+    e.preventDefault();
+    if (state.dirty && !confirm('Leave this page and discard unsaved edits?')) return;
+    location.assign('/'); return;
+  }
   if (act==='nav-close'){ setNav(false); return; }
   if (act==='skip'){
     e.preventDefault();
@@ -8787,7 +8876,8 @@ document.addEventListener('click', async e => {
     }
     const form = $('#citylookup') || $('#facts');
     const body = form ? Object.fromEntries(new FormData(form).entries()) : {};
-    state.premium = $('#premium')?.checked || false;
+    state.premium = $('#deeper-research')?.checked || false;
+    const refreshEvidence = $('#refresh-evidence')?.checked || false;
     const city = String(body.city || body.client || state.search.client || '').trim();
     const website = String(body.website || state.search.website || '').trim();
     if (!city || !website){
@@ -8795,7 +8885,7 @@ document.addEventListener('click', async e => {
       return;
     }
     await startResearch({
-      city, website, premium: state.premium,
+      city, website, premium: state.premium, refreshEvidence,
       // Facts typed on the Search facts form are saved before research starts,
       // so nothing somebody entered is lost to the operation that follows.
       patch: form?.id === 'facts' ? body : null
@@ -8827,7 +8917,9 @@ document.addEventListener('click', async e => {
     const job = state.research.review;
     if (!job) return;
     await withBusy(async () => {
-      const out = await api('/api/searches/'+state.search.id+'/research-jobs/'+job.id+'/apply', { method:'POST', body:{} });
+      const selected = $$('[name="research-field"]:checked').map(el => el.value);
+      const out = await api('/api/searches/'+state.search.id+'/research-jobs/'+job.id+'/apply', { method:'POST',
+        body:$$('[name="research-field"]').length ? { selectedFields:selected } : {} });
       state.search = out.search;
       state.research.review = null;
       state.research.error = null;
@@ -9375,10 +9467,8 @@ async function createSearch(){
     });
     state.newJurisdiction = null;
     if (!state.search) return;
-    // A search now opens on the roster, not the profile. Adding the committee
-    // is what makes the profile something other than one person's guess.
-    go('team');
-    toast('Search '+state.search.no+' is open. Add the committee first.');
+    go('billing');
+    toast('Search '+state.search.no+' is open. Review its project payment.');
   } finally {
     creating = false;
   }
@@ -9415,6 +9505,7 @@ window.addEventListener('popstate', async event => {
  */
 window.addEventListener('hashchange', async () => {
   if (location.pathname.startsWith('/apply/')) return;
+  if (location.pathname === '/how-it-works') return;
   if (!state.user) return;
   // Already showing it: this is the app's own rewrite coming back round.
   if (location.hash === routeFor()) return;
@@ -9466,12 +9557,14 @@ $('#lookup-cancel')?.addEventListener('click', () => { if (showWait._cancel) sho
       });
   } catch (error) {
     state.authError = error.message;
-    if (location.pathname === '/subscriptions') { await loadBilling(); return; }
+    if (location.pathname === '/pricing' || location.pathname === '/subscriptions') { await loadBilling(); return; }
     render();
     return;
   }
   const signedIn = await loadMe();
-  if (location.pathname === '/subscriptions') { await loadBilling(); return; }
+  if (location.pathname === '/subscriptions') history.replaceState(null, '', '/pricing');
+  if (location.pathname === '/pricing') { await loadBilling(); return; }
+  if (signedIn && location.pathname === '/how-it-works') { render(); return; }
   if (signedIn){
     if (/^\/(sign-up|sign-in)(?:\/|$)/.test(location.pathname)) history.replaceState(null, '', '/' + location.hash);
     navDepth = Number(history.state?.slateDepth) || 0;
@@ -9484,6 +9577,16 @@ $('#lookup-cancel')?.addEventListener('click', () => { if (showWait._cancel) sho
     } else {
       await refreshSearches();
       await applyRoute(parseRoute(location.hash), { push:false });
+      const paymentReturn = new URLSearchParams(location.search).get('payment');
+      if (paymentReturn === 'return' && state.search && state.view === 'billing') {
+        await withBusy(async () => {
+          await api('/api/searches/'+state.search.id+'/payment/reconcile', { method:'POST', body:{} });
+          await loadSearch(state.search.id);
+        }, false);
+      }
+      if (paymentReturn === 'return' || paymentReturn === 'cancel') {
+        history.replaceState(history.state, '', location.pathname + location.hash);
+      }
     }
     // In the background, and never blocking the first paint. "Help with this
     // page" appears once the guide is there; until then the screen is simply

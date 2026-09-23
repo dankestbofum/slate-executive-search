@@ -27,8 +27,8 @@ const loaded = env.loadLocalEnv();
 const budget = require('../server/aibudget');
 
 const WANTED = {
-  CLAUDE_MODEL: process.env.CLAUDE_MODEL || 'claude-sonnet-5',
-  CLAUDE_MODEL_PREMIUM: process.env.CLAUDE_MODEL_PREMIUM || 'claude-opus-5'
+  CLAUDE_MODEL: 'claude-opus-5-5',
+  CLAUDE_MODEL_PREMIUM: 'claude-opus-5-5'
 };
 
 const tick = ok => (ok ? '  ok  ' : ' FAIL ');

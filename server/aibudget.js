@@ -17,6 +17,9 @@ const PRICES_PER_MTOK = {
   // Anthropic first-party API rates. Partner platforms (Bedrock, Vertex) are
   // priced separately and are not modelled here.
   'claude-opus-5': { input: 5, output: 25 },
+  // Published Anthropic API rate card. Account entitlement and actual billed
+  // usage still need verification before enabling paid pilot calls.
+  'claude-opus-5-5': { input: 4, output: 20, cacheWrite5m: 5, cacheWrite1h: 8, cacheRead: 0.20 },
   'claude-sonnet-5': { input: 2, output: 10 },
   'claude-haiku-4-5': { input: 1, output: 5 },
   'claude-opus-4-8': { input: 5, output: 25 },
@@ -24,7 +27,8 @@ const PRICES_PER_MTOK = {
   'claude-fable-5-1': { input: 10, output: 50 }
 };
 
-const PRICES_UPDATED = '2026-06-24';
+const PRICES_UPDATED = '2026-09-22 Anthropic API pricing';
+const WEB_SEARCH_USD = 0.01;
 
 /**
  * Estimated dollar cost of one call.
@@ -38,15 +42,19 @@ function estimateCost(model, usage) {
   const output = Number(usage?.output_tokens) || 0;
   const cacheRead = Number(usage?.cache_read_input_tokens) || 0;
   const cacheWrite = Number(usage?.cache_creation_input_tokens) || 0;
+  const cacheWrite1h = Math.min(cacheWrite, Number(usage?.cache_creation?.ephemeral_1h_input_tokens) || 0);
+  const searches = Number(usage?.server_tool_use?.web_search_requests) || 0;
 
   if (!price) {
     return { known: false, usd: null, model, note: 'No price on file for this model.' };
   }
-  // Cache reads bill at roughly a tenth of input, writes at roughly 1.25x.
+  // Explicit cache rates for Opus 5.5; older model estimates retain their
+  // historical multipliers. Search uses are charged separately from tokens.
   const usd = (input * price.input
-    + cacheRead * price.input * 0.1
-    + cacheWrite * price.input * 1.25
-    + output * price.output) / 1_000_000;
+    + cacheRead * (price.cacheRead ?? price.input * 0.1)
+    + (cacheWrite - cacheWrite1h) * (price.cacheWrite5m ?? price.input * 1.25)
+    + cacheWrite1h * (price.cacheWrite1h ?? price.input * 1.25)
+    + output * price.output) / 1_000_000 + searches * WEB_SEARCH_USD;
 
   return {
     known: true,
@@ -155,6 +163,10 @@ function begin() {
   ledger.inFlight += 1;
 }
 
+function release() {
+  ledger.inFlight = Math.max(0, ledger.inFlight - 1);
+}
+
 /**
  * Record an attempt.
  *
@@ -169,7 +181,9 @@ function record({ searchId, model, usage, ok }) {
   if (!ok) ledger.failures += 1;
 
   const cost = estimateCost(model, usage);
-  const known = Boolean(usage && (usage.input_tokens || usage.output_tokens));
+  const known = Boolean(usage && (usage.input_tokens || usage.output_tokens
+    || usage.cache_read_input_tokens || usage.cache_creation_input_tokens
+    || usage.server_tool_use?.web_search_requests));
   if (!known) ledger.unknownUsage += 1;
 
   ledger.inputTokens += Number(usage?.input_tokens) || 0;
@@ -221,5 +235,5 @@ function reset() {
 
 module.exports = {
   PRICES_PER_MTOK, PRICES_UPDATED,
-  estimateCost, limits, check, begin, record, status, reset
+  estimateCost, limits, check, begin, release, record, status, reset
 };

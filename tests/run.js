@@ -50,6 +50,8 @@ async function suite(file, suiteEnv) {
     const organizationsSuite = await suite('organizations.js', suiteEnv);
     const auth = await suite('auth.js', suiteEnv);
     const billing = await suite('billing.js', suiteEnv);
+    const projectBilling = await suite('project-billing.js', suiteEnv);
+    const projectAccess = await suite('project-access.js', suiteEnv);
     const clerkAuth = await suite('clerk-auth.js', suiteEnv);
     const baseline = await suite('bughunt.js', suiteEnv);
     const counties = await suite('jurisdictions.js', suiteEnv);
@@ -63,7 +65,11 @@ async function suite(file, suiteEnv) {
     const cands = await suite('candidates.js', suiteEnv);
     const dispo = await suite('disposition.js', suiteEnv);
     const aichecks = await suite('aireliability.js', suiteEnv);
+    const allowanceChecks = await suite('ai-allowance.js', suiteEnv);
     const researchChecks = await suite('research.js', suiteEnv);
+    const retrieval = await suite('retrieval.js', suiteEnv);
+    const census = await suite('census.js', suiteEnv);
+    const coreResearch = await suite('research-core.js', suiteEnv);
     // The interface around research, run against the real public/app.js in an
     // isolated context. Needs no server, so it stays beside the suite that
     // covers the server half of the same operation.
@@ -76,7 +82,7 @@ async function suite(file, suiteEnv) {
     // (docs/audits/2026-09-19-user-guidance-candidate-portal).
     const helpChecks = await suite('help.js', suiteEnv);
     const portalChecks = await suite('portal.js', suiteEnv);
-    process.exitCode = organizationsSuite || auth || billing || clerkAuth || baseline || counties || regression || security || roles || authority || storage || recover || monitoring || exports_ || cands || dispo || aichecks || researchChecks || researchUi || committeeChecks || helpChecks || portalChecks;
+    process.exitCode = organizationsSuite || auth || billing || projectBilling || projectAccess || clerkAuth || baseline || counties || regression || security || roles || authority || storage || recover || monitoring || exports_ || cands || dispo || aichecks || allowanceChecks || researchChecks || retrieval || census || coreResearch || researchUi || committeeChecks || helpChecks || portalChecks;
     console.log('Isolated test data: ' + directory);
   } catch (error) { console.error(error); process.exitCode = 1; }
   finally { server.kill(); }
