@@ -1643,6 +1643,26 @@ function recordPublication(search, req, extra){
   };
 }
 
+// The common ballot is deliberately separate from private answers and profile
+// provenance. Freeze it when collection begins so everyone rates the same list.
+app.put('/api/searches/:id/intake/qualities', ...requireWorkspace, requireSearch, requireManager, (req, res) => {
+  const intake = req.search.intake;
+  if (intake.status !== 'draft' || intake.openedAt || Object.keys(intake.responses || {}).length) {
+    return res.status(409).json({ error: 'The shared qualities cannot change after the response window has opened.' });
+  }
+  const raw = req.body?.qualities;
+  if (!Array.isArray(raw) || raw.length > 40 || raw.some(q => !q || !committee.KINDS.includes(q.kind)
+      || typeof q.label !== 'string' || !q.label.trim() || q.label.trim().length > 200)) {
+    return res.status(400).json({ error: 'Use up to 40 qualities, each with a category and a name of 200 characters or fewer.' });
+  }
+  intake.qualities = committee.cleanItems(raw).map(({ kind, label }) => ({ kind, label }));
+  if ('dueBy' in req.body) intake.dueBy = String(req.body.dueBy || '').slice(0, 120);
+  if ('prompt' in req.body) intake.prompt = String(req.body.prompt || '').slice(0, 2000);
+  db.touch(req.search, req.user, 'prepared shared qualities for committee ranking');
+  db.persist();
+  res.json(painted(req, req.search));
+});
+
 app.post('/api/searches/:id/intake/status', ...requireWorkspace, requireSearch, requireManager, (req, res) => {
   const want = String(req.body?.status || '');
   if (!['draft', 'open', 'closed'].includes(want)) {
@@ -1750,6 +1770,20 @@ app.put('/api/searches/:id/intake', ...requireWorkspace, requireSearch, (req, re
   const submitting = Boolean(req.body?.submitted);
   const now = db.now();
   const answer = committee.normalizeAnswer(req.body, submitting ? record.submitted : record.draft, now);
+  // An unanswered common quality is not a default vote of 3. Preserve it in
+  // private drafts and require an explicit 1–5 rating before submission.
+  for (const quality of intake.qualities || []) {
+    const key = committee.groupKey(quality.kind, quality.label);
+    const raw = (Array.isArray(req.body?.items) ? req.body.items : [])
+      .find(i => i && committee.groupKey(i.kind, i.label) === key);
+    const weight = Number(raw?.weight);
+    const rated = typeof raw?.weight === 'number' && Number.isInteger(weight) && weight >= 1 && weight <= 5;
+    if (submitting && !rated) {
+      return res.status(400).json({ error: 'Rate every shared quality from 1 to 5 before submitting.' });
+    }
+    answer.items = answer.items.filter(i => committee.groupKey(i.kind, i.label) !== key);
+    answer.items.push({ ...quality, weight: rated ? weight : null, note: String(raw?.note || '').trim().slice(0, 600) });
+  }
   if (submitting && !answer.items.length) {
     return res.status(400).json({ error:'Name at least one quality before you submit.' });
   }

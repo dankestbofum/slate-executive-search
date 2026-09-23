@@ -18,7 +18,7 @@ async function revision(page, id) {
 }
 
 /** A confirmed roster, an open window, and two committee members signed in. */
-async function openIntake(browser, testInfo, names) {
+async function openIntake(browser, testInfo, names, { draft = false } = {}) {
   const managerContext = await browser.newContext();
   const manager = await managerContext.newPage();
   await installClerk(manager, { email: 'abe@slate.local' });
@@ -51,7 +51,7 @@ async function openIntake(browser, testInfo, names) {
   await manager.request.post('/api/searches/' + search.id + '/team/confirm', {
     headers: { 'if-match': await revision(manager, search.id) }, data: { confirmed: true }
   });
-  await manager.request.post('/api/searches/' + search.id + '/intake/status', {
+  if (!draft) await manager.request.post('/api/searches/' + search.id + '/intake/status', {
     headers: { 'if-match': await revision(manager, search.id) }, data: { status: 'open', dueBy: '19 Sep 2026' }
   });
   return { search, manager, managerContext, members };
@@ -72,6 +72,61 @@ async function namePriorities(page, searchId, priorities) {
 
 const nameOnePriority = (page, searchId, label, weight) =>
   namePriorities(page, searchId, [[label, weight]]);
+
+test('shared qualities reach every member and the owner can navigate from aggregate to recruiting and review', async ({ browser }, testInfo) => {
+  test.slow();
+  const { search, manager, managerContext, members } = await openIntake(browser, testInfo, ['ada', 'bo'], { draft:true });
+  try {
+    for (const page of [manager, members.ada.page, members.bo.page]) {
+      await page.setViewportSize(testInfo.project.use.viewport || {width:1280, height:720});
+    }
+    await manager.goto('/#/s/' + search.id + '/intake');
+    await manager.locator('#sharedqualities [name="skill"]').fill('Financial management\nCommunity engagement\nStaff leadership');
+    await manager.getByRole('button', { name:'Save shared qualities', exact:true }).click();
+    await expect(manager.locator('#toast')).toContainText('Shared qualities saved');
+    await manager.getByRole('button', { name:'Open the window', exact:true }).click();
+    await expect(manager.locator('#toast')).toContainText('Intake is open');
+
+    const labels = ['Financial management', 'Community engagement', 'Staff leadership'];
+    for (const page of [members.ada.page, members.bo.page, manager]) {
+      await page.goto('/#/s/' + search.id + '/intake-mine');
+      await expect(page.getByText('Rank the shared candidate qualities', { exact:true })).toBeVisible();
+      await expect(page.locator('#intake-sec-skill .intake-row')).toHaveCount(3);
+      await expect(page.getByRole('textbox', { name:'Priority: Financial management', exact:true })).toHaveAttribute('readonly', '');
+      await page.getByRole('button', { name:'Submit my answers', exact:true }).click();
+      await expect(page.locator('#toast')).toContainText('Rate every shared quality');
+      await page.getByRole('button', { name:'Save and finish later', exact:true }).click();
+      await expect(page.locator('#toast')).toContainText('Saved privately');
+      await page.reload();
+      await expect(page.locator('#intake-sec-skill .wgt [aria-pressed="true"]')).toHaveCount(0);
+      for (const [i, label] of labels.entries()) {
+        await page.getByRole('button', { name:'Rate ' + label + ' ' + (5-i) + ' of 5', exact:true }).click();
+      }
+      await page.getByRole('button', { name:'Submit my answers', exact:true }).click();
+      await expect(page.locator('#toast')).toContainText('Your answers are in');
+    }
+
+    await manager.goto('/#/s/' + search.id + '/intake');
+    await expect(manager.locator('.cons').first()).toContainText('3 of 3');
+    await expect(manager.locator('.cons').first()).toContainText('avg 5.0');
+    await manager.getByRole('button', { name:'Close and read the room', exact:true }).click();
+    await expect(manager.locator('#toast')).toContainText('Intake closed');
+    await manager.getByRole('button', { name:'Review what this would change', exact:true }).click();
+    await expect(manager.locator('#adoptplan')).toContainText('Financial management');
+    await manager.getByRole('button', { name:'Save this profile', exact:true }).click();
+    await expect(manager.locator('#toast')).toContainText('Profile saved from committee input');
+    await expect(manager.locator('#prof-skill .crit-row').first().locator('[data-f="label"]')).toHaveValue('Financial management');
+    for (const [label, route] of [['Create brochure','brochure'], ['Create advertisement','ads'], ['Review candidates','screen']]) {
+      await manager.getByRole('navigation', { name:'Search stages', exact:true }).getByRole('button', { name:new RegExp('^' + label) }).click();
+      await expect(manager).toHaveURL(new RegExp('/' + route + '$'));
+      await expect(manager.locator('h1')).toBeVisible();
+    }
+    await expect(members.ada.page.getByRole('navigation', { name:'Search stages', exact:true })).toHaveCount(0);
+    await manager.screenshot({ path:testInfo.outputPath('owner-stages.png'), fullPage:true });
+  } finally {
+    await Promise.all([managerContext.close(), members.ada.context.close(), members.bo.context.close()]);
+  }
+});
 
 test('saving a draft after submitting keeps the submitted answer in the tally', async ({ browser }, testInfo) => {
   const { search, manager, managerContext, members } = await openIntake(browser, testInfo, ['ada']);

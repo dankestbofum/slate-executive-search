@@ -108,6 +108,7 @@ function blankSearch(input, user, organizationId){
       status: 'draft',
       dueBy: '',
       prompt: '',
+      qualities: [],
       openedAt: null,
       closedAt: null,
       // One record per person: their private draft and their committed
@@ -920,6 +921,7 @@ function decorate(search, access){
       status: intake.status || 'draft',
       dueBy: intake.dueBy || '',
       prompt: intake.prompt || '',
+      qualities: (intake.qualities || []).map(q => ({ kind: q.kind, label: q.label })),
       openedAt: intake.openedAt || null,
       closedAt: intake.closedAt || null,
       legacy: intake.legacy,

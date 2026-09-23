@@ -33,6 +33,17 @@ Engineering work for phases 1-3 is in the working tree, uncommitted. Nothing bel
 
 ## Delivery sequence
 
+### Committee qualities and owner navigation follow-up (September 23)
+
+Implemented locally, not deployed:
+
+- Before opening Step 2, the account manager can prepare shared candidate qualities in each category, or copy the current profile's labels. Every rostered member, including the manager, gets the same 1–5 importance controls and can suggest additions. Equal ratings are allowed; this is importance weighting, not forced ordinal ranking.
+- Shared qualities freeze when the window opens. Existing response windows retain their current questionnaire. Private drafts preserve unrated qualities as blank; submission requires an explicit rating for every shared quality. Only submitted answers contribute to the existing aggregate and adoption workflow.
+- The owner can navigate directly among Committee rankings, Aggregate and adopt, Create brochure, Create advertisement, and Review candidates. Completion and waiting states remain visible, and existing workflow/package prerequisites still apply.
+- Rating-button edits now participate in the unsaved-edit guard. Shared-list and window-settings saves preserve both forms' values.
+- Regression coverage lives in `tests/committee.js` and `tests/browser/committee.spec.js`: manager/member parity, unrated drafts, incomplete submissions, list immutability, permissions, privacy, aggregate weights, adoption, and later-stage navigation. Browser providers remain substitutes; hosted acceptance is outstanding.
+- Local validation: syntax/packaging check passed; 24 committee/collaboration browser checks passed across Chrome, WebKit, and mobile Chrome. The full server suite reported all checks passing. Runtime remains Node 22.18.0; supported Node 24 and hosted validation are still release gates. Playwright's Windows server teardown needed the test server stopped after all assertions finished.
+
 | Phase | Work | Depends on | Completion gate |
 |---|---|---|---|
 | 1 | Finish invitation-to-search recovery | Existing local fix | Real invited accounts reach only their assigned search |
