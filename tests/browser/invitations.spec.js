@@ -54,7 +54,6 @@ test('accepting a search invitation opens its assigned search after account setu
   await expect(page.locator('#main')).toContainText('Invitation City');
   // Reopening an accepted link works with an already-active membership.
   await page.goto(landing.pathname + landing.search);
-  await page.getByRole('button', { name: 'Continue to workspace' }).click();
   await expect(page).toHaveURL(new RegExp('/s/' + search.id + '$'));
 });
 
@@ -82,4 +81,68 @@ test('a revoked invitation reports the failure and offers account recovery', asy
   await expect(page.getByRole('alert')).toContainText('This invitation has expired');
   await expect(page.getByRole('button', { name: 'Use a different account' })).toBeEnabled();
   await expect(page).toHaveURL(/\/join$/);
+});
+
+test('an interrupted pending sign-in opens a workspace task and then the assigned search', async ({ page }, testInfo) => {
+  const orgId = await sharedWorkspace();
+  const email = `pending-join-${testInfo.project.name}@example.test`;
+  const headers = authHeaders('abe@slate.local', orgId);
+  const search = await (await page.request.post('/api/searches', {
+    headers, data: { client: 'Pending Invitation City', position: 'City Manager' }
+  })).json();
+  const invitation = await page.request.post(`/api/searches/${search.id}/members`, {
+    headers: { ...headers, 'if-match': String(search.revision) },
+    data: { name: 'Pending Member', email, searchRole: 'committee' }
+  });
+  expect(invitation.ok()).toBe(true);
+  await installClerk(page, { email, organization: null, invited: ['shared'], pendingTask: 'choose-organization' });
+  // Legacy email has no explicit organization/search params. The ticket's
+  // organization hint is untrusted; only signed membership opens the search.
+  const ticket = 'fixture.' + Buffer.from(JSON.stringify({ oid: orgId })).toString('base64url') + '.fixture';
+  await page.goto('/join/sign-in?__clerk_status=sign_in&__clerk_ticket=' + ticket);
+  await expect(page.getByRole('heading', { name: 'Choose your search workspace' })).toBeVisible();
+  await expect(page.locator('[data-clerk-auth]')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Create.*workspace|Create.*organization/i })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Accept invitation to Fixture Search Partners' }).click();
+  await expect(page.getByLabel('Your name')).toBeVisible();
+  await page.getByLabel('Your name').fill('Pending Member');
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await expect(page).toHaveURL(new RegExp('/s/' + search.id + '$'));
+  await expect(page.locator('#main')).toContainText('Pending Invitation City');
+});
+
+test('a required task completing within the same session and workspace refreshes access', async ({ page }) => {
+  await installClerk(page, { pendingTask: 'setup-mfa' });
+  await page.goto('/join');
+  await expect(page.getByRole('heading', { name: 'Secure your account' })).toBeVisible();
+  await page.getByRole('button', { name: 'Complete test MFA setup' }).click();
+  await expect(page).toHaveURL(/\/#\/o\/[^/]+\/home$/);
+  await expect(page.getByRole('heading', { name: 'Secure your account' })).toHaveCount(0);
+});
+
+test('an invitation organization hint never opens a different workspace', async ({ page }) => {
+  await installClerk(page);
+  const ticket = 'fixture.' + Buffer.from(JSON.stringify({ oid: 'org_unrelated' })).toString('base64url') + '.fixture';
+  await page.goto('/join/sign-in?__clerk_ticket=' + ticket);
+  await expect(page.getByRole('heading', { name: 'Your team access' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Continue to workspace' })).toHaveCount(0);
+  await expect(page).toHaveURL(/\/join\/sign-in\?/);
+});
+
+test('an opaque invitation ticket does not silently open an existing workspace', async ({ page }) => {
+  await installClerk(page);
+  await page.goto('/join/sign-in?__clerk_ticket=opaque-ticket&__clerk_status=sign_in');
+  await expect(page.getByRole('heading', { name: 'Your team access' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Continue to workspace' })).toBeVisible();
+  await expect(page).toHaveURL(/\/join\/sign-in\?/);
+});
+
+test('a pending account without an invitation gets recovery instead of workspace creation', async ({ page }, testInfo) => {
+  await installClerk(page, { email: `no-workspace-${testInfo.project.name}@example.test`, organization: null, pendingTask: 'choose-organization' });
+  await page.goto('/join');
+  await expect(page.getByRole('status')).toContainText('No workspace or invitation is available');
+  await expect(page.getByRole('button', { name: /Create.*workspace|Create.*organization/i })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Use a different account' }).click();
+  await expect(page.getByRole('heading', { name: 'Sign in to join' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Sign in to test account' })).toBeVisible();
 });

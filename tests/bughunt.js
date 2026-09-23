@@ -1353,7 +1353,9 @@ async function run(){
   // than the handful of phrases that used to carry it.
   record('The word "seat" appears nowhere in the client', !/\bseat(s|ed|ing)?\b/i.test(appJs));
 
-  record('New search opens on project payment', /go\('billing'\)/.test(appJs) && /Review its project payment/.test(appJs));
+  record('New search opens on project payment only when it owes one',
+    /projectAccess\?\.state === 'unpaid'\) \{\s*go\('billing'/.test(appJs) && /Review its project payment/.test(appJs)
+      && /\} else \{\s*go\('team'/.test(appJs));
 
   record('Search facts retains an operational workflow choice',
     /function packageChoice/.test(appJs) && /name="package"/.test(appJs)

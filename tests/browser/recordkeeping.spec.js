@@ -123,6 +123,8 @@ test('logged contact is labelled staff-recorded and a dated follow-up reaches th
   await openCandidate(page, search.id, candidate.id, 'Details');
   // Nobody has been contacted, so the list should already be saying so.
   await page.goto('/#/s/' + search.id + '/screen');
+  // The candidate page also mentions follow-up; wait for the list itself.
+  await expect(page.locator('#main h1')).toHaveText('Candidates');
   await expect(page.locator('.spec', { hasText: 'Follow-up' })).toContainText('No contact recorded yet');
 
   await openCandidate(page, search.id, candidate.id, 'Details');
@@ -144,6 +146,8 @@ test('logged contact is labelled staff-recorded and a dated follow-up reaches th
   await expect(panel).toContainText(/cannot confirm delivery/i);
 
   await page.goto('/#/s/' + search.id + '/screen');
+  // The candidate page also mentions follow-up; wait for the list itself.
+  await expect(page.locator('#main h1')).toHaveText('Candidates');
   const followUp = page.locator('.spec', { hasText: 'Follow-up' });
   await expect(followUp).toContainText('Follow-up date has passed');
   await expect(followUp.getByRole('button', { name: 'Robin Vega' })).toBeVisible();

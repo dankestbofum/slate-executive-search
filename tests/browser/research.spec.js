@@ -218,7 +218,7 @@ test('findings that are incomplete are offered for review rather than discarded'
   await openCommunity(page, search.id);
   await startButton(page).click();
 
-  const review = page.locator('.notice--wait', { hasText: /found part of the file/i });
+  const review = page.locator('.notice--wait', { hasText: /research ready for review/i });
   await expect(review).toBeVisible({ timeout: 10000 });
   await expect(review).toContainText(/operating or general-fund budget/);
   await expect(review.getByRole('button', { name: /apply what it found/i })).toBeVisible();

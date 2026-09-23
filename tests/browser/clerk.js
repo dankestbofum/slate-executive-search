@@ -101,7 +101,7 @@ const UI_STUB = 'window.__internal_ClerkUICtor = class ClerkUI {};';
 // Signed-in state and the active workspace are kept in localStorage so they
 // survive the reload the app performs when either changes, exactly as a real
 // Clerk cookie would.
-function clerkStub(tokens, workspaces, email, signedInByDefault, startingOrg) {
+function clerkStub(tokens, workspaces, email, signedInByDefault, startingOrg, pendingTask = null) {
   return `(() => {
   const TOKENS = ${JSON.stringify(tokens)};
   const WORKSPACES = ${JSON.stringify(workspaces)};
@@ -112,6 +112,7 @@ function clerkStub(tokens, workspaces, email, signedInByDefault, startingOrg) {
   try { stored = localStorage.getItem(KEY); storedOrg = localStorage.getItem(ORG_KEY); } catch {}
   let signedIn = stored === null ? ${Boolean(signedInByDefault)} : stored === '1';
   let orgId = storedOrg === null ? ${JSON.stringify(startingOrg)} : (storedOrg || null);
+  let taskKey = localStorage.getItem('slate-fixture-task-done') ? null : ${JSON.stringify(pendingTask)};
   const listeners = [];
   // A workspace created during the test. The harness signs a session for it in
   // Node the moment the API returns and hands it over here, because the page
@@ -127,7 +128,8 @@ function clerkStub(tokens, workspaces, email, signedInByDefault, startingOrg) {
     return found ? { id: found.id, name: found.name } : null;
   };
   const session = () => signedIn
-    ? { id: 'sess_fixture', currentTask: null, getToken: async () => TOKENS[orgId || ''] || TOKENS[''] }
+    ? { id: 'sess_fixture', status: taskKey ? 'pending' : 'active', currentTask: taskKey ? { key: taskKey } : null,
+        getToken: async () => taskKey ? TOKENS.__pending : TOKENS[orgId || ''] || TOKENS[''] }
     : null;
   const emit = () => { for (const fn of listeners) fn({ session: session(), organization: organization() }); };
   const invitations = () => WORKSPACES.filter(w => w.invited && w.id !== orgId).map(w => ({
@@ -141,6 +143,7 @@ function clerkStub(tokens, workspaces, email, signedInByDefault, startingOrg) {
       return signedIn ? {
         id: 'user_fixture',
         primaryEmailAddress: { emailAddress: EMAIL },
+        getOrganizationMemberships: async () => ({ data: WORKSPACES.filter(w => !w.invited).map(w => ({ organization: { id:w.id, name:w.name } })) }),
         getOrganizationInvitations: async () => ({ data: invitations() })
       } : null;
     },
@@ -155,6 +158,8 @@ function clerkStub(tokens, workspaces, email, signedInByDefault, startingOrg) {
       // out-of-page session has to move at the same moment the in-page one does
       // or the next request would carry the workspace we just left.
       if (window.__slateFixtureSwitched) await window.__slateFixtureSwitched(id || '');
+      taskKey = null;
+      localStorage.setItem('slate-fixture-task-done', '1');
       rememberOrg(id);
       emit();
     },
@@ -178,7 +183,31 @@ function clerkStub(tokens, workspaces, email, signedInByDefault, startingOrg) {
       element.append(button);
     },
     unmountSignIn(element) { element.replaceChildren(); },
-    async signOut() { remember(false); rememberOrg(null); emit(); },
+    mountTaskChooseOrganization(element, props) {
+      window.__taskMount = { task: taskKey, props };
+      for (const workspace of WORKSPACES) {
+        const button = document.createElement('button');
+        button.textContent = 'Continue with ' + workspace.name;
+        button.onclick = async () => {
+          workspace.invited = false;
+          await window.Clerk.setActive({ organization: workspace.id });
+        };
+        element.append(button);
+      }
+    },
+    unmountTaskChooseOrganization(element) { element.replaceChildren(); },
+    mountTaskSetupMFA(element, props) {
+      window.__taskMount = { task: taskKey, props };
+      const button = document.createElement('button');
+      button.textContent = 'Complete test MFA setup';
+      button.onclick = () => window.Clerk.setActive({ organization: orgId });
+      element.append(button);
+    },
+    unmountTaskSetupMFA(element) { element.replaceChildren(); },
+    async signOut() {
+      if (window.__slateFixtureSwitched) await window.__slateFixtureSwitched(null);
+      remember(false); rememberOrg(null); emit();
+    },
     mountUserButton(element) {
       const account = document.createElement('button');
       account.type = 'button';
@@ -225,7 +254,7 @@ function clerkStub(tokens, workspaces, email, signedInByDefault, startingOrg) {
  * fixture workspace by default, `null` for a spec about not having one, and an
  * array to give the account several to choose between.
  */
-async function installClerk(target, { email = 'abe@slate.local', signedIn = true, organization = 'shared', invited = [] } = {}) {
+async function installClerk(target, { email = 'abe@slate.local', signedIn = true, organization = 'shared', invited = [], pendingTask = null } = {}) {
   const sign = signer();
   const shared = await sharedWorkspace();
   const resolve = id => (id === 'shared' ? shared : id);
@@ -238,6 +267,7 @@ async function installClerk(target, { email = 'abe@slate.local', signedIn = true
   // switching in the page produces exactly the token that workspace's requests
   // must carry.
   const tokens = { '': sign.token(email, { org_id: undefined }) };
+  if (pendingTask) tokens.__pending = sign.token(email, { ...identity.orgClaims(startingOrg), sts: 'pending' });
   for (const id of [...wanted, ...invitedIds]) tokens[id] = sign.token(email, identity.orgClaims(id));
 
   const names = { [shared]: 'Fixture Search Partners' };
@@ -251,7 +281,7 @@ async function installClerk(target, { email = 'abe@slate.local', signedIn = true
   // holds. A page that starts signed out gets no header, or /api/me would
   // answer for an account the app does not believe it is signed in as.
   if (signedIn) {
-    await context.setExtraHTTPHeaders({ authorization: 'Bearer ' + (tokens[startingOrg || ''] || tokens['']) });
+    await context.setExtraHTTPHeaders({ authorization: 'Bearer ' + (tokens.__pending || tokens[startingOrg || ''] || tokens['']) });
   }
 
   // Playwright applies a context's extra headers over the ones a page sets on
@@ -261,7 +291,7 @@ async function installClerk(target, { email = 'abe@slate.local', signedIn = true
     // A spec may install the fixture twice on one page, to move from one
     // account to another. The binding is per page and only has to exist once.
     await target.exposeBinding('__slateFixtureSwitched', async (_source, id) => {
-      await context.setExtraHTTPHeaders({ authorization: 'Bearer ' + (tokens[id || ''] || tokens['']) });
+      await context.setExtraHTTPHeaders(id === null ? {} : { authorization: 'Bearer ' + (tokens[id || ''] || tokens['']) });
     }).catch(error => {
       if (!/already registered/.test(String(error?.message))) throw error;
     });
@@ -275,7 +305,7 @@ async function installClerk(target, { email = 'abe@slate.local', signedIn = true
     headers: { 'access-control-allow-origin': '*', 'cache-control': 'no-store' },
     body: route.request().url().includes('/@clerk/ui@')
       ? UI_STUB
-      : clerkStub(tokens, workspaces, email, signedIn, startingOrg)
+      : clerkStub(tokens, workspaces, email, signedIn, startingOrg, pendingTask)
   }));
 
   /**

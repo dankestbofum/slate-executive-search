@@ -1,5 +1,7 @@
 # Slate paid pilot implementation plan
 
+Current follow-up: [September 23 pilot remediation plan](../2026-09-22-pilot-walkthrough/IMPLEMENTATION_PLAN.md), based on the three-agent walkthrough and subsequent local invitation fix. Use that plan for current priorities and remaining work; this document preserves the earlier design and baseline findings.
+
 Date: September 22, 2026, America/Phoenix
 
 Baseline: `main`, commit `8fe844bc202cd2a9387f89f73e3e8eced8c1e46a`.

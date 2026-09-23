@@ -1,0 +1,13 @@
+'use strict';
+const path = require('path');
+const root = path.resolve(__dirname, '../../../../');
+const config = require(path.join(root, 'playwright.config.js'));
+const port = 4191;
+process.env.SLATE_BROWSER_BASE = `http://127.0.0.1:${port}`;
+config.testDir = root;
+config.outputDir = path.join(__dirname, 'test-results');
+config.use.baseURL = `http://127.0.0.1:${port}`;
+config.webServer.url = `http://127.0.0.1:${port}/api/health`;
+config.webServer.env.PORT = String(port);
+config.webServer.cwd = root;
+module.exports = config;

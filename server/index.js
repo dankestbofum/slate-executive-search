@@ -3408,8 +3408,14 @@ function publicBase(req){
 }
 
 function invitationLanding(req, searchId) {
-  if (auth.config.invitationRedirectUrl) return auth.config.invitationRedirectUrl;
-  const url = new URL('/join', publicBase(req));
+  const base = publicBase(req);
+  const configured = auth.config.invitationRedirectUrl;
+  const url = new URL(configured || '/join', base);
+  // Existing deployments used the app homepage as their override. Upgrade
+  // that destination too, so fresh emails carry the actual assigned search.
+  if (url.origin !== new URL(base).origin || !['/', '/join'].includes(url.pathname)) return url.href;
+  url.pathname = '/join';
+  url.hash = '';
   url.searchParams.set('organization', req.access.orgId);
   if (searchId) url.searchParams.set('search', searchId);
   return url.href;

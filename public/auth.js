@@ -3,6 +3,21 @@ window.SlateAuth = (() => {
   let clerk = null;
   let mounted = null;
   let authMounted = null;
+  let taskMounted = null;
+  const taskComponents = {
+    'reset-password': 'TaskResetPassword',
+    'setup-mfa': 'TaskSetupMFA'
+  };
+
+  function completionUrl() {
+    if (!/^\/join(?:\/|$)/.test(location.pathname)) return '/' + location.hash;
+    const context = new URLSearchParams();
+    for (const key of ['organization', 'search']) {
+      const value = new URLSearchParams(location.search).get(key);
+      if (value) context.set(key, value);
+    }
+    return '/join' + (context.size ? '?' + context : '');
+  }
   function loadScript(src, publishableKey) {
     return new Promise((resolve, reject) => {
       const script = document.createElement('script');
@@ -27,10 +42,9 @@ window.SlateAuth = (() => {
      * A required step Clerk is holding the session on.
      *
      * With organization selection required, a brand-new session arrives
-     * `pending` until a workspace is chosen. Slate answers that with its own
-     * chooser rather than mounting Clerk's, because the choice has to run the
-     * same unsaved-edit guard as every other workspace change and has to be
-     * cancellable — which a prebuilt component's selection event is not.
+     * `pending` until a workspace is chosen. Slate lists only memberships and
+     * invitations, without offering unapproved workspace creation. Active sessions continue
+     * using Slate's workspace switcher and its unsaved-edit guard.
      */
     get pendingTask() { return clerk?.session?.currentTask?.key || null; },
 
@@ -53,10 +67,16 @@ window.SlateAuth = (() => {
       });
       let sessionId = clerk.session?.id || null;
       let organizationId = clerk.organization?.id || null;
+      let taskKey = clerk.session?.currentTask?.key || null;
+      let sessionStatus = clerk.session?.status || null;
       clerk.addListener(({ session, organization }) => {
         const nextSession = session?.id || null;
-        if (nextSession !== sessionId) {
+        const nextTask = session?.currentTask?.key || null;
+        const nextStatus = session?.status || null;
+        if (nextSession !== sessionId || nextTask !== taskKey || nextStatus !== sessionStatus) {
           sessionId = nextSession;
+          taskKey = nextTask;
+          sessionStatus = nextStatus;
           organizationId = organization?.id || null;
           onSessionChange();
           return;
@@ -101,7 +121,22 @@ window.SlateAuth = (() => {
       }));
     },
 
+    async pendingWorkspaces() {
+      if (!clerk?.user) throw new Error('Sign in again to choose your workspace.');
+      const memberships = await clerk.user.getOrganizationMemberships({ pageSize: 100 });
+      const invitations = await this.invitations();
+      const choices = (memberships.data || []).map(m => ({ id: m.organization.id, name: m.organization.name }));
+      for (const invitation of invitations) {
+        if (invitation.organizationId && !choices.some(w => w.id === invitation.organizationId)) {
+          choices.push({ id: invitation.organizationId, name: invitation.organizationName, accept: invitation.accept });
+        }
+      }
+      return choices;
+    },
+
     unmount() {
+      if (taskMounted && clerk) clerk['unmount' + taskMounted.component]?.(taskMounted.element);
+      taskMounted = null;
       if (authMounted && clerk) {
         if (authMounted.kind === 'sign-up') clerk.unmountSignUp(authMounted.element);
         else clerk.unmountSignIn(authMounted.element);
@@ -111,16 +146,23 @@ window.SlateAuth = (() => {
       mounted = null;
     },
     mount(root) {
+      const taskElement = root.querySelector('[data-clerk-task]');
+      if (taskElement && clerk) {
+        const component = taskComponents[taskElement.dataset.clerkTask];
+        try {
+          if (!component || typeof clerk['mount' + component] !== 'function') throw new Error('Task unavailable');
+          clerk['mount' + component](taskElement, { redirectUrlComplete: completionUrl() });
+          taskMounted = { component, element: taskElement };
+        } catch {
+          taskElement.setAttribute('role', 'alert');
+          taskElement.textContent = 'This sign-in step could not load. Try again, or sign out and reopen your invitation.';
+        }
+      }
       const authElement = root.querySelector('[data-clerk-auth]');
       if (authElement && clerk && !clerk.user) {
         const kind = authElement.dataset.clerkAuth;
         const joining = /^\/join(?:\/|$)/.test(location.pathname);
-        const context = new URLSearchParams();
-        for (const key of ['organization', 'search']) {
-          const value = new URLSearchParams(location.search).get(key);
-          if (value) context.set(key, value);
-        }
-        const complete = '/join' + (context.size ? '?' + context : '');
+        const complete = completionUrl();
         const props = joining
           ? { routing: 'path', path: /^\/join\/(sign-in|sign-up)/.exec(location.pathname)?.[0] || '/join',
               signInUrl: '/join/sign-in' + location.search, signUpUrl: '/join/sign-up' + location.search,

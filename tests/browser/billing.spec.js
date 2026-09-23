@@ -48,6 +48,9 @@ test('existing searches keep explicit legacy access and project payment details'
 test('the pricing menu opens by keyboard and closes with Escape', async ({ page }) => {
   await installClerk(page, { signedIn: false, organization: null });
   await page.goto('/pricing');
+  // The offer loads after the first paint and repaints the page; focus the
+  // control that will stay on screen, not the one about to be replaced.
+  await page.waitForLoadState('networkidle');
   const menu = page.getByRole('button', { name: 'Menu', exact: true });
   await menu.focus();
   await page.keyboard.press('Enter');
@@ -57,17 +60,25 @@ test('the pricing menu opens by keyboard and closes with Escape', async ({ page 
   await expect(menu).toHaveAttribute('aria-expanded', 'false');
 });
 
-test('workspace home control and optional desktop menu keep navigation usable', async ({ page }) => {
+test('workspace home control and optional desktop menu keep navigation usable', async ({ page }, testInfo) => {
   await installClerk(page);
   await page.goto('/');
-  await expect(page.getByRole('navigation', { name: 'Primary' })).toBeVisible();
-  await page.getByRole('button', { name: 'Hide menu' }).click();
-  await expect(page.getByRole('navigation', { name: 'Primary' })).toBeHidden();
-  await page.reload();
-  await expect(page.getByRole('navigation', { name: 'Primary' })).toBeHidden();
-  await page.getByRole('button', { name: 'Show menu' }).click();
+  // Hiding the rail is a desktop control. On a phone the rail is already a
+  // drawer behind Menu, so only the home control is checked there.
+  if (testInfo.project.name === 'mobile-chrome') {
+    await page.getByRole('button', { name: 'Menu', exact: true }).click();
+  } else {
+    await expect(page.getByRole('navigation', { name: 'Primary' })).toBeVisible();
+    await page.getByRole('button', { name: 'Hide menu' }).click();
+    await expect(page.getByRole('navigation', { name: 'Primary' })).toBeHidden();
+    await page.reload();
+    await expect(page.getByRole('navigation', { name: 'Primary' })).toBeHidden();
+    await page.getByRole('button', { name: 'Show menu' }).click();
+  }
   await expect(page.getByRole('navigation', { name: 'Primary' })).toBeVisible();
   await page.getByRole('button', { name: 'New search', exact: true }).click();
+  if (testInfo.project.name === 'mobile-chrome') await page.getByRole('button', { name: 'Menu', exact: true }).click();
   await page.getByRole('link', { name: 'Slate home' }).click();
+  if (testInfo.project.name === 'mobile-chrome') await page.getByRole('button', { name: 'Menu', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Workspace home' })).toHaveAttribute('aria-current', 'page');
 });

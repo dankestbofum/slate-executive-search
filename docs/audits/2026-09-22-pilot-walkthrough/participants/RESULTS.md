@@ -1,0 +1,28 @@
+# Participant walkthrough — local evidence
+
+September 22, 2026. Repository baseline `a6c91bf`; other agents were changing the working tree during the audit. These are local engineering observations, not hosted or human pilot acceptance.
+
+I drove the UI in desktop Chromium (1280 CSS px) and emulated Pixel 7 Chromium (412 CSS px), against an isolated server on port 4192 and a disposable data directory. The browser used fixture-signed Clerk sessions and a stub of Clerk's browser SDK. Public email verification used the test `echo` mail transport; file scanning was the test `accept-all` scanner. No real invitation or email was sent, no paid API was called, and no production or hosted record was changed. Node was 22.18.0, below the supported Node 24 floor. [Reproducible test](walkthrough.spec.js) and [config](playwright.config.js) define the setup. Playwright printed four passing tests across desktop and mobile after the explicit reload was added; on Windows its web-server teardown lingered and I interrupted the runner after the tests had finished, so I do not claim a clean process exit.
+
+## Findings
+
+### P1 — A committee member sees a stale empty candidate list after another participant submits
+
+Reproduction in both browser sizes: sign a committee member into an assigned search, save and submit Step 2 candidate profile input, then keep that tab open. In separate contexts, have the manager add a candidate and the candidate submit the initial questionnaire. The member navigates from the search overview to **Candidates** using Slate's rail. The rail still says **Candidates 0**, and the destination says **No candidates yet**. A browser reload shows **Candidates 1** and the candidate row. The member can then review and save a score. The stale and refreshed screens are captured for [desktop](evidence/desktop-chrome-candidate-list-stale.png) and [mobile](evidence/mobile-chrome-candidate-list-stale.png), followed by [mobile after reload](evidence/mobile-chrome-candidate-list.png). The [walkthrough step](walkthrough.spec.js) records the exact sequence.
+
+Cause: `go()` in `public/app.js` around lines 1678–1765 refreshes the portfolio for Home, but intra-search navigation renders the existing `state.search` without calling `loadSearch()` (defined around line 2366). The visible **Reload search** control can recover, but the false empty state does not tell the member that another participant's work may have arrived. This can leave an unassisted committee reviewer believing there is nothing to score.
+
+Fix: refresh the current search when entering Candidates or another participant-dependent view, with the existing dirty-edit guard and revision-conflict behavior preserved. If refresh fails, keep the old view and show that it may be out of date. Retest with the manager and candidate writing while the member remains in the search, including a slow/failed refresh and an unsaved score.
+
+### P2 — Mobile rating buttons are 28 × 28 CSS px
+
+On the emulated 412 px screen, the five numeric score buttons each measure 28 × 28 CSS px in [candidate review measurements](evidence/mobile-chrome-candidate-review.json); the [screenshot](evidence/mobile-chrome-candidate-review.png) shows the compact row. The same `.wgt button` rule in `public/app.css` around lines 169–175 controls the Step 2 priority ratings. These targets are operable in Playwright and meet a 24 px minimum, but are cramped for repeated finger scoring in a real panel session. Increase the mobile hit area, preferably to about 44 px, while allowing the five controls to wrap within 320 px. Verify on physical iPhone and Android before treating this as resolved.
+
+## Completed local paths
+
+- An assigned committee search appeared on Home. The reviewer opened Step 2 from the search, wrote and rated a priority, saved a private draft, reloaded it, and submitted. The reviewer later opened the read-only [candidate profile](evidence/mobile-chrome-committee-profile-view.png), reviewed a candidate response, saved a 4/5 score, and recovered that score after reload. The [sealed reviewer response](evidence/mobile-chrome-committee-record.json) showed the score present and unreleased. The synthetic profile was inserted through the manager API with one criterion to set up scoring; full profile adoption and manager score release were outside this path.
+- A bearer-link candidate saved and reloaded a private questionnaire, then submitted and received a receipt. The candidate also opened a public posting without a staff session, verified an email using the test transport, saved and reloaded an application, reviewed it, submitted it, and saw the receipt after reload. Representative [mobile questionnaire](evidence/mobile-chrome-private-questionnaire.png) and [application receipt](evidence/mobile-chrome-application-receipt.png) are captured. Measured document overflow was zero on all captured screens at 412 px.
+
+## Evidence limits and remaining acceptance
+
+The SDK stub cannot establish real Clerk invitation acceptance, pending-session behavior, or revocation. The `echo` mail transport does not prove deliverability or a real candidate's return from an inbox; the test scanner does not prove production upload handling. Pixel 7 emulation does not prove physical touch, iOS Safari, Android Chrome, assistive technology, slow-network recovery, or an unassisted person's comprehension. A real search owner must still confirm the adopted-profile workflow, scoring privacy/release policy, and the authority matrix. A release-specific hosted run is needed after fixes; this local walkthrough does not clear any pilot gate.
