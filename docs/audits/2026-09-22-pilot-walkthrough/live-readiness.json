@@ -1,0 +1,41 @@
+﻿{
+    "observedAt":  "2026-09-23T04:12:12.8678956Z",
+    "target":  "https://slate-executive-search.onrender.com",
+    "releaseIdentity":  {
+                            "id":  "16df65715938811ea650e0a82b0236ea2b694903",
+                            "source":  "build",
+                            "build":  "16df65715938811ea650e0a82b0236ea2b694903",
+                            "platform":  "a6c91bf278f42fb96d64c48970f56300be0d07cd",
+                            "stamped":  true,
+                            "agrees":  false
+                        },
+    "ready":  true,
+    "mail":  {
+                 "configured":  false,
+                 "transport":  "none",
+                 "productionCapable":  false,
+                 "refusedSetting":  null,
+                 "note":  "No mail provider is configured. Applicant email verification is unavailable, and the portal will not offer it."
+             },
+    "uploads":  false,
+    "scanner":  "none",
+    "offVolumeCopy":  "NOT CONFIGURED",
+    "alerts":  "NOT CONFIGURED",
+    "aiEntitlement":  {
+                          "checkedHere":  false,
+                          "command":  "npm run preflight",
+                          "model":  "claude-opus-5-5",
+                          "premiumModel":  "claude-opus-5-5",
+                          "note":  "Entitlement is not checked by this endpoint. Run the preflight in this deployment, or read the research outcomes below."
+                      },
+    "researchVerified":  false,
+    "offer":  {
+                  "mode":  "off",
+                  "version":  "pilot-1",
+                  "name":  "Slate pilot search",
+                  "amount":  null,
+                  "currency":  "usd",
+                  "allowanceUsd":  null,
+                  "configured":  false
+              }
+}

@@ -1102,7 +1102,7 @@ function applyTerminalResearch(job){
 async function refreshAfterResearch(searchId, view){
   try {
     await loadSearch(searchId);
-    if (state.view !== view && state.search?.id === searchId) go(view);
+    if (state.view !== view && state.search?.id === searchId) go(view, {}, { fresh:true });
     else render();
   } catch { render(); }
 }
@@ -1649,8 +1649,9 @@ async function applyRoute(route, { push=false }={}){
     await go('home', {}, { replace:true });
     return;
   }
-  if (route.searchId && state.search?.id !== route.searchId){
-    try { await loadSearch(route.searchId); }
+  const loaded = route.searchId && state.search?.id !== route.searchId;
+  if (loaded){
+    try { await loadSearch(route.searchId, { current:() => ticket === navSeq }); }
     catch {
       if (ticket !== navSeq) return;
       toast('That search is not on your book, or is no longer available.');
@@ -1661,7 +1662,7 @@ async function applyRoute(route, { push=false }={}){
   }
   if (!route.searchId && !WORKSPACE_VIEWS.includes(route.view)) route = { view:'home' };
   const extra = route.sel ? { sel:route.sel } : {};
-  await go(route.view, extra, { push, replace:!push, fromHistory:true, ticket });
+  await go(route.view, extra, { push, replace:!push, fromHistory:true, ticket, fresh:loaded });
 }
 
 /**
@@ -1760,6 +1761,12 @@ async function go(view, extra={}, opts={}){
     if (superseded()) return;
     toast(error.message); return;
   }
+  if (superseded()) return;
+  // Other people change a search while it sits open here: a manager adds a
+  // candidate, an applicant submits, a colleague saves. Each move within an
+  // open search reads it again, so nobody has to reload the browser to see
+  // today's list. A failure keeps what is on screen and says it may be old.
+  if (state.search && view !== 'home' && !opts.fresh) await refreshOpenSearch(superseded);
   if (superseded()) return;
   // Who still needs chasing, read from the server so the list and the export
   // agree on the answer. Deliberately not fatal: the candidate list is still
@@ -2217,18 +2224,21 @@ async function loadMe(){
     state.users = me.users || [];
     state.health = Object.assign({}, state.health, me.health);
     state.authError = null;
+    state.authTaskPending = false;
     return true;
   } catch (error) {
     // A session Clerk is holding on an unanswered task is not a failure to
     // sign in; it is a person who has not chosen a workspace yet. The chooser
     // is what they need, not the sign-in page.
     if (error.code === 'SESSION_TASK_PENDING') {
+      state.authTaskPending = true;
       state.user = state.user || null;
       state.onboarding = { stage:'workspace', blocked:true, required:false };
       state.authError = null;
       return Boolean(state.user);
     }
     state.user = null;
+    state.authTaskPending = false;
     state.authError = window.SlateAuth.signedIn ? error.message : null;
     return false;
   }
@@ -2283,6 +2293,12 @@ async function enterWorkspace(orgId, destination){
     state.orgBusy = true; state.orgError = null;
     try {
       if (orgId !== window.SlateAuth.organizationId) await window.SlateAuth.setActiveOrganization(orgId);
+      // Only authenticated, server-authorized assignments determine the
+      // destination of older invitations that did not include a search ID.
+      if (!searchId && await loadMe() && state.org?.id === orgId && state.role) {
+        const searches = await api('/api/searches');
+        if (searches.length === 1) destination = '#/o/' + encodeURIComponent(orgId) + '/s/' + encodeURIComponent(searches[0].id);
+      }
       location.assign('/' + destination);
     } catch (error) {
       state.orgBusy = false; state.orgError = error.message; render();
@@ -2354,7 +2370,48 @@ async function refreshSearches(){
   try { await loadSearches(); return true; }
   catch (error) { state.searchesError = error.message || 'The list could not be refreshed.'; return false; }
 }
-async function loadSearch(id){
+/**
+ * Read the open search again without letting a slow answer win.
+ *
+ * The response is applied only if this is still the navigation in charge, the
+ * same search and workspace are still open, and nothing has been typed since
+ * it was asked for. Anything else keeps the screen the person is looking at.
+ */
+async function refreshOpenSearch(superseded = () => false){
+  const asked = state.search;
+  const id = asked?.id;
+  const orgId = state.org?.id;
+  if (!id) return false;
+  try {
+    const fresh = await api('/api/searches/'+id);
+    // A save made while this read was in flight already put a newer search on
+    // screen; the read must not put the older one back.
+    if (superseded() || state.search !== asked || state.org?.id !== orgId || state.dirty) return false;
+    state.search = fresh;
+    state.searchStale = null;
+    adoptResearchJob();
+    return true;
+  } catch (error) {
+    if (superseded() || state.search !== asked || state.org?.id !== orgId) return false;
+    state.searchStale = error.message || 'The latest changes could not be loaded.';
+    return false;
+  }
+}
+
+function searchStaleNotice(){
+  if (!state.search || !state.searchStale) return '';
+  return `<div class="notice notice--wait" role="status"><div>
+    <div class="notice__t">This search may be out of date</div>
+    <div class="notice__b">${esc(state.searchStale)} You are seeing what was last loaded; changes by other people may be missing.
+      <button type="button" class="btn btn--secondary btn--sm" data-act="retry-search-refresh">Try again</button></div>
+  </div></div>`;
+}
+
+async function loadSearch(id, { current = () => true } = {}){
+  const search = await api('/api/searches/'+id);
+  // A navigation that has since been replaced must not paint its search over
+  // the one the person moved on to.
+  if (!current()) return false;
   // An in-progress intake draft belongs to one search. Drop it when the file
   // changes so answers cannot bleed from one committee into another. Research
   // is the same: an operation on the previous search must not keep reporting
@@ -2363,10 +2420,12 @@ async function loadSearch(id){
     state.intake = null; state.intakeConflict = null; state.adoptPlan = null;
     state.newPin = null; state.newPeople = null; stopResearch();
   }
-  state.search = await api('/api/searches/'+id);
+  state.search = search;
+  state.searchStale = null;
   // Research that is already running reconnects here rather than being lost
   // because the page was reloaded or revisited.
   adoptResearchJob();
+  return true;
 }
 
 // A committee member is on the search to answer intake and score people, not
@@ -2485,6 +2544,7 @@ function shell(body){
   // deliberate freeze and a page whose Save button mysteriously fails.
   const frozen = frozenNotice();
   if (frozen) body = frozen + body;
+  body = searchStaleNotice() + body;
   if (state.search?.projectAccess?.state === 'unpaid' && canEdit() && state.view !== 'billing') {
     body = '<div class="notice notice--info" role="status">This search is a draft. Complete its project payment before research, publishing, or other search work. <button type="button" class="btn btn--secondary btn--sm" data-go="billing">Review project payment</button></div>' + body;
   }
@@ -2683,6 +2743,37 @@ function vPricing(){
 }
 
 function isInvitationPage(){ return /^\/join(?:\/|$)/.test(location.pathname); }
+
+function vSessionTask(){
+  const task = window.SlateAuth.pendingTask;
+  const title = { 'choose-organization':'Choose your search workspace', 'reset-password':'Update your password', 'setup-mfa':'Secure your account' }[task] || 'Finish signing in';
+  return publicFrame(`<section class="welcome__card stack"><p class="t-label">Continue to your search</p>
+    <h1 class="t-title">${esc(title)}</h1>
+    <p>Your account is signed in. Complete this required step to open your assigned search.</p>
+    ${task === 'choose-organization'
+      ? `${state.taskChoicesError ? `<p role="alert">${esc(state.taskChoicesError)}</p>` : ''}
+        ${(state.taskChoices || []).map(w => `<div class="row"><button class="btn btn--primary" data-act="complete-workspace-task" data-org="${esc(w.id)}" ${state.orgBusy?'disabled':''}>${w.accept ? 'Accept invitation to' : 'Continue with'} ${esc(w.name)}</button></div>`).join('')}
+        ${state.taskChoices?.length === 0 ? '<p role="status">No workspace or invitation is available for this account. Ask your search team to invite the email you signed in with.</p>' : ''}`
+      : `<div data-clerk-task="${esc(task || '')}"></div>`}
+    <p class="t-small">Use the workspace named in your invitation. If it is missing, check that you signed in with the email your team invited.</p>
+    <div class="row"><button class="btn btn--secondary" data-act="auth-retry">Try again</button><button class="btn btn--ghost" data-act="logout">Use a different account</button></div>
+  </section>`);
+}
+
+async function continueInvitation(){
+  const params = new URLSearchParams(location.search);
+  const target = params.get('organization');
+  // Clerk can also issue opaque tickets. Without a target, let the member
+  // choose instead of mistaking their old workspace for the new invitation.
+  if (params.has('__clerk_ticket') && !target) return false;
+  const memberships = (state.workspaces || []).filter(w => w.role && (!target || w.id === target));
+  // A pending invitation still needs explicit acceptance. Never choose
+  // between several workspaces or infer membership from URL parameters.
+  const pending = (state.invites || []).filter(i => !target || i.organizationId === target);
+  if (state.invitesError || pending.length || memberships.length !== 1) return false;
+  await enterWorkspace(memberships[0].id);
+  return !state.orgError;
+}
 
 function vInvitation(){
   const params = new URLSearchParams(location.search);
@@ -4406,7 +4497,12 @@ function vTeam(){
           <p class="t-small">Somebody waiting joins the roster the moment they accept their workspace invitation and sign in. Until then they can read nothing.</p>
         </div></div>` : ''}
 
-      ${manage ? `<div class="spec"><div class="spec__bar">Add people</div>
+      ${manage && s.projectAccess?.state === 'unpaid' ? `<div class="spec"><div class="spec__bar">Add people</div>
+        <div class="spec__body stack">
+          <p>People can be added to this search once its project payment is complete.</p>
+          ${canEdit() ? '<div class="row"><button type="button" class="btn btn--primary" data-go="billing">Review project payment</button></div>' : ''}
+        </div></div>` : ''}
+      ${manage && s.projectAccess?.state !== 'unpaid' ? `<div class="spec"><div class="spec__bar">Add people</div>
         <div class="spec__body stack">
           <p class="t-small">${esc(SEARCH_ROLE.committee.hint)} The consultant role is for somebody already in ${esc(orgName())}.
             ${state.caps?.inviteMembers
@@ -4608,6 +4704,10 @@ function vIntakeAnswer(){
       + 'Rate how much each priority matters to you. The account manager uses the committee’s submitted answers to build and adopt the candidate profile in Step '+stepNo('profile')+'.')}
     <div class="band"><div class="wrap stack">
       <p class="t-small">Answer for yourself. Saved drafts are private to you. Submitted answers are visible to the search team; the rest of the committee can read them after the account manager closes the response window.</p>
+      ${(s.criteria||[]).length && canOpenStep('profile') ? `<div class="notice notice--ok" role="status"><div>
+        <div class="notice__t">A candidate profile has been adopted</div>
+        <div class="notice__b">It is what candidates are scored against. <button type="button" class="btn btn--secondary btn--sm" data-go="profile">Open the adopted candidate profile</button></div>
+      </div></div>` : ''}
       ${intakeConflictPanel()}
       ${!open ? `<div class="notice notice--${closed?'ok':'info'}"><div>
         <div class="notice__t">${closed ? 'Intake is closed' : 'Intake has not opened yet'}</div>
@@ -7461,6 +7561,7 @@ function vTeamAccess(){
  */
 function page(){
   if (location.pathname.startsWith('/apply/')) return vApply();
+  if (window.SlateAuth.pendingTask || state.authTaskPending) return vSessionTask();
   if (isInvitationPage()) return vInvitation();
   if (location.pathname === '/pricing' || location.pathname === '/subscriptions') return vPricing();
   if (location.pathname === '/how-it-works' || (location.pathname === '/' && !location.hash && !state.user)) return vGate();
@@ -8076,7 +8177,7 @@ document.addEventListener('click', async e => {
     await withBusy(async () => {
       await loadSearch(id);
     }, waitSave('Opening the search'));
-    if (state.search && state.search.id === id) go('overview');
+    if (state.search && state.search.id === id) go('overview', {}, { fresh:true });
     return;
   }
   if (t.dataset.cand){
@@ -8241,6 +8342,14 @@ document.addEventListener('click', async e => {
   }
   if (act==='retry-searches'){
     await withBusy(async () => { await refreshSearches(); }, false);
+    return;
+  }
+  if (act==='retry-search-refresh') {
+    if (state.dirty && !confirm('Discard unsaved edits and load the latest search?')) return;
+    state.dirty = false;
+    await withBusy(async () => {
+      if (!(await refreshOpenSearch())) toast('The search still could not be refreshed. Try again shortly.');
+    }, false);
     return;
   }
   if (act==='reload-search') {
@@ -8485,6 +8594,20 @@ document.addEventListener('click', async e => {
   }
 
   /* --- workspaces --------------------------------------------------------- */
+
+  if (act==='complete-workspace-task') {
+    const choice = (state.taskChoices || []).find(w => w.id === t.dataset.org);
+    if (!choice) return;
+    state.completingTask = true;
+    state.orgBusy = true; state.taskChoicesError = null; render();
+    try {
+      if (choice.accept) await choice.accept();
+      await enterWorkspace(choice.id);
+      if (state.orgError) state.taskChoicesError = state.orgError;
+    } catch (error) { state.taskChoicesError = error.message || 'The workspace could not be opened. Try again.'; }
+    finally { state.completingTask = false; state.orgBusy = false; render(); }
+    return;
+  }
 
   if (act==='open-workspaces') { state.chooseWorkspace = true; state.orgError = null; render(); $('#main')?.focus(); return; }
   if (act==='my-access') {
@@ -9513,8 +9636,15 @@ async function createSearch(){
     });
     state.newJurisdiction = null;
     if (!state.search) return;
-    go('billing');
-    toast('Search '+state.search.no+' is open. Review its project payment.');
+    // Payment comes first only when this search actually owes one. Without
+    // billing, or with access already in place, the work starts with the team.
+    if (state.search.projectAccess?.state === 'unpaid') {
+      go('billing', {}, { fresh:true });
+      toast('Search '+state.search.no+' is open. Review its project payment.');
+    } else {
+      go('team', {}, { fresh:true });
+      toast('Search '+state.search.no+' is open. Add the search committee next.');
+    }
   } finally {
     creating = false;
   }
@@ -9536,8 +9666,14 @@ window.addEventListener('popstate', async event => {
   }
   state.dirty = false;
   navDepth = Number(event.state?.slateDepth) || 0;
-  await applyRoute(parseRoute(location.hash), { push:false });
+  // A fragment change fires popstate and then hashchange for the same move.
+  // Remember which address this handler is routing so the second event does
+  // not start the same navigation, and the same reads, all over again.
+  const routing = routingHash = location.hash;
+  try { await applyRoute(parseRoute(routing), { push:false }); }
+  finally { if (routingHash === routing) routingHash = null; }
 });
+let routingHash = null;
 
 /**
  * An address changed in place rather than navigated to.
@@ -9555,6 +9691,8 @@ window.addEventListener('hashchange', async () => {
   if (!state.user) return;
   // Already showing it: this is the app's own rewrite coming back round.
   if (location.hash === routeFor()) return;
+  // Already on its way: popstate is routing this very address.
+  if (location.hash === routingHash) return;
   if (state.dirty && !confirm('Leave this page and discard unsaved edits?')){
     history.replaceState({ slateDepth:navDepth }, '', routeFor());
     return;
@@ -9568,6 +9706,20 @@ window.addEventListener('hashchange', async () => {
 $('#lookup-cancel')?.addEventListener('click', () => { if (showWait._cancel) showWait._cancel(); });
 
 (async function boot(){
+  // Older Clerk emails only carry a ticket. Its organization ID is a routing
+  // hint, never evidence of access: the authenticated membership and search
+  // APIs still authorize everything before a destination can open.
+  const invitationParams = new URLSearchParams(location.search);
+  if (invitationParams.has('__clerk_ticket') && !location.pathname.startsWith('/apply/')) {
+    if (!invitationParams.has('organization')) {
+      try {
+        const payload = invitationParams.get('__clerk_ticket').split('.')[1];
+        const claims = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')));
+        if (/^org_[a-zA-Z0-9]+$/.test(claims.oid || '')) invitationParams.set('organization', claims.oid);
+      } catch { /* Clerk, not Slate, decides whether a ticket is valid. */ }
+    }
+    history.replaceState(null, '', location.pathname + '?' + invitationParams + location.hash);
+  }
   // Older email redirects may still point at Home. Keep Clerk's ticket intact.
   if (!location.pathname.startsWith('/apply/') && !isInvitationPage()
       && new URLSearchParams(location.search).has('__clerk_ticket')) {
@@ -9591,13 +9743,14 @@ $('#lookup-cancel')?.addEventListener('click', () => { if (showWait._cancel) sho
   try {
     await window.SlateAuth.init(state.health?.auth,
       () => {
+        if ((isInvitationPage() && state.orgBusy) || state.completingTask) return;
         state.user = null; state.dirty = false;
         clearWorkspaceState();
         render();
         location.reload();
       },
       nextOrganization => {
-        if (isInvitationPage() && state.orgBusy) return;
+        if ((isInvitationPage() && state.orgBusy) || state.completingTask) return;
         // The active workspace changed somewhere this tab did not ask — another
         // tab, or Clerk resolving a task. Whatever is on screen belongs to the
         // workspace we were in, so it comes down before anything else happens.
@@ -9614,6 +9767,13 @@ $('#lookup-cancel')?.addEventListener('click', () => { if (showWait._cancel) sho
     return;
   }
   const signedIn = await loadMe();
+  if (window.SlateAuth.pendingTask || state.authTaskPending) {
+    if (window.SlateAuth.pendingTask === 'choose-organization') {
+      try { state.taskChoices = await window.SlateAuth.pendingWorkspaces(); }
+      catch (error) { state.taskChoicesError = error.message || 'Your workspaces could not load. Try again.'; }
+    }
+    render(); return;
+  }
   if (isInvitationPage()) {
     // A stable component path survives Clerk's verification/callback steps,
     // even when their query string no longer includes the invitation status.
@@ -9624,6 +9784,7 @@ $('#lookup-cancel')?.addEventListener('click', () => { if (showWait._cancel) sho
     if (signedIn) {
       try { state.invites = await window.SlateAuth.invitations(); }
       catch (error) { state.invitesError = error.message || 'Invitations could not be read. Try again.'; }
+      if (await continueInvitation()) return;
     }
     render();
     return;

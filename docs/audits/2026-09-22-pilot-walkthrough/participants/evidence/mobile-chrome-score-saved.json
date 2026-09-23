@@ -1,0 +1,29 @@
+{
+  "url": "/#/o/org_fixture1/s/sr-e9f2c600/person/C-e9681bf9",
+  "heading": "Synthetic Candidate",
+  "width": 412,
+  "overflow": 0,
+  "visibleButtons": 33,
+  "scoreTargets": [
+    {
+      "width": 28,
+      "height": 28
+    },
+    {
+      "width": 28,
+      "height": 28
+    },
+    {
+      "width": 28,
+      "height": 28
+    },
+    {
+      "width": 28,
+      "height": 28
+    },
+    {
+      "width": 28,
+      "height": 28
+    }
+  ]
+}

@@ -173,6 +173,13 @@ button.strip__s:hover{background:var(--sunken)}
   border-radius:var(--r-1); cursor:pointer;
 }
 .wgt button[aria-pressed="true"]{background:var(--accent); border-color:var(--accent); color:var(--accent-on)}
+/* Priorities and scores are tapped dozens of times in a panel session. On a
+   phone, or any touch screen, each rating gets a full finger-sized target and
+   the row may wrap rather than push the page sideways at 320px or under zoom. */
+@media (max-width:900px), (pointer:coarse){
+  .wgt{flex-wrap:wrap; gap:6px}
+  .wgt button{min-width:44px; height:44px; font-size:15px}
+}
 
 .crit-row{
   display:grid; grid-template-columns:3.2em minmax(0,1fr) auto auto;

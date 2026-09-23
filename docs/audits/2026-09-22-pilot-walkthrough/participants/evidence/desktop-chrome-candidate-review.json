@@ -1,0 +1,29 @@
+{
+  "url": "/#/o/org_fixture1/s/sr-ba316d66/person/C-332b9ad7",
+  "heading": "Synthetic Candidate",
+  "width": 1280,
+  "overflow": 0,
+  "visibleButtons": 29,
+  "scoreTargets": [
+    {
+      "width": 28,
+      "height": 28
+    },
+    {
+      "width": 28,
+      "height": 28
+    },
+    {
+      "width": 28,
+      "height": 28
+    },
+    {
+      "width": 28,
+      "height": 28
+    },
+    {
+      "width": 28,
+      "height": 28
+    }
+  ]
+}

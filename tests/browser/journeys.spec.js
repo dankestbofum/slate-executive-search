@@ -11,12 +11,19 @@ const { test, expect } = require('@playwright/test');
 const { installClerk } = require('./clerk');
 
 // The door: Clerk's own script is stubbed, and the page starts signed out.
-async function openLanding(page) {
+// Sign in lives in the public site menu at every width, behind "Menu".
+async function openLanding(page, { openMenu = true } = {}) {
   await installClerk(page, { signedIn: false });
   await page.goto('/');
   await page.waitForLoadState('networkidle');
-  await expect(page.getByRole('button', { name: 'Sign in', exact: true }).first()).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Menu', exact: true })).toBeVisible();
+  if (openMenu) await openPublicMenu(page);
   await expect(page.locator('#login')).toHaveCount(0);
+}
+
+async function openPublicMenu(page) {
+  await page.getByRole('button', { name: 'Menu', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Sign in', exact: true }).first()).toBeVisible();
 }
 
 async function startWorkspace(page) {
@@ -48,16 +55,21 @@ test('a session opens the workspace, survives reload, and ends on sign-out', asy
   await page.context().setExtraHTTPHeaders({});
   await page.getByRole('button', { name: 'Open account menu', exact: true }).click();
   await page.getByRole('button', { name: 'Sign out', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Sign in', exact: true }).first()).toBeVisible();
+  await openPublicMenu(page);
   await page.getByRole('button', { name: 'Sign in', exact: true }).first().click();
   await expect(page.getByRole('button', { name: /open a new search/i }).first()).toBeVisible({ timeout: 10000 });
 });
 
 test('signing in is reachable with the keyboard alone', async ({ page }) => {
-  await openLanding(page);
+  await openLanding(page, { openMenu: false });
+  const menu = page.getByRole('button', { name: 'Menu', exact: true });
   const signIn = page.getByRole('button', { name: 'Sign in', exact: true }).first();
-  // The public navigation and skip link precede authentication now. Traverse
-  // them with real Tab presses rather than assuming sign-in is the first stop.
+  // The skip link and brand precede the site menu, which holds sign-in. Reach
+  // and open it with real key presses, then Tab through the menu's links.
+  for (let n = 0; n < 5 && !await menu.evaluate(el => el === document.activeElement); n++) await page.keyboard.press('Tab');
+  await expect(menu).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(signIn).toBeVisible();
   for (let n = 0; n < 8 && !await signIn.evaluate(el => el === document.activeElement); n++) await page.keyboard.press('Tab');
   await expect(signIn).toBeFocused();
   await page.keyboard.press('Enter');
@@ -97,9 +109,15 @@ test('starting fresh can be cancelled, archives managed searches, and keeps the 
 });
 
 test('every focusable control shows a visible focus indicator', async ({ page }) => {
-  await openLanding(page);
+  await openLanding(page, { openMenu: false });
+  // Reached by keyboard, as a keyboard user would: a focus ring is drawn for
+  // :focus-visible, which a scripted focus after a mouse click does not set.
+  const menu = page.getByRole('button', { name: 'Menu', exact: true });
   const button = page.getByRole('button', { name: 'Sign in', exact: true }).first();
-  await button.focus();
+  for (let n = 0; n < 5 && !await menu.evaluate(el => el === document.activeElement); n++) await page.keyboard.press('Tab');
+  await page.keyboard.press('Enter');
+  for (let n = 0; n < 8 && !await button.evaluate(el => el === document.activeElement); n++) await page.keyboard.press('Tab');
+  await expect(button).toBeFocused();
   const outline = await button.evaluate(el => {
     const style = getComputedStyle(el);
     return { outlineWidth: style.outlineWidth, outlineStyle: style.outlineStyle, boxShadow: style.boxShadow };
@@ -124,6 +142,8 @@ test('a county search can be opened and reloads with its type intact', async ({ 
   if (await state.count()) await state.fill('AZ');
 
   await page.getByRole('button', { name: /create search/i }).click();
+  // The new search has its own address before a reload is asked to keep it.
+  await page.waitForURL(/\/s\/[^/]+\/(team|billing)$/, { timeout: 10000 });
 
   await expect(page.getByText('Browser County').filter({ visible: true }).first()).toBeVisible({ timeout: 10000 });
 
