@@ -67,7 +67,7 @@ async function myRevision(id, auth, userId) {
 }
 
 /** Stand up a search with a manager and `names.length` committee members. */
-async function standUp(client, names) {
+async function standUp(client, names, qualities) {
   const abe = sign.headers('abe@slate.local');
   const made = await api('/api/searches', {
     auth: abe, method: 'POST', body: { client, position: 'City Manager', state: 'Nevada' }
@@ -93,6 +93,12 @@ async function standUp(client, names) {
     people[name] = { auth: sign.headers(email), userId: row.userId, email };
   }
   await write('/api/searches/' + id + '/team/confirm', { auth: abe, id, body: { confirmed: true } });
+  if (qualities) {
+    const prepared = await write('/api/searches/' + id + '/intake/qualities', {
+      auth: abe, id, method: 'PUT', body: { qualities }
+    });
+    assert.strictEqual(prepared.status, 200);
+  }
   const opened = await write('/api/searches/' + id + '/intake/status', {
     auth: abe, id, body: { status: 'open' }
   });
@@ -136,6 +142,44 @@ async function adopt(id, abe, body = {}) {
 const archive = (id, abe) => write('/api/searches/' + id, { auth: abe, id, method: 'DELETE' });
 
 (async () => {
+  await check('shared qualities require explicit ratings and aggregate independent submissions', async () => {
+    const qualities = [{ kind:'skill', label:'Budgeting' }, { kind:'skill', label:'Communication' }];
+    const { id, abe, people } = await standUp('Shared qualities', ['alice', 'bob'], qualities);
+    try {
+      const seen = await read(id, people.alice.auth);
+      assert.deepStrictEqual(seen.intake.qualities, qualities);
+      const forbidden = await write('/api/searches/' + id + '/intake/qualities', {
+        auth: people.alice.auth, id, method:'PUT', body:{ qualities:[] }
+      });
+      assert.strictEqual(forbidden.status, 403);
+      const frozen = await write('/api/searches/' + id + '/intake/qualities', {
+        auth: abe, id, method:'PUT', body:{ qualities:[] }
+      });
+      assert.strictEqual(frozen.status, 409);
+      await saveDraft(id, people.alice, [{ ...qualities[0], weight:5, note:'PRIVATE_SHARED_NOTE' }]);
+      const draft = (await read(id, people.alice.auth)).intake.responses[people.alice.userId].draft;
+      assert.strictEqual(draft.items.find(i => i.label === 'Communication').weight, null);
+      assert.doesNotMatch(JSON.stringify(await read(id, abe)), /PRIVATE_SHARED_NOTE/);
+      assert.strictEqual((await submit(id, people.alice, [{ ...qualities[0], weight:5 }])).status, 400);
+      assert.strictEqual((await read(id, abe)).consensus.submitted, 0);
+      assert.strictEqual((await submit(id, people.alice, qualities.map((q,i) => ({ ...q, weight:i ? 5 : 1 })))).status, 200);
+      assert.strictEqual((await submit(id, people.bob, qualities.map((q,i) => ({ ...q, weight:i ? 3 : 1 })))).status, 200);
+      const own = (await read(id, abe)).you;
+      const ownerId = (await read(id, abe)).roster.find(r => r.searchRole === own.searchRole).userId;
+      assert.strictEqual((await submit(id, {auth:abe, userId:ownerId}, qualities.map((q,i) => ({ ...q, weight:i ? 4 : 1 })))).status, 200);
+      const agg = (await read(id, abe)).consensus;
+      assert.strictEqual(agg.submitted, 3);
+      assert.strictEqual(agg.byKind.skill[0].label, 'Communication');
+      assert.strictEqual(agg.byKind.skill[0].avgWeight, 4);
+      assert.strictEqual(agg.byKind.skill[0].mentions, 3);
+      assert.strictEqual((await read(id, people.bob.auth)).consensus, null);
+      assert.strictEqual((await closeIntake(id, abe)).status, 200);
+      const { applied } = await adopt(id, abe);
+      assert.ok(applied.search.criteria.some(c => c.label === 'Communication' && c.weight === 4));
+      assert.strictEqual((await read(id, people.bob.auth)).consensus.submitted, 3);
+    } finally { await archive(id, abe); }
+  });
+
   /* --- CA-01, CA-10: a draft belongs to its author ---------------------- */
 
   await check('an unfinished draft never reaches another member, before or after closing', async () => {
