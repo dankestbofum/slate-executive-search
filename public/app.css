@@ -201,6 +201,9 @@ button.strip__s:hover{background:var(--sunken)}
   background:var(--accent-tint); border-color:var(--accent); color:var(--ink); font-weight:600;
 }
 .pick button:disabled{opacity:.45; cursor:not-allowed}
+@media (max-width:900px), (pointer:coarse){
+  .pick button{min-height:44px}
+}
 .seal{display:flex; gap:var(--s-3); padding:var(--s-5); border:1px dashed var(--line-strong); border-radius:var(--r-3); background:var(--sunken)}
 .req{color:var(--stop)}
 /* The duplicate .grid2, .sub, .btn--ghost, .btn--sm, .field__hint, .t-small,

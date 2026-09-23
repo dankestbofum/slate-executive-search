@@ -4663,7 +4663,7 @@ function intakeGroup(kind){
   const ask = INTAKE_ASK[kind];
   const named = rows.filter(x => String(x.it.label||'').trim()).length;
   const suggKey = 'isugg-'+kind;
-  const suggOpen = state.open[suggKey] === undefined ? named === 0 : Boolean(state.open[suggKey]);
+  const suggOpen = state.open[suggKey] === undefined ? true : Boolean(state.open[suggKey]);
   return `<section id="intake-sec-${kind}" class="spec profgroup"><div class="spec__bar">${esc(KIND[kind].plural)} · ${named} named</div>
     <div class="spec__body stack">
       <p><strong>${esc(ask.t)}</strong></p>
@@ -4674,6 +4674,7 @@ function intakeGroup(kind){
         <button type="button" class="btn btn--ghost btn--sm" data-panel="${suggKey}" aria-expanded="${suggOpen}" aria-controls="ipick-${kind}" data-open-label="Suggestions" data-close-label="Hide suggestions">${suggOpen?'Hide suggestions':'Suggestions'}</button>
       </div>
       <div id="ipick-${kind}"${suggOpen?'':' hidden'}>
+        <p class="t-small">Select suggested qualities to add to your answer, or write your own.${(state.search?.intake?.qualities || []).length ? ' Shared qualities are already included; rate those above.' : ''}</p>
         <div class="pick">${(SUGGEST[kind]||[]).map(label => {
           const on = labels.has(label.toLowerCase());
           const shared = (state.search?.intake?.qualities || []).some(q => q.kind === kind && q.label.toLowerCase() === label.toLowerCase());
@@ -4896,9 +4897,18 @@ function sharedQualitiesPanel(){
     && !Object.keys(intake.responses || {}).length;
   return `<section class="spec"><div class="spec__bar">Shared candidate qualities</div><div class="spec__body stack">
     <p>Prepare the same list for every committee member and yourself to rate from 1 to 5. Members can suggest additions. The list stays fixed once the window opens so the aggregate compares the same qualities.</p>
-    ${editable ? `<form id="sharedqualities" class="formgrid">${Object.keys(INTAKE_ASK).map(kind =>
-      field(KIND[kind].plural, 'One quality per line.', `<textarea class="input ed" name="${kind}" rows="4">${esc(qualities.filter(q => q.kind === kind).map(q => q.label).join('\n'))}</textarea>`)
-    ).join('')}</form><div class="row">
+    ${editable ? `<form id="sharedqualities" class="formgrid">${Object.keys(INTAKE_ASK).map(kind => {
+      const selected = qualities.filter(q => q.kind === kind).map(q => q.label);
+      const labels = new Set(selected.map(label => label.toLowerCase()));
+      return `<section class="stack stack--tight" aria-labelledby="shared-title-${kind}">
+        <h3 id="shared-title-${kind}">${esc(KIND[kind].plural)}</h3>
+        <p class="t-small">Select suggested qualities. Click a selected suggestion again to remove it.</p>
+        <div class="pick" role="group" aria-label="Suggested ${esc(KIND[kind].plural.toLowerCase())}">${(SUGGEST[kind] || []).map(label =>
+          `<button type="button" data-shared-pick="${kind}" data-label="${esc(label)}" aria-pressed="${labels.has(label.toLowerCase())}">${esc(label)}</button>`
+        ).join('')}</div>
+        ${field('Selected '+KIND[kind].plural.toLowerCase(), 'Edit the wording or add your own qualities, one per line.', `<textarea class="input ed" id="shared-selected-${kind}" name="${kind}" rows="4">${esc(selected.join('\n'))}</textarea>`)}
+      </section>`;
+    }).join('')}</form><div class="row">
       <button type="button" class="btn btn--primary" data-act="save-shared-qualities">Save shared qualities</button>
       ${(state.search.criteria || []).length ? '<button type="button" class="btn btn--secondary" data-act="copy-profile-qualities">Use current profile qualities</button>' : ''}
     </div><p class="t-small">Save this list before opening the response window. Leaving it empty keeps the open-ended questionnaire.</p>`
@@ -4912,6 +4922,18 @@ function collectSharedQualities(){
   if (!form) return null;
   return Object.entries(Object.fromEntries(new FormData(form).entries())).flatMap(([kind, text]) =>
     String(text).split(/\r?\n/).map(label => label.trim()).filter(Boolean).map(label => ({ kind, label })));
+}
+
+// Update the selection marks in place so choosing a suggestion never redraws
+// or discards the administrator's other unsaved categories and window notes.
+function paintSharedQualities(){
+  const qualities = collectSharedQualities();
+  if (!qualities) return;
+  $$('#sharedqualities [data-shared-pick]').forEach(button => {
+    const on = qualities.some(q => q.kind === button.dataset.sharedPick
+      && q.label.toLowerCase() === button.dataset.label.toLowerCase());
+    button.setAttribute('aria-pressed', String(on));
+  });
 }
 
 function questionnaireChoice(){
@@ -5202,13 +5224,11 @@ function vProfile(){
     const atCap = rows.length >= 5;
     const labels = new Set(rows.map(x => x.c.label.trim().toLowerCase()).filter(Boolean));
     const range = inCritRange(n) ? 'ok' : (k==='skill' ? 'wait' : (n ? 'wait' : 'idle'));
-    // What the committee named comes first and is marked as theirs. The stock
-    // suggestions stay underneath for the gaps nobody filled. Once a category
-    // has what it needs the bank collapses, so twelve criteria no longer read
-    // as four walls of chips (D10).
+    // Committee suggestions keep their attribution. Leave the quality bank
+    // visible as selections change; only the user's Hide suggestions closes it.
     const fromRoom = (agg?.byKind[k] || []).filter(e => !labels.has(e.label.trim().toLowerCase()));
     const suggKey = 'sugg-'+k;
-    const suggOpen = state.open[suggKey] === undefined ? !inCritRange(n) : Boolean(state.open[suggKey]);
+    const suggOpen = state.open[suggKey] === undefined ? true : Boolean(state.open[suggKey]);
     return `<section id="prof-${k}" class="profgroup">
       ${sectionHead(KIND[k].plural, '', pill(range, n+' of 3–5'))}
       ${k==='skill' ? `<p class="t-small">Select 3 to 5 essential skills. These become the spine of the ads, surveys, and interviews.</p>` : ''}
@@ -5220,6 +5240,7 @@ function vProfile(){
         <button type="button" class="btn btn--ghost btn--sm" data-panel="${suggKey}" aria-expanded="${suggOpen}" aria-controls="pick-${k}" data-open-label="Suggestions" data-close-label="Hide suggestions">${suggOpen?'Hide suggestions':'Suggestions'}</button>
       </div>
       <div id="pick-${k}"${suggOpen?'':' hidden'}>
+        <p class="t-small">Select suggested qualities, then edit their wording and importance above. You can also add your own.</p>
         ${fromRoom.length ? `<p class="t-small">Named by the committee and not on the profile yet:</p>
           <div class="pick pick--room">${fromRoom.map(e =>
             `<button type="button" data-pick="${k}" data-label="${esc(e.label)}" data-weight="${Math.round(e.avgWeight)}" aria-pressed="false" ${atCap?'disabled':''}>${esc(e.label)} <span class="mono">${e.mentions}/${agg.submitted}</span></button>`
@@ -8158,7 +8179,7 @@ window.addEventListener('slate:help-open-guide', () => { go('help'); });
 
 document.addEventListener('click', async e => {
   closeMenusExcept(e.target);
-  const t = e.target.closest('[data-go],[data-open],[data-act],[data-add],[data-del],[data-w],button[data-theme],[data-cand],[data-score],[data-pick],[data-ipick],[data-iadd],[data-idel],[data-iw],[data-phase],[data-panel],[data-personadd],[data-persondel],[data-mode],[data-artadd],[data-artdel],[data-tab],[data-col]');
+  const t = e.target.closest('[data-go],[data-open],[data-act],[data-add],[data-del],[data-w],button[data-theme],[data-cand],[data-score],[data-pick],[data-shared-pick],[data-ipick],[data-iadd],[data-idel],[data-iw],[data-phase],[data-panel],[data-personadd],[data-persondel],[data-mode],[data-artadd],[data-artdel],[data-tab],[data-col]');
   if (!t) return;
 
   if (t.dataset.tab){
@@ -8266,6 +8287,18 @@ document.addEventListener('click', async e => {
   }
   if (t.dataset.cand){
     await go('person', { sel:t.dataset.cand }); return;
+  }
+  if (t.dataset.sharedPick){
+    const field = $('#sharedqualities')?.elements[t.dataset.sharedPick];
+    if (!field) return;
+    const label = t.dataset.label;
+    const lines = field.value.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
+    const on = lines.some(value => value.toLowerCase() === label.toLowerCase());
+    field.value = (on ? lines.filter(value => value.toLowerCase() !== label.toLowerCase()) : [...lines, label]).join('\n');
+    state.dirty = true;
+    paintSharedQualities();
+    markUnsaved();
+    return;
   }
   if (t.dataset.pick){
     state.dirty = true;
@@ -8995,6 +9028,7 @@ document.addEventListener('click', async e => {
     for (const kind of Object.keys(INTAKE_ASK)) {
       form.elements[kind].value = (state.search.criteria || []).filter(c => c.kind === kind && c.label).map(c => c.label).join('\n');
     }
+    paintSharedQualities();
     state.dirty = true;
     markUnsaved();
     return;
@@ -10019,6 +10053,7 @@ document.addEventListener('input', e => {
     markUnsaved();
   }
   if (e.target.closest('#applyform')) paintApplyProgress();
+  if (e.target.closest('#sharedqualities')) paintSharedQualities();
 });
 
 // How far through the questionnaire a candidate is. Updated against the live

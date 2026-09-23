@@ -162,6 +162,81 @@ test('shared qualities reach every member and the owner can navigate from aggreg
   }
 });
 
+test('quality suggestions build the shared questionnaire without losing custom wording or window notes', async ({ browser }, testInfo) => {
+  test.slow();
+  const {search, manager, managerContext, members} = await openIntake(browser, testInfo, ['ada'], {draft:true});
+  try {
+    for (const page of [manager, members.ada.page]) await page.setViewportSize(testInfo.project.use.viewport || {width:1280,height:720});
+    await manager.goto('/#/s/' + search.id + '/intake');
+    const form = manager.locator('#sharedqualities');
+    const financial = form.getByRole('button', {name:'Financial management',exact:true});
+    await manager.locator('#intakewindow [name="prompt"]').fill('Consider our next five years.');
+    await form.locator('[name="trait"]').fill('Calm under pressure');
+    await financial.click();
+    await expect(financial).toHaveAttribute('aria-pressed','true');
+    await form.getByRole('button', {name:'Staff leadership',exact:true}).click();
+    await form.locator('[name="skill"]').fill('Financial management\nStaff leadership\nGrant administration');
+    await financial.click();
+    await expect(financial).toHaveAttribute('aria-pressed','false');
+    await expect(form.locator('[name="skill"]')).toHaveValue('Staff leadership\nGrant administration');
+    await form.locator('[name="skill"]').fill('Team development\nGrant administration');
+    await expect(form.getByRole('button', {name:'Staff leadership',exact:true})).toHaveAttribute('aria-pressed','false');
+    await financial.click();
+    await expect(form.locator('[name="trait"]')).toHaveValue('Calm under pressure');
+    await expect(manager.locator('#intakewindow [name="prompt"]')).toHaveValue('Consider our next five years.');
+    await manager.getByRole('button', {name:'Save shared qualities',exact:true}).click();
+    await expect(manager.locator('#toast')).toContainText('Shared qualities saved');
+    await manager.reload();
+    await expect(form.locator('[name="skill"]')).toHaveValue('Team development\nGrant administration\nFinancial management');
+    await expect(financial).toHaveAttribute('aria-pressed','true');
+    await manager.screenshot({path:testInfo.outputPath('shared-quality-picker.png'),fullPage:true});
+    await manager.getByRole('button', {name:'Open the window',exact:true}).click();
+    await expect(manager.locator('#toast')).toContainText('Intake is open');
+
+    const member = members.ada.page;
+    await member.goto('/#/s/' + search.id + '/intake');
+    const additions = member.locator('#ipick-skill');
+    await expect(additions.getByRole('button',{name:'Financial management',exact:true})).toBeDisabled();
+    await additions.getByRole('button',{name:'Communication',exact:true}).click();
+    await expect(additions.getByRole('button',{name:'Strategic leadership',exact:true})).toBeVisible();
+    for (const label of ['Team development','Grant administration','Financial management','Calm under pressure']) {
+      await member.getByRole('button',{name:'Rate '+label+' 5 of 5',exact:true}).click();
+    }
+    await member.getByRole('button',{name:'Submit my answers',exact:true}).click();
+    await expect(member.locator('#toast')).toContainText('Your answers are in');
+    const result = await (await manager.request.get('/api/searches/' + search.id)).json();
+    expect(result.intake.prompt).toBe('Consider our next five years.');
+    expect(result.consensus.byKind.skill.map(q => q.label)).toEqual(expect.arrayContaining(['Team development','Grant administration','Financial management','Communication']));
+  } finally { await Promise.all([managerContext.close(), members.ada.context.close()]); }
+});
+
+test('skipping intake still lets the administrator select, edit, add and weight profile qualities', async ({browser}, testInfo) => {
+  const {search, manager, managerContext} = await openIntake(browser, testInfo, [], {draft:true});
+  try {
+    await manager.setViewportSize(testInfo.project.use.viewport || {width:1280,height:720});
+    await manager.goto('/#/s/' + search.id + '/intake');
+    await manager.getByRole('button',{name:'Skip questionnaire and continue',exact:true}).click();
+    await expect(manager).toHaveURL(/\/profile$/);
+    const choices = manager.locator('#pick-skill');
+    for (const label of ['Financial management','Community engagement','Staff leadership']) await choices.getByRole('button',{name:label,exact:true}).click();
+    await expect(choices.getByRole('button',{name:'Communication',exact:true})).toBeVisible();
+    const rows = manager.locator('#prof-skill .crit-row');
+    await rows.first().locator('[data-f="label"]').fill('Public finance leadership');
+    await rows.first().locator('[data-w="5"]').click();
+    await manager.locator('#prof-skill [data-add="skill"]').click();
+    await rows.last().locator('[data-f="label"]').fill('Grant administration');
+    await rows.last().locator('[data-w="4"]').click();
+    await manager.getByRole('button',{name:'Save profile',exact:true}).click();
+    await expect(manager.locator('#toast')).toContainText('Profile saved');
+    await manager.reload();
+    await expect(rows.first().locator('[data-f="label"]')).toHaveValue('Public finance leadership');
+    await expect(rows.first().locator('[data-w="5"]')).toHaveAttribute('aria-pressed','true');
+    await expect(rows.last().locator('[data-f="label"]')).toHaveValue('Grant administration');
+    await expect(choices.getByRole('button',{name:'Community engagement',exact:true})).toHaveAttribute('aria-pressed','true');
+    await manager.screenshot({path:testInfo.outputPath('profile-quality-picker.png'),fullPage:true});
+  } finally { await managerContext.close(); }
+});
+
 test('saving a draft after submitting keeps the submitted answer in the tally', async ({ browser }, testInfo) => {
   const { search, manager, managerContext, members } = await openIntake(browser, testInfo, ['ada']);
   const page = members.ada.page;
