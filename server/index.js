@@ -1662,6 +1662,7 @@ app.put('/api/searches/:id/intake/participation', ...requireWorkspace, requireSe
     intake.completedEmpty = null;
     intake.status = 'draft';
     intake.closedAt = null;
+    committee.questionnaire.initialize(req.search);
   } else {
     if (intake.skipped) return res.json(painted(req, req.search));
     if (!req.search.team?.confirmedAt) return res.status(409).json({ error:'Confirm the search roster before continuing without the questionnaire.', code:'ROSTER_UNCONFIRMED' });
@@ -1714,6 +1715,7 @@ app.post('/api/searches/:id/intake/status', ...requireWorkspace, requireSearch, 
     }
   }
   intake.status = want;
+  committee.questionnaire.initialize(req.search);
   if ('dueBy' in (req.body || {})) intake.dueBy = String(req.body.dueBy || '').slice(0, 120);
   if ('prompt' in (req.body || {})) intake.prompt = String(req.body.prompt || '').slice(0, 2000);
   if (want === 'open') {
