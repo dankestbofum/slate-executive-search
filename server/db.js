@@ -128,6 +128,7 @@ function blankSearch(input, user, organizationId){
     reviews: {},
     candidates: [],
     scores: {},
+    scoreRevisions: {},
     notesBy: {},
     released: false,
     activity: [{ at: now(), who: user.name, by: user.id || null, role: user.role || null, x: 'opened the search' }]
@@ -955,6 +956,24 @@ function decorate(search, access){
       out.candidates = (search.candidates || []).map(c => Object.fromEntries(fields.filter(k => k in c).map(k => [k, c[k]])));
     }
   }
+  if (access && !isStaff(access)) {
+    // A committee response is an explicit publication surface. Storage fields
+    // such as posting drafts, working notes, invitation links and artifacts
+    // must not appear here merely because they were added to a search record.
+    const visible = [
+      'id', 'no', 'client', 'jurisdictionType', 'position', 'package',
+      'packageInfo', 'state', 'fog', 'population', 'budget', 'salary',
+      'opened', 'firstReview', 'createdAt', 'updatedAt', 'revision',
+      'profileRevision', 'released', 'team',
+      'steps', 'progress', 'roster', 'accountManager', 'you', 'intake',
+      'criteria', 'candidates', 'scores', 'notesBy'
+    ];
+    const committeeView = Object.fromEntries(visible.filter(key => key in out).map(key => [key, out[key]]));
+    committeeView.staff = {};
+    committeeView.scoreRevisions = { [access.userId]: (search.scoreRevisions || {})[access.userId] || {} };
+    return committeeView;
+  }
+  if (access) out.scoreRevisions = { [access.userId]: (search.scoreRevisions || {})[access.userId] || {} };
   return out;
 }
 

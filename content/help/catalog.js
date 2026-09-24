@@ -67,7 +67,7 @@ const articles = [
     ],
     recovery: [
       'Signed in but no workspace: select **Check my workspaces**, then **My access** in the left navigation to see exactly what you hold.',
-      'Signed in, in a workspace, but no searches: your workspace membership is real and your search assignment has not been made. Select **Check for assignments**, then ask the search manager.',
+      'Signed in, in a workspace, but no searches: your workspace membership is real and your search assignment has not been made. Select **Check for assignments**, then ask the account manager.',
       'Wrong workspace: use the workspace name in the left navigation to switch, or **Switch workspace** on the access screen.'
     ],
     related: ['no-assignment', 'glossary-orientation'],
@@ -107,7 +107,7 @@ const articles = [
     recovery: [
       'A step is missing entirely: the service package decides which steps are on the file. The overview names what is not on this search.',
       'A step is there but will not open: it is waiting on an earlier one, and the page says which.',
-      'An action is missing rather than disabled: some decisions belong to the search manager, and the screen names who holds the account.'
+      'An action is missing rather than disabled: some decisions belong to the account manager, and the screen names who holds the account.'
     ],
     related: ['no-assignment', 'glossary-orientation'],
     reviewed: REVIEWED
@@ -208,7 +208,7 @@ const articles = [
       'Open Team & access.',
       'Send the invitation from the Invitations tab.',
       'Check the role you chose is the one you meant.',
-      'Have the search manager add them to the search.'
+      'Have the account manager add them to the search.'
     ],
     who: 'A workspace administrator. Consultants and committee members do not see this screen.',
     before: [
@@ -219,7 +219,7 @@ const articles = [
       { do: 'Select **Team & access** in the left navigation.' },
       { do: 'Open the **Invitations** tab.' },
       { do: 'Enter the email address, choose the role, and select **Send invitation**.' },
-      { do: 'Once they accept, ask the search manager to add them to the search they are needed on.', note: 'These are two separate things. Membership without an assignment is the most common reason somebody signs in to an empty Home.' }
+      { do: 'Once they accept, ask the account manager to add them to the search they are needed on.', note: 'These are two separate things. Membership without an assignment is the most common reason somebody signs in to an empty Home.' }
     ],
     worked: [
       'The invitation appears in the Invitations tab marked "Invitation sent".',
@@ -243,7 +243,7 @@ const articles = [
   {
     id: 'submit-committee-input',
     title: 'Save and submit your committee input',
-    summary: 'In Step 2, contribute the skills, traits, challenges, and opportunities you want in the candidate profile. The search manager reviews the committee’s answers and adopts the profile in Step 3.',
+    summary: 'In Step 2, contribute the skills, traits, challenges, and opportunities you want in the candidate profile. The account manager reviews the committee’s answers and adopts the profile in Step 3.',
     audience: ['committee', 'consultant'],
     screens: ['intake', 'intake-mine', 'committee'],
     steps: ['intake'],
@@ -256,7 +256,7 @@ const articles = [
     who: 'Every member of the search committee, including the consultants on the file. Your own answers are counted in the tally too.',
     before: [
       'The organization administrator may skip the committee questionnaire for this search. If the screen says it was skipped, no response is required; you can still review candidates later.',
-      'The intake window has to be open. If it is not, the screen says so and the search manager opens it.',
+      'The intake window has to be open. If it is not, the screen says so and the account manager opens it.',
       'Nothing else. There is no preparation and no right answer; the profile is built from what the room actually says.'
     ],
     doThis: [
@@ -295,11 +295,11 @@ const articles = [
     steps: ['profile', 'intake'],
     checklist: [
       'Close the intake window.',
-      'Select Build from committee.',
+      'Select Review what this would change.',
       'Review what adoption would change before saving.',
       'Save the profile.'
     ],
-    who: 'The search manager adopts the profile. Consultants can prepare and preview it.',
+    who: 'The account manager reviews and adopts the profile. Consultants can inspect the committee input.',
     before: [
       'The questionnaire is optional per search. After confirming the roster, an organization administrator can select **Skip questionnaire and continue** in Step 2. Write and weight the profile directly, then select **Save profile**. To collect input later, return to Step 2 and select **Include committee questionnaire**, then have the account manager open the window.',
       'When collecting committee input, enough members have submitted that the tally means something. The screen shows who has and has not.',
@@ -307,7 +307,7 @@ const articles = [
     ],
     doThis: [
       { do: 'Open **Committee**, then the intake screen, and select **Close and read the room**.', note: 'Closing also makes submitted answers readable by everyone on the search. Tell the committee before you do it.' },
-      { do: 'Open Step 3, **Review committee input**. Compare the combined ratings and every explanation, including current challenges, future opportunities, and members’ written context.', note: 'Step 2 collects individual answers. Step 3 is the administrator’s review and adoption step; committee members see a read-only profile once it is available.' },
+      { do: 'Open Step 3, **Review committee input**. Compare the combined ratings and every explanation, including current challenges, future opportunities, and members’ written context.', note: 'Step 2 collects individual answers. Step 3 is the account manager’s review and adoption step; committee members see a read-only profile once it is available.' },
       { do: 'Review the score-ranked qualities. The score is the average submitted 1–5 rating, and the top five in each category are initially selected. Choose 3–5 favorites per category, then select **Review what this would change**.', note: 'Review the response count, explanations, and disagreements. Tied scores are shown alphabetically; that ordering does not imply stronger agreement. Private drafts are never scored.' },
       { do: 'Read the preview. It names which committee priorities become criteria and what an adoption would change.', note: 'The same review is available from **Review what this would change** without committing anything.' },
       { do: 'Select **Save this profile**, then finalize the wording, explanations, and importance ratings. You can select suggested qualities or add your own.', note: 'If the questionnaire was skipped, Step 3 opens directly to profile writing. Suggestions remain visible while you choose; Hide suggestions collapses them when you are finished.' }
@@ -427,9 +427,9 @@ const articles = [
       'Open the candidate.',
       'Rate each criterion and write your note.',
       'Select Save my scores.',
-      'The search manager selects Release scores when the panel should see each other.'
+      'The account manager selects Release scores when the panel should see each other.'
     ],
-    who: 'Every member of the search scores. Only the search manager releases or reseals.',
+    who: 'Every member of the search scores. Only the account manager releases or reseals.',
     before: [
       'An adopted candidate profile. The criteria you score against come from it.',
       'Whatever the candidate submitted, which is shown beside the scorecard.'
@@ -438,7 +438,7 @@ const articles = [
       { do: 'Open **Candidates** and select the candidate.' },
       { do: 'Rate each criterion from 1 to 5 and add your note.', note: 'On a narrow screen the evidence and the scorecard are two panels; switching between them keeps your unsaved entries.' },
       { do: 'Select **Save my scores**.' },
-      { do: 'When the panel should see each other, the search manager selects **Release scores**.', note: 'The same control reads **Seal scores** afterwards.' }
+      { do: 'When the panel should see each other, the account manager selects **Release scores**.', note: 'The same control reads **Seal scores** afterwards.' }
     ],
     worked: [
       'Your scores are shown as saved, with your note beside them.',
@@ -512,7 +512,7 @@ const articles = [
       'Export the record.',
       'Archive it from Home when the file is finished.'
     ],
-    who: 'The search manager closes, reopens, and archives. Any consultant can export. An administrator can restore an archived search if the manager is unreachable.',
+    who: 'The account manager closes, reopens, and archives. Any consultant can export. An administrator can restore an archived search if the manager is unreachable.',
     before: [
       'Outcomes recorded for the candidates who need one. Recording an outcome is the manager\'s decision.',
       'Agreement that the search is over. Closing refuses every ordinary edit afterwards, which is the point.'
@@ -551,10 +551,10 @@ const articles = [
     checklist: [
       'Fill in every required field on Public posting.',
       'Preview the page exactly as an applicant sees it.',
-      'The search manager selects Publish posting.',
+      'The account manager selects Publish posting.',
       'Check the live address, and share that.'
     ],
-    who: 'Consultants prepare and preview. Only the search manager publishes, pauses, closes, or republishes.',
+    who: 'Consultants prepare and preview. Only the account manager publishes, pauses, closes, or republishes.',
     before: [
       'A decision that this search should be advertised publicly at all. Nothing is public until somebody publishes it.',
       'Approved wording for the position, the employer, the requirements, the application materials, the deadline policy, the support contact, and the privacy notice. The posting refuses to publish without them.'
@@ -563,8 +563,8 @@ const articles = [
       { do: 'Open the search and select **Public posting**.' },
       { do: 'Fill in the posting fields. The screen lists what is still missing.', note: 'Workspace defaults fill in the support contact and privacy notice where the firm has set them; you can override either for this posting.' },
       { do: 'Choose the deadline policy: a hard closing date, or open until filled with an advisory first-review date.', note: 'Only the policy you choose is enforced. An advisory review date never closes applications.' },
-      { do: 'Select **Preview posting** and read the page as an applicant would.' },
-      { do: 'The search manager selects **Publish posting**.', note: 'This publishes a snapshot of the approved fields. Later edits to research, drafts, or search facts do not change the live page.' },
+      { do: 'Review the posting fields on this screen. After publishing, select **Open the live page** to read it as an applicant would.' },
+      { do: 'The account manager selects **Publish posting**.', note: 'This publishes a snapshot of the approved fields. Later edits to research, drafts, or search facts do not change the live page.' },
       { do: 'Copy the public address from the posting screen and use that in advertisements.' }
     ],
     worked: [
@@ -722,7 +722,7 @@ const articles = [
       'Are you in the right workspace?',
       'Has your invitation been accepted, or is it still pending?',
       'Does your role allow what you are trying to do?',
-      'Has the search manager added you to the search?'
+      'Has the account manager added you to the search?'
     ],
     who: 'Anyone who signed in and found an empty Home, or an action that is not there.',
     before: ['Nothing.'],
@@ -730,7 +730,7 @@ const articles = [
       { do: 'Select **My access** in the left navigation.', note: 'It states your workspaces, your role in each, and the searches you are on. It is the fastest way to tell these four states apart.' },
       { do: 'If a workspace is missing, select **Check my workspaces**.' },
       { do: 'If an invitation is pending, accept it. A pending invitation is not membership.' },
-      { do: 'If the workspace and role are right but no searches are listed, select **Check for assignments**, then ask the search manager to add you.' }
+      { do: 'If the workspace and role are right but no searches are listed, select **Check for assignments**, then ask the account manager to add you.' }
     ],
     worked: [
       'My access names a workspace, a role, and at least one search.',
@@ -741,7 +741,7 @@ const articles = [
     ],
     next: [{ article: 'first-sign-in', label: 'Signing in for the first time' }],
     recovery: [
-      'An action is missing rather than disabled: some decisions belong to the search manager, and the screen names who holds the account.',
+      'An action is missing rather than disabled: some decisions belong to the account manager, and the screen names who holds the account.',
       'A step is not on the file at all: the service package decides which steps exist. The overview lists what is not on this file and why.',
       'Still stuck: an administrator can see your membership and role on **Team & access**.'
     ],

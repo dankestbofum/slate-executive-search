@@ -237,6 +237,7 @@ const state = {
   intakeConflict:null,
   // A proposed profile the manager is reviewing before it is applied.
   adoptPlan:null,
+  scoreDraft:null, scoreConflict:null,
   // The people being typed into the add-people form, held here rather than
   // read back off the DOM only at submit, so a re-render never drops a row.
   newPeople:null,
@@ -304,7 +305,7 @@ const STEP_FLOW = ['team','intake','profile','community','survey1','guide','surv
 const STEP_NAME = {
   team:'Search committee',
   intake:'Committee questionnaire',
-  profile:'Review and adopt profile',
+  profile:'Adopt the candidate profile',
   community:'Community',
   survey1:'Initial survey',
   guide:'Interview guide',
@@ -419,7 +420,7 @@ function may(action){
 /** Who to ask, for the line under a control this person cannot use. */
 function askManager(){
   const mgr = state.search?.accountManager;
-  return mgr && mgr.name ? mgr.name + ' runs this search.' : 'The search manager decides this.';
+  return mgr && mgr.name ? mgr.name + ' runs this search.' : 'The account manager decides this.';
 }
 // Works across this workspace's whole book: a consultant or an administrator.
 function isStaff(){ return Boolean(state.caps?.staff); }
@@ -1316,8 +1317,9 @@ function nextOf(view){
   // step of its own, so it advances to whatever follows intake.
   const i = flow.indexOf(view === 'intake-mine' ? 'intake' : view);
   if (i < 0) return null;
-  if (i === flow.length-1) return { key:'overview', n:null, title:'This search' };
-  const key = flow[i+1];
+  const remaining = flow.slice(i+1);
+  const key = isCommittee() ? remaining.find(step => COMMITTEE_STEPS.has(step)) : remaining[0];
+  if (!key) return { key:'overview', n:null, title:'This search' };
   return { key, n: stepNo(key) || i+2, title: STEP_NAME[key] || key };
 }
 
@@ -1678,6 +1680,9 @@ let navSeq = 0;
 
 async function go(view, extra={}, opts={}){
   if (!state.busy && state.dirty && !confirm('Leave this page and discard unsaved edits?')) return;
+  state.myAccess = false;
+  if (state.view === 'profile' && view !== 'profile') state.adoptPlan = null;
+  if (state.view === 'person' && view !== 'person') { state.scoreDraft = null; state.scoreConflict = null; }
   // Taken when the move was asked for, not when this function happened to get
   // its turn: a navigation delayed by a slow fetch must not outrank one asked
   // for after it and already painted.
@@ -2262,6 +2267,7 @@ function clearWorkspaceState(){
   state.search = null; state.searches = []; state.users = [];
   state.sel = null; state.picked = []; state.archives = null; state.history = null;
   state.followUps = null; state.intake = null; state.intakeConflict = null; state.adoptPlan = null;
+  state.scoreDraft = null; state.scoreConflict = null;
   state.newPin = null; state.newPeople = null;
   state.filters = {}; state.open = {}; state.mode = {}; state.tab = {};
   state.scrollMem = {}; state.homeQ = ''; state.searchesError = null;
@@ -2418,6 +2424,7 @@ async function loadSearch(id, { current = () => true } = {}){
   // into this one.
   if (state.search?.id !== id) {
     state.intake = null; state.intakeConflict = null; state.adoptPlan = null;
+    state.scoreDraft = null; state.scoreConflict = null;
     delete state.open.profileedit;
     state.profileFavorites = null;
     state.newPin = null; state.newPeople = null; stopResearch();
@@ -2542,7 +2549,7 @@ function railAccount(u, s){
 
 function shell(body){
   if (state.search && canEdit() && !WORKSPACE_VIEWS.includes(state.view)) {
-    const stages = [['intake','Committee rankings'], ['profile','Aggregate and adopt'],
+    const stages = [['intake','Committee questionnaire'], ['profile','Adopt the candidate profile'],
       ['brochure','Create brochure'], ['ads','Create advertisement'], ['screen','Review candidates']];
     body = `<div class="wrap"><nav class="secnav" aria-label="Search stages">
       ${stages.filter(([key]) => canOpenStep(key)).map(([key,label]) => {
@@ -3009,7 +3016,7 @@ function vAssignmentPending(){
   const org = state.onboarding?.organization?.name || 'this workspace';
   return accountFrame(`<div><p class="t-label">Step 3 of 3 · Confirm access</p>
     <h1 class="t-title">You are part of ${esc(org)}</h1>
-    <p class="t-body">Your search assignment is pending. A search manager adds committee members to one search at a time, so being in the workspace is not by itself an assignment.</p></div>
+    <p class="t-body">Your search assignment is pending. An account manager adds committee members to one search at a time, so being in the workspace is not by itself an assignment.</p></div>
     <section class="onboarding__next stack stack--tight">
       <p>Ask your search consultant to add <strong>${esc(state.user.email)}</strong> to the search you are serving on.</p>
       <p class="t-small">Nothing is sent by pressing the button below; it re-reads your assignments.</p></section>
@@ -3037,7 +3044,7 @@ function vMyAccess(){
       <p class="t-small">Roles are set by an administrator of this workspace in Team &amp; access. To change yours, ask one of them.</p></section>
     <section class="stack stack--tight"><h2 class="t-section">Your searches</h2>
       ${assignments ? `<ul class="wslist wslist--plain" role="list">${assignments}</ul>` : '<p class="t-small">You are not on any search in this workspace.</p>'}
-      <p class="t-small">A search manager adds people to individual searches. Being in the workspace is a separate thing from being on a search.</p></section>
+      <p class="t-small">An account manager adds people to individual searches. Being in the workspace is a separate thing from being on a search.</p></section>
     ${others.length ? `<section class="stack stack--tight"><h2 class="t-section">Your other workspaces</h2>
       <ul class="wslist" role="list">${others.map(w => `<li class="wslist__row"><span class="wslist__id"><strong>${esc(w.name)}</strong><span class="t-small">${esc(w.roleLabel)}</span></span>
         <button class="btn btn--secondary btn--sm" data-act="switch-workspace" data-org="${esc(w.id)}">Switch</button></li>`).join('')}</ul></section>` : ''}
@@ -3062,7 +3069,7 @@ function vHomeCommittee(){
   return shell(`
     ${head(orgName(),'Your assignments',
       'You are on '+(list.length===1?'a search':list.length+' searches')+' in '+esc(orgName())+' as a committee member. You are asked what you are looking for in the executive, and later you score candidates against what the committee agreed on.',
-      owed.length ? `<button class="btn btn--primary" data-open="${owed[0].id}">Answer for ${esc(owed[0].client)}</button>` : '')}
+      owed.length ? `<button class="btn btn--primary" data-open="${owed[0].id}" data-answer="true">Answer for ${esc(owed[0].client)}</button>` : '')}
     <div class="band"><div class="wrap stack">
       ${crossWorkspaceNotice()}
       ${searchesNotice()}
@@ -3071,7 +3078,7 @@ function vHomeCommittee(){
           <div class="hubrow__id"><b>${esc(s.client||'')} · ${esc(s.position||'')}</b>
             <div class="t-small">The committee is being asked what to look for in the next ${esc(s.position||'executive')}. Answer for yourself; nobody sees your answers until the window closes.${s.intakeDue?' <b>'+esc(summaryDeadline(s))+'.</b>':''}</div></div>
           <div class="hubrow__st"></div>
-          <div class="hubrow__act"><button class="btn btn--primary btn--sm" data-open="${s.id}">Answer now</button></div>
+          <div class="hubrow__act"><button class="btn btn--primary btn--sm" data-open="${s.id}" data-answer="true">Answer now</button></div>
         </div>`).join('')}</div>
       </div>` : ''}
       <div class="spec"><div class="spec__bar">Your searches · ${list.length}</div>
@@ -3326,6 +3333,16 @@ function vNew(){
 
 function nextHint(next){
   if (!next) return '';
+  if (isCommittee()) {
+    const memberHints = {
+      team:'See who is on this search. The account manager confirms the roster.',
+      intake:'Answer your own questionnaire when collection is open, or preview the questions while you wait.',
+      profile:'Read the adopted candidate profile when the account manager shares it.',
+      screen:'Review candidates and save your own scores against the adopted profile.',
+      finalists:'Review the finalists and your permitted evaluation work.'
+    };
+    if (memberHints[next.key]) return memberHints[next.key];
+  }
   if (next.blocked) {
     if (next.needsCandidates) return 'Add a candidate in Screening first. Later steps wait until someone is on the file.';
     return 'Finish the earlier step first. Later documents are only as good as the profile they inherit.';
@@ -3729,14 +3746,14 @@ function checklistItems(s){
   const items = [];
 
   if (isCommittee()){
-    const mine = s.you?.intake;
+    const mine = s.intake?.responses?.[state.user?.id]?.submitted;
     const open = s.intake?.status === 'open';
     if (!s.intake?.skipped) items.push({
-      done: Boolean(mine?.submitted),
+      done: Boolean(mine),
       label: 'Submit what you are looking for in this hire',
       note: open
         ? 'The input window is open. Save a private draft as often as you like; submit when you are ready.'
-        : (mine?.submitted ? 'Counted in the tally.' : 'The input window is not open. The search manager opens it.'),
+        : (mine ? 'Counted in the tally.' : 'The input window is not open. The account manager opens it.'),
       go: open && canOpenStep('intake') ? 'intake-mine' : null,
       goLabel: 'Open your questionnaire'
     });
@@ -3744,7 +3761,7 @@ function checklistItems(s){
       done: Boolean(s.candidates?.length && Object.keys(s.scores?.[state.user?.id] || {}).length),
       label: 'Score the candidates',
       note: s.candidates?.length
-        ? 'Each person scores privately. The search manager decides when the panel sees each other.'
+        ? 'Each person scores privately. The account manager decides when the panel sees each other.'
         : 'Nothing to score yet. Candidates appear here once the search team adds them.',
       go: s.candidates?.length && canOpenStep('screen') ? 'screen' : null,
       goLabel: 'Open candidates'
@@ -3783,7 +3800,7 @@ function checklistItems(s){
     label: 'Publish the public job posting',
     note: s.posting?.published
       ? (s.posting.accepting ? 'Live and accepting applications.' : 'Live, not accepting applications.')
-      : 'Optional. Nothing is public until the search manager publishes it.',
+      : 'Optional. Nothing is public until the account manager publishes it.',
     go: 'posting', goLabel: 'Open Public posting'
   });
   items.push({
@@ -4480,7 +4497,7 @@ function vTeam(){
     <div class="band"><div class="wrap stack">
       ${you().consultant && !you().member ? `<div class="notice notice--info"><div>
         <div class="notice__t">You are not on this search</div>
-        <div class="notice__b">You can read and edit it as a consultant, but adding people and running intake belong to whoever holds the account. Join the file to take it over.
+        <div class="notice__b">You can read and edit it as a consultant, but adding people and running intake belong to the account manager. Join the roster to contribute; the account manager or an organization administrator can hand over the account.
           <button class="btn btn--secondary btn--sm" data-act="join-search">Join this search</button></div>
       </div></div>` : ''}
       ${mgr ? `<div class="spec"><div class="spec__bar">Account manager</div>
@@ -4491,7 +4508,7 @@ function vTeam(){
             <div class="rosterrow__tags">${pill('ok','Runs this search')}</div>
             <div class="rosterrow__acts"></div>
           </div>
-          <p class="t-small">${esc(SEARCH_ROLE.manager.hint)} Any consultant on the roster can take the account; hand it over from the list below.</p>
+          <p class="t-small">${esc(SEARCH_ROLE.manager.hint)} The account manager or an organization administrator can hand over the account from the list below.</p>
         </div></div>` : ''}
 
       <div class="spec"><div class="spec__bar">Search staff and committee ${pill(committeeCount?'ok':'wait', committeeCount+(committeeCount===1?' committee member':' committee members'))}</div>
@@ -4614,6 +4631,13 @@ function intakeDraft(){
       }
     }
   }
+  // A legacy search can gain its standard qualities while this tab is open.
+  // Reconcile by identity so locally typed ratings and explanations survive.
+  for (const q of state.search?.intake?.qualities || []) {
+    if (!state.intake.items.some(i => i.kind === q.kind && i.label === q.label)) {
+      state.intake.items.push({ ...q, weight:null, note:'' });
+    }
+  }
   return state.intake;
 }
 
@@ -4728,6 +4752,9 @@ function vIntakeAnswer(){
       'Describe the candidate you want to hire: essential skills, leadership traits, current challenges, and future opportunities. '
       + 'Rate how much each priority matters to you. The account manager uses the committee’s submitted answers to build and adopt the candidate profile in Step '+stepNo('profile')+'.')}
     <div class="band"><div class="wrap stack">
+      ${!open ? `<div class="notice notice--info" role="status"><div><div class="notice__t">${closed?'Questionnaire closed':'Preview only — answers are not open'}</div>
+        <div class="notice__b">${closed?'Ask the account manager to reopen collection if you need to revise your answer.':'The controls below show the questions. You can answer when the account manager opens collection.'}</div>
+        <button type="button" class="btn btn--secondary btn--sm" data-act="check-intake">Check again</button></div></div>` : ''}
       <p class="t-small">Answer for yourself. Saved drafts are private to you. Submitted answers are visible to the search team; the rest of the committee can read them after the account manager closes the response window.</p>
       ${(s.criteria||[]).length && canOpenStep('profile') ? `<div class="notice notice--ok" role="status"><div>
         <div class="notice__t">A candidate profile has been adopted</div>
@@ -4735,14 +4762,14 @@ function vIntakeAnswer(){
       </div></div>` : ''}
       ${(intake.qualities || []).length ? `<div class="notice notice--info"><div>
         <div class="notice__t">Rank the shared candidate qualities</div>
-        <div class="notice__b">Every member, including the administrator, rates the same qualities independently. Choose 1 (nice to have) through 5 (decisive) for each; equal ratings are allowed. You can also suggest additional qualities. Submitted ratings are aggregated for the account manager to review and adopt before recruiting.</div>
+        <div class="notice__b">Every rostered member rates the same qualities independently. Choose 1 (nice to have) through 5 (decisive) for each; equal ratings are allowed. Submitted ratings are aggregated for the account manager to review and adopt before recruiting.</div>
       </div></div>` : ''}
       ${intakeConflictPanel()}
       ${!open ? `<div class="notice notice--${closed?'ok':'info'}"><div>
         <div class="notice__t">${closed ? 'Intake is closed' : 'Intake has not opened yet'}</div>
         <div class="notice__b">${closed
           ? 'The window is shut and the committee’s answers have been read together. Ask '+esc(s.accountManager?.name||'the account manager')+' if you still need to add something.'
-          : esc(s.accountManager?.name||'The account manager')+' must open the questionnaire before you can answer. Your ratings and explanations belong here in Step '+stepNo('intake')+'. Step '+stepNo('profile')+' is the administrator’s review of the committee’s answers.'}</div>
+          : esc(s.accountManager?.name||'The account manager')+' must open the questionnaire before you can answer. Your ratings and explanations belong here in Step '+stepNo('intake')+'. Step '+stepNo('profile')+' is the account manager’s review of the committee’s answers.'}</div>
       </div></div>` : ''}
       ${mine ? `<div class="notice notice--${intakeHasUnsubmitted()?'wait':'ok'}"><div>
         <div class="notice__t">${intakeHasUnsubmitted() ? 'Submitted — you have unpublished changes' : 'Your answers are in'}</div>
@@ -4796,7 +4823,7 @@ function vIntakeAnswer(){
       ${closed && mine ? `<section class="spec"><div class="spec__bar">Your submitted answers</div><div class="spec__body stack">
         ${(mine.items || []).map(item => `<div><b>${esc(item.label)}</b> <span class="t-small">Importance: ${esc(item.weight)} of 5</span>${item.note ? `<p class="t-small">${esc(item.note)}</p>` : ''}</div>`).join('')}
       </div></section>` : ''}
-      ${!open ? `<p class="t-small">The administrator reviews the combined ratings, explanations, and community needs in Step ${stepNo('profile')}. You do not need to complete another questionnaire there.</p>` : ''}
+      ${!open ? `<p class="t-small">The account manager reviews the combined ratings, explanations, and community needs in Step ${stepNo('profile')}. You do not need to complete another questionnaire there.</p>` : ''}
       ${!open && you().consultant ? stepFooter('intake') : ''}
     </div></div>`);
 }
@@ -4847,7 +4874,7 @@ function consensusPanels(agg, showEmpty=true, choose=false){
     const list = agg.byKind[k] || [];
     return `<div class="spec"><div class="spec__bar">${esc(label)} ${pill(list.length>=3?'ok':'wait', list.length+' named')}</div>
       <div class="spec__body stack">
-        ${choose ? `<p class="t-small">Choose 3 to 5 favorites. The five highest-scoring qualities are initially selected. Review ties and explanations before deciding.</p>` : ''}
+        ${choose ? `<p class="t-small" role="status"><span data-favorite-count="${k}">${favoritesFor(agg).filter(key => list.some(e => e.key === key)).length}</span> of 3–5 favorites selected for this category. These choices are a preview and are recorded only when you adopt the profile. The five highest-scoring qualities are initially selected. Review ties and explanations before deciding.</p>` : ''}
         ${list.map((e,i) => consensusMeter(e, agg.submitted, choose ? favoritesFor(agg) : null, choose && i < 5)).join('') || '<div class="t-small">Nobody named anything here. You will have to write these yourself.</div>'}
       </div></div>`;
   }).join('') + (agg.voices.length ? `<div class="spec"><div class="spec__bar">In their own words</div>
@@ -4917,7 +4944,8 @@ function sharedQualitiesPanel(){
   const intake = state.search.intake || {};
   return '<section class="spec"><div class="spec__bar">Committee questionnaire</div><div class="spec__body stack">'
     + '<p>Everyone answers the same four questions about skills, leadership traits, current challenges, and future opportunities. Each quality is rated independently from 1 to 5, with an Explain why field.</p>'
-    + '<p>The questionnaire supplies the qualities. Administrators manage the response window, then review the highest-scoring qualities in Step 3; they do not choose what the committee rates.</p>'
+    + '<p>The questionnaire supplies the qualities. The account manager opens and closes the response window, then reviews the highest-scoring qualities in Step 3.</p>'
+    + '<ul class="stack">'+(intake.qualities || []).map(q => '<li><b>'+esc(KIND[q.kind]?.label || q.kind)+'</b>: '+esc(q.label)+'</li>').join('')+'</ul>'
     + (intake.questionnaireVersion ? '<p class="t-small">Standard questionnaire: '+(intake.qualities || []).length+' qualities. Scores use the average of submitted ratings; drafts are excluded.</p>' : '<p class="t-small">This search already began an earlier questionnaire. Its questions and answers are preserved so existing responses remain comparable.</p>')
     + '</div></section>';
 }
@@ -4932,7 +4960,7 @@ function questionnaireChoice(){
       <div class="row">${skipped
         ? '<button type="button" class="btn btn--secondary" data-act="include-questionnaire">Include committee questionnaire</button>'
         : `<span class="t-small">Included in this search.</span><button type="button" class="btn btn--secondary" data-act="skip-questionnaire" ${!confirmed || submitted?'disabled':''}>Skip questionnaire and continue</button>`}</div>
-      ${!skipped && !confirmed ? '<p class="t-small">Confirm the roster in Step 1 first. A search can have just the account manager.</p>' : ''}
+      ${!skipped && !confirmed ? '<p class="t-small">The account manager must confirm the roster in Step 1 first. A search can have just the account manager.</p>' : ''}
       ${!skipped && submitted ? '<p class="t-small">Answers have already been submitted. Review them and close the response window to continue.</p>' : ''}
     </div></section>`;
 }
@@ -4961,11 +4989,16 @@ function vIntakeManage(){
   return shell(`
     ${head('Step '+stepNo('intake'), 'Committee questionnaire',
       'Collect what each committee member wants in the candidate profile: essential skills, leadership traits, current challenges, and future opportunities. In Step '+stepNo('profile')+', review these priorities together and adopt the profile used to evaluate candidates.',
-      `${!open && !closed ? `<button class="btn btn--primary" data-act="intake-open" ${confirmed?'':'disabled'}>Open the window</button>` : ''}
-       ${open ? `<button class="btn btn--primary" data-act="intake-close">Close and read the room</button>` : ''}
-       ${closed ? `<button class="btn btn--secondary" data-act="intake-open">Reopen the window</button>` : ''}
+      `${you().member && open ? `<button class="btn btn--primary" data-go="intake-mine">Answer my questionnaire</button>` : ''}
+       ${canManage() && !open && !closed ? `<button class="btn btn--primary" data-act="intake-open" ${confirmed?'':'disabled'}>Open the window</button>` : ''}
+       ${canManage() && open ? `<button class="btn btn--primary" data-act="intake-close">Close and read the room</button>` : ''}
+       ${canManage() && closed ? `<button class="btn btn--secondary" data-act="intake-open" ${confirmed?'':'disabled'}>Reopen the window</button>` : ''}
        ${nextBtn('intake')}`)}
     <div class="band"><div class="wrap stack">
+      ${!canManage() ? `<div class="notice notice--info"><div><div class="notice__t">The account manager controls collection</div><div class="notice__b">${esc(askManager())}</div></div></div>` : ''}
+      ${!you().member ? `<div class="notice notice--info"><div><div class="notice__t">You are not on this search roster</div><div class="notice__b">You can inspect the questions here. Join the search before answering your own questionnaire.</div>
+        <button type="button" class="btn btn--secondary btn--sm" data-act="join-search">Join this search</button></div></div>` : ''}
+      <button type="button" class="btn btn--secondary btn--sm" data-act="check-intake">Check again</button>
       ${questionnaireChoice()}
       ${sharedQualitiesPanel()}
       ${you().member ? `<section class="spec"><div class="spec__bar">Your input for the candidate profile</div>
@@ -4975,7 +5008,7 @@ function vIntakeManage(){
         </div></section>` : ''}
       ${!confirmed ? `<div class="notice notice--info"><div>
         <div class="notice__t">Confirm the roster first</div>
-        <div class="notice__b">Anyone added after the window opens would miss it. Finish Step ${stepNo('team')}, then open intake.</div>
+        <div class="notice__b">Anyone added after the window opens would miss it. ${canManage()?'Finish':'Ask the account manager to finish'} Step ${stepNo('team')}, then open intake. <button type="button" class="btn btn--secondary btn--sm" data-go="team">Open the roster</button></div>
       </div></div>` : ''}
 
       <div class="tiles">
@@ -5021,7 +5054,7 @@ function vIntakeManage(){
         <div class="notice__b">${esc(intake.completedEmpty.byName||'The account manager')} recorded this on ${esc(String(intake.completedEmpty.at||'').slice(0,10))}: “${esc(intake.completedEmpty.reason)}”. No responses were collected.</div>
       </div></div>` : ''}
 
-      <section class="spec"><div class="spec__bar">Next: administrator review</div>
+      <section class="spec"><div class="spec__bar">Next: account manager review</div>
         <div class="spec__body stack"><p>Step ${stepNo('profile')} brings together the committee’s ratings, explanations, and community needs. Review and adopt the candidate profile there.</p>
           <div class="row"><button type="button" class="btn btn--primary" data-go="profile">Review committee input</button></div>
         </div>
@@ -5034,7 +5067,8 @@ function vIntake(){
   if (state.search.intake?.skipped) return vIntakeSkipped();
   // A committee member only ever has the answer page. A consultant gets the
   // facilitator view, and reaches their own form from the prompt on it.
-  if (!you().consultant || state.view === 'intake-mine') return vIntakeAnswer();
+  if (state.view === 'intake-mine' && you().member) return vIntakeAnswer();
+  if (!you().consultant) return vIntakeAnswer();
   return vIntakeManage();
 }
 
@@ -5165,7 +5199,7 @@ function vProfile(){
   if (!canEdit()) {
     return shell(`
       ${head('Step '+stepNo('profile'),'Adopted candidate profile',
-        'The administrator reviews the committee’s ratings, explanations, and community needs here, then adopts the profile. Your input is collected in Step '+stepNo('intake')+'; this page is read-only for committee members.')}
+        'The account manager reviews the committee’s ratings, explanations, and community needs here, then adopts the profile. Your input is collected in Step '+stepNo('intake')+'; this page is read-only for committee members.')}
       <div class="band"><div class="wrap stack">
         ${s.profileWithheld ? `<div class="notice notice--info"><div>
           <div class="notice__t">Not published yet</div>
@@ -5206,6 +5240,7 @@ function vProfile(){
     return shell(`${head('Step '+stepNo('profile'), 'Review committee input', 'Evaluate the committee’s view of the candidate and the community’s needs, then adopt the profile that will guide recruiting and candidate review.')}
       <div class="band"><div class="wrap stack">
         ${committeeReviewPanel()}
+        ${!canManage() ? `<div class="notice notice--info"><div><div class="notice__t">The account manager adopts the profile</div><div class="notice__b">${esc(askManager())} You can inspect the committee input here and prepare the profile wording with them.</div></div></div>` : ''}
         ${s.intake?.status === 'closed' && !s.intake?.questionnaireVersion ? `<button type="button" class="btn btn--secondary" data-act="edit-final-profile">Write the final profile manually</button>` : ''}
       </div></div>`);
   }
@@ -6743,8 +6778,8 @@ function vPerson(){
   const s = state.search;
   const c = (s.candidates||[]).find(x=>x.id===state.sel);
   if (!c) return vScreen();
-  const mine = ((s.scores||{})[state.user.id]||{})[c.id] || {};
-  const note = (((s.notesBy||{})[state.user.id]||{})[c.id]) || '';
+  const mine = state.scoreDraft?.cid === c.id ? state.scoreDraft.scores : (((s.scores||{})[state.user.id]||{})[c.id] || {});
+  const note = state.scoreDraft?.cid === c.id ? state.scoreDraft.note : ((((s.notesBy||{})[state.user.id]||{})[c.id]) || '');
   const sealed = !s.released;
   const others = Object.entries(s.scores||{})
     .filter(([uid]) => uid !== state.user.id)
@@ -6819,6 +6854,13 @@ function vPerson(){
         <div class="notice__t">${esc(concluded)}</div>
         <div class="notice__b">Scores already recorded stay on the file as evidence of how the committee worked.
           This candidate cannot be advanced or newly evaluated while that outcome stands.</div></div></div>` : ''}
+      ${state.scoreConflict?.cid === c.id ? `<div class="notice notice--wait" role="alert"><div>
+        <div class="notice__t">Your ratings are still here</div>
+        <div class="notice__b">${esc(state.scoreConflict.message)} Review the current criteria and your entries below. Your typed ratings are retained here, including any criterion that was removed:
+          <ul>${Object.entries(state.scoreDraft?.scores || {}).map(([id,value]) => `<li>${esc(state.scoreDraft?.labels?.[id] || id)}: ${esc(value)} of 5</li>`).join('')}</ul>
+          The latest saved ratings are ${esc(JSON.stringify(state.scoreConflict.current.scores || {}))}; latest note: ${esc(state.scoreConflict.current.note || '(none)')}.</div>
+        <button type="button" class="btn btn--secondary" data-act="retry-score">Save my reviewed ratings</button>
+      </div></div>` : ''}
       <div data-tabpanel="person:review" role="tabpanel" id="panel-person-review" aria-labelledby="tab-person-review" tabindex="0" class="stack"${(state.tab?.person||'review')==='review'?'':' hidden'}>
         ${sealed?`<div class="seal">${ico('lock')}<div><div class="empty__t">Other scores are sealed</div><div class="t-small">Enter your scores. You will see the rest of the panel after the account manager releases scores.</div></div></div>`:''}
         <div class="colswitch" role="group" aria-label="What to show">
@@ -6941,7 +6983,7 @@ function vApply(){
       <div class="applybar">
         <button class="btn btn--primary" type="submit">Submit questionnaire</button>
         <button class="btn btn--secondary" type="button" data-act="save-apply-draft" data-which="${which}">Save draft</button>
-        <span class="t-small" id="applycount" role="status" data-total="${questions.length}">0 of ${questions.length} answered</span>
+        <span class="t-small" id="applycount" role="status" data-total="${questions.length}">${questions.filter(q => String(draftAnswers['q'+q.n] || '').trim()).length} of ${questions.length} answered</span>
       </div>
       <p class="t-small" id="apply-draft-status" role="status">${draftStamp}</p>
     </form>
@@ -7048,7 +7090,7 @@ function vArchives(){
           <div class="hubrow__act">${s.mayRestore
             ? withTip(`<button type="button" class="btn btn--secondary btn--sm" data-act="restore-search" data-id="${esc(s.id)}">Restore search</button>`,
               'Put this search back on the book. Candidate links stay revoked; reissue a link separately if needed.')
-            : `<span class="t-small">${esc(s.managerName ? s.managerName + ' ran this search and restores it.' : 'Its search manager restores it.')}</span>`}</div>
+            : `<span class="t-small">${esc(s.managerName ? s.managerName + ' ran this search and restores it.' : 'Its account manager restores it.')}</span>`}</div>
         </div>
       </div></div>`).join('')
       : emptyState('No archived searches',
@@ -7127,13 +7169,13 @@ function historyRecord(entry){
  * which invitations are still out. Membership and pending invitation are shown
  * as two separate lists because they are two different states — somebody who
  * has been emailed is not in the firm yet, and treating them as if they were is
- * how a search manager ends up waiting on access that was never granted.
+ * how an account manager ends up waiting on access that was never granted.
  * ========================================================================= */
 
 /* ===========================================================================
  * The public job posting
  *
- * Consultants write and preview it; the search manager publishes. The screen
+ * Consultants write and preview it; the account manager publishes. The screen
  * draws that split from the authority answers the server sends rather than
  * from a role name, so the buttons and the refusals cannot disagree.
  *
@@ -7566,8 +7608,8 @@ function paintHelpControl(){
 function vHelp(){
   return shell(`
     ${head('Workspace', 'Help & user guide',
-      'Task-by-task instructions for Slate, written against this build. Every screen also has a '
-      + '<b>Help with this page</b> control that opens the right article beside your work without disturbing it.')}
+      'Task-by-task instructions for Slate, written against this build. Supported work pages have a '
+      + '<b>Help with this page</b> control that opens the relevant article beside your work.')}
     <div class="band"><div class="wrap stack">
       ${state.search && checklistDismissed() ? `<div class="notice notice--info" role="status"><div>
         <div class="notice__t">The getting-started checklist is hidden on ${esc(state.search.client || 'this search')}</div>
@@ -7621,7 +7663,7 @@ function vTeamAccess(){
 
   return shell(`
     ${head('Workspace', 'Team & access',
-      'Who is in ' + esc(orgName()) + ', and what they may do here. Membership opens the workspace; a search manager still adds people to individual searches.')}
+      'Who is in ' + esc(orgName()) + ', and what they may do here. Membership opens the workspace; an account manager still adds people to individual searches.')}
     <div class="band"><div class="wrap stack">
       ${state.teamError ? `<div class="notice notice--wait" role="alert"><div>
         <div class="notice__t">This list could not be loaded</div>
@@ -8058,6 +8100,7 @@ async function persistProfile(moveOn){
   }
   await withBusy(async () => {
     state.search = await api('/api/searches/'+state.search.id+'/profile', { method:'PUT', body:{ criteria } });
+    state.adoptPlan = null;
     if (moveOn){
       const next = nextOf('profile');
       const dest = next?.key || 'overview';
@@ -8286,7 +8329,7 @@ document.addEventListener('click', async e => {
     await withBusy(async () => {
       await loadSearch(id);
     }, waitSave('Opening the search'));
-    if (state.search && state.search.id === id) go('overview', {}, { fresh:true });
+    if (state.search && state.search.id === id) go(t.dataset.answer ? 'intake-mine' : 'overview', {}, { fresh:true });
     return;
   }
   if (t.dataset.cand){
@@ -8462,6 +8505,16 @@ document.addEventListener('click', async e => {
     state.dirty = false;
     await withBusy(async () => {
       if (!(await refreshOpenSearch())) toast('The search still could not be refreshed. Try again shortly.');
+    }, false);
+    return;
+  }
+  if (act==='check-intake') {
+    if (state.dirty) { toast('Save or finish your edits before checking for a new questionnaire status.'); return; }
+    const ticket = navSeq;
+    await withBusy(async () => {
+      const updated = await refreshOpenSearch(() => ticket !== navSeq);
+      if (updated) toast('Questionnaire status checked.');
+      else toast('The latest status could not be shown. Try again.');
     }, false);
     return;
   }
@@ -8949,10 +9002,6 @@ document.addEventListener('click', async e => {
     });
     return;
   }
-  if (act==='create'){
-    await createSearch();
-    return;
-  }
   /* --- Step 1, the roster ------------------------------------------------- */
   if (act==='confirm-team'){
     const confirmed = !state.search.team?.confirmedAt;
@@ -9126,11 +9175,20 @@ document.addEventListener('click', async e => {
   if (act==='profile-favorite'){
     collectCriteria();
     const selected = favoritesFor(state.search.consensus);
+    const kind = Object.entries(state.search.consensus.byKind || {}).find(([,rows]) => rows.some(row => row.key === t.dataset.key))?.[0];
+    const count = selected.filter(key => (state.search.consensus.byKind?.[kind] || []).some(row => row.key === key)).length;
+    if (t.checked && count >= 5) {
+      t.checked = false;
+      toast('Choose no more than 5 favorites in this category. Remove one before adding another.');
+      return;
+    }
     state.profileFavorites.keys = t.checked ? [...new Set([...selected, t.dataset.key])] : selected.filter(key => key !== t.dataset.key);
     state.adoptPlan = null;
     state.dirty = true;
     $('#adoptplan')?.remove();
     markUnsaved();
+    const counter = $('[data-favorite-count="'+kind+'"]');
+    if (counter) counter.textContent = String(count + (t.checked ? 1 : -1));
     return;
   }
   if (act==='edit-final-profile'){
@@ -9138,7 +9196,7 @@ document.addEventListener('click', async e => {
     render();
     return;
   }
-  if (act==='adopt-preview' || act==='adopt-consensus'){
+  if (act==='adopt-preview'){
     await refreshAdoptPlan();
     if (state.adoptPlan && state.view !== 'profile') go('profile');
     return;
@@ -9222,13 +9280,6 @@ document.addEventListener('click', async e => {
     await withBusy(
       () => reconcileResearch({ searchId: state.search.id, key }),
       waitSave('Checking what happened to this research'));
-    return;
-  }
-  if (act==='reload-search'){
-    await withBusy(async () => {
-      state.research.error = null;
-      await loadSearch(state.search.id);
-    }, waitSave('Reloading this search'));
     return;
   }
   if (act==='research-apply'){
@@ -9397,8 +9448,8 @@ document.addEventListener('click', async e => {
     // Answers typed into the intake form but never saved would otherwise
     // vanish on the way to the next step.
     if (from === 'intake' && state.intake) {
-      const typed = collectIntakeText().items.some(i => String(i.label||'').trim());
-      if (typed && !mySubmission()?.submitted &&
+      collectIntakeText();
+      if (!mySubmission() && state.dirty &&
           !confirm('Your answers are not submitted yet. Leave this step without submitting them?')) return;
     }
     if ($('#edit-'+from) || $('#art-'+from)){
@@ -9527,14 +9578,14 @@ document.addEventListener('click', async e => {
     });
     return;
   }
-  if (act==='advance-semi' || act==='advance-final'){
+  if (act==='advance-final'){
     const cid = t.dataset.cid;
-    const stage = act==='advance-semi' ? 'semifinalist' : 'finalist';
+    const stage = 'finalist';
     const who = (state.search?.candidates||[]).find(x => x.id===cid)?.name || 'this candidate';
     if (!confirm('Advance '+who+' to '+stage+'?')) return;
     await withBusy(async () => {
       state.search = await api('/api/searches/'+state.search.id+'/candidates/'+cid, { method:'PATCH', body:{ stage } });
-      toast(stage==='semifinalist' ? 'Advanced to semifinalist.' : 'Advanced to finalist.');
+      toast('Advanced to finalist.');
     });
     return;
   }
@@ -9628,6 +9679,9 @@ document.addEventListener('click', async e => {
   if (act==='save-score'){
     await saveScores();
   }
+  if (act==='retry-score'){
+    await saveScores();
+  }
 });
 
 /**
@@ -9640,9 +9694,28 @@ async function saveScores(){
   const scores = {};
   $$('[data-score][aria-pressed="true"]').forEach(b => { scores[b.dataset.score] = Number(b.dataset.val); });
   const note = $('#cnote')?.value || '';
+  const cid = state.sel;
+  state.scoreDraft = { cid, scores, note,
+    labels:Object.fromEntries((state.search.criteria || []).map(criterion => [criterion.id, criterion.label])) };
   let saved = false;
   await withBusy(async () => {
-    state.search = await api('/api/searches/'+state.search.id+'/scores/'+state.sel, { method:'PUT', body:{ scores, note } });
+    const revision = state.scoreConflict?.cid === cid
+      ? state.scoreConflict.current.version
+      : String(state.search.profileRevision || 1) + ':' + Number(state.search.scoreRevisions?.[state.user.id]?.[cid] || 1);
+    try {
+      state.search = await api('/api/searches/'+state.search.id+'/scores/'+cid, {
+        method:'PUT', headers:{ 'if-match-score':revision }, body:{ scores, note }
+      });
+    } catch (error) {
+      if (error.code === 'STALE_SCORE') {
+        const latest = await api('/api/searches/'+state.search.id);
+        state.search = latest;
+        state.scoreConflict = { cid, message:error.message, current:error.detail.current };
+        render();
+      }
+      throw error;
+    }
+    state.scoreDraft = null; state.scoreConflict = null;
     saved = true;
     toast('Your scores are on the file.');
   });

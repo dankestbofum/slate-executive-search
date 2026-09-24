@@ -309,6 +309,7 @@ function painted(req, search){
   out.projectAccess = projectEntitlements.status(search, db.db.projectPurchases);
   out.consensus = consensusFor(search, req.access);
   const staff = db.isStaff(req.access);
+  if (!staff) out.projectAccess = { state:out.projectAccess.state };
   // Both data paths, not just the page: hiding the profile screen while the
   // criteria still ride along on the search response would move the disclosure
   // rather than close it.
@@ -347,18 +348,26 @@ function painted(req, search){
   }
   // Which workspace this record belongs to, so the client can refuse to paint
   // it under a different one after a switch.
-  out.organization = req.access?.organization || null;
+  out.organization = staff ? (req.access?.organization || null)
+    : (req.access?.organization ? { id:req.access.organization.id, name:req.access.organization.name } : null);
   // Places that are spoken for but not yet taken. On every read, not only on
   // the response to adding somebody: a manager who opens the Committee screen
   // tomorrow has to see who is still outstanding.
-  out.pending = heldPlaces(search);
+  out.pending = staff ? heldPlaces(search) : [];
   // Which authority facts are confirmed and which are still assertions. Shown
   // on every read so the gap is visible while the work is happening, not
   // discovered when the county reads the brochure.
-  out.factStatus = jurisdictions.factStatus(search);
+  out.factStatus = staff ? jurisdictions.factStatus(search) : null;
   // How the search concluded, if it has. Kept separate from Archive: filing a
   // search away is not the same statement as the work having finished.
   out.lifecycle = disposition.summary(search);
+  if (!staff) {
+    // Closure reasons and the final-document list are working records. Members
+    // need the lifecycle state, not the private explanation behind it.
+    out.lifecycle = { status:out.lifecycle.status, frozen:out.lifecycle.frozen,
+      closedAt:out.lifecycle.closedAt };
+    out.projectPayment = null;
+  }
   // The research operation this search has in flight, or the last one it ran.
   // Carried on every read so refreshing the page, or coming back to it
   // tomorrow, reconnects to the same operation instead of losing it or
@@ -560,6 +569,7 @@ const STOP_WORK_PATH = /\/research-jobs\/[^/]+\/cancel\/?$/;
 // (CA-12). These routes carry their own per-member precondition instead, and
 // re-check membership and the window themselves. Nothing else is relaxed.
 const PERSONAL_INTAKE_PATH = /^\/api\/searches\/[^/]+\/intake(\/withdraw)?\/?$/;
+const PERSONAL_SCORE_PATH = /^\/api\/searches\/[^/]+\/scores\/[^/]+\/?$/;
 
 function requireSearch(req, res, next){
   const s = db.findSearch(req.params.id);
@@ -586,7 +596,8 @@ function requireSearch(req, res, next){
   // been closed, without first reloading to collect a fresh revision — the
   // alternative is a paid operation nobody can stop.
   const stopsWork = STOP_WORK_PATH.test(req.path);
-  const personal = req.method !== 'GET' && PERSONAL_INTAKE_PATH.test(req.path);
+  const personal = req.method !== 'GET' && (PERSONAL_INTAKE_PATH.test(req.path)
+    || (PERSONAL_SCORE_PATH.test(req.path) && req.headers['if-match-score'] !== undefined));
   if (!reads && !stopsWork && !personal && req.headers['if-match'] === undefined) {
     return res.status(428).json({ error:'Reload this search before saving.', code:'REVISION_REQUIRED' });
   }
@@ -3378,6 +3389,9 @@ app.post('/api/searches/:id/send2', ...requireWorkspace, requireSearch, requireE
 app.put('/api/searches/:id/scores/:cid', ...requireWorkspace, requireSearch, (req, res) => {
   const c = req.search.candidates.find(x=>x.id===req.params.cid);
   if (!c) return res.status(404).json({ error:'Candidate not found.' });
+  const scoreClaim = req.headers['if-match-score'];
+  const ownRevision = Number((req.search.scoreRevisions || {})[req.user.id]?.[c.id] || 1);
+  const scoreVersion = String(req.search.profileRevision || 1) + ':' + ownRevision;
   // Scores already recorded stay: they are evidence of how the committee
   // worked. What stops is new evaluation of someone whose participation ended.
   const concluded = disposition.blocksAdvancement(c);
@@ -3396,12 +3410,34 @@ app.put('/api/searches/:id/scores/:cid', ...requireWorkspace, requireSearch, (re
       || Object.entries(scores).some(([id, n]) => !allowed.has(id) || !Number.isInteger(n) || n < 1 || n > 5)) {
     return res.status(400).json({ error:'Scores must use current criterion IDs and whole numbers from 1 to 5.' });
   }
+  if (scoreClaim !== undefined && scoreClaim !== scoreVersion) {
+    const priorScores = (req.search.scores || {})[req.user.id]?.[c.id] || {};
+    const priorNote = (req.search.notesBy || {})[req.user.id]?.[c.id] || '';
+    // A response may be lost after a successful write. An identical retry is
+    // safe and confirms the saved record without creating another revision.
+    if (scoreClaim.split(':')[0] === String(req.search.profileRevision || 1)
+        && Number(scoreClaim.split(':')[1]) === ownRevision - 1
+        && JSON.stringify(priorScores) === JSON.stringify(scores)
+        && (req.body?.note == null || String(req.body.note) === priorNote)) {
+      return res.json(painted(req, req.search));
+    }
+    return res.status(409).json({
+      code:'STALE_SCORE',
+      error: scoreClaim.split(':')[0] !== String(req.search.profileRevision || 1)
+        ? 'The candidate profile changed. Review the current criteria before saving these ratings.'
+        : 'Your scores for this candidate changed in another tab. Review both versions before saving again.',
+      current: { scores:priorScores, note:priorNote, version:scoreVersion }
+    });
+  }
   if (!req.search.scores[req.user.id]) req.search.scores[req.user.id] = {};
   req.search.scores[req.user.id][c.id] = req.body?.scores || {};
   if (req.body?.note != null) {
     if (!req.search.notesBy[req.user.id]) req.search.notesBy[req.user.id] = {};
     req.search.notesBy[req.user.id][c.id] = String(req.body.note);
   }
+  req.search.scoreRevisions ||= {};
+  req.search.scoreRevisions[req.user.id] ||= {};
+  req.search.scoreRevisions[req.user.id][c.id] = ownRevision + 1;
   db.touch(req.search, req.user, 'scored '+c.name);
   db.persist();
   res.json(painted(req, req.search));

@@ -127,7 +127,7 @@ const DEFAULT_PACKAGE = 'executive';
 // step complete. Slate is the record, not the worker.
 const STEPS = [
   { n:1,  key:'team',       t:'Add the search committee and name the account manager', opt:false, phase:0, needs:[], pkg:'basic' },
-  { n:2,  key:'intake',     t:'Gather candidate profile input', opt:false, phase:0, needs:['team'], pkg:'basic' },
+  { n:2,  key:'intake',     t:'Committee questionnaire', opt:false, phase:0, needs:['team'], pkg:'basic' },
   { n:3,  key:'profile',    t:'Adopt the candidate profile', opt:false, phase:1, needs:['intake'], pkg:'basic' },
   { n:4,  key:'community',  t:'Develop community and form-of-government profile', opt:false, phase:1, needs:['profile'], pkg:'enhanced' },
   { n:5,  key:'survey1',    t:'Develop initial candidate survey', opt:false, phase:1, needs:['profile'], pkg:'basic' },

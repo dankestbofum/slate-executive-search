@@ -47,6 +47,7 @@ test('a candidate saves a draft and gets the same answers after reload', async (
 
   await page.reload();
   await expect(answer).toHaveValue('Managed a synthetic $40 million operating budget.');
+  await expect(page.locator('#applycount')).toHaveText('1 of 2 answered');
   await expect(page.locator('#apply-draft-status')).toContainText('Draft saved');
 });
 

@@ -1169,8 +1169,14 @@ details.toggle[open] summary::before{transform:rotate(90deg) translateX(-1px)}
 .band .candtable tr,
 .band .hubrow,
 .band .scorerow,
-.band .field{scroll-margin-bottom:96px}
-.band:has(.actionbar){padding-bottom:var(--s-7)}
+.band .field{scroll-margin-bottom:180px}
+.band:has(.actionbar){padding-bottom:180px}
+@media (max-width:480px){
+  /* A wrapped action bar can occupy much of a narrow viewport and intercept
+     rating controls, especially above an on-screen keyboard. */
+  .actionbar{position:static}
+  .band:has(.actionbar){padding-bottom:var(--s-7)}
+}
 
 /* --- the portfolio table -------------------------------------------------- */
 .hometable td{font-size:var(--ws-label)}
