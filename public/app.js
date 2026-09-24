@@ -9168,7 +9168,9 @@ document.addEventListener('click', async e => {
         toast(gaps.length
           ? 'Profile saved from committee input. It is still short in '+gaps.map(g=>g.label.toLowerCase()).join(', ')+' — write those yourself.'
           : 'Profile saved from committee input. Edit the weights and wording, then save.');
-        go('profile');
+        // Adoption already returned the current search. Finish navigation before
+        // releasing the editor; a late refresh could replace the first edit.
+        await go('profile', {}, { fresh:true });
       } catch (err) {
         if (err.code === 'STALE_SOURCE' || err.code === 'STALE_PROFILE') {
           state.adoptPlan = null;

@@ -174,7 +174,7 @@ test('standard questionnaire feeds scored recommendations, reviewed favorites an
     await extra.locator('[data-w="4"]').click();
     await manager.getByRole('button',{name:'Save profile',exact:true}).click();
     await expect(manager.locator('#toast')).toContainText('Profile saved');
-    const result = await (await manager.request.get('/api/searches/'+search.id)).json();
+    const result = await (await manager.request.get('/api/searches/'+search.id,{maxRetries:1})).json();
     expect(result.criteria).toHaveLength(13);
     expect(result.criteria.find(c=>c.label==='Grant administration').from).toBe('consultant');
     expect(result.adoption.groups).toHaveLength(12);
@@ -311,8 +311,11 @@ test('an unfinished draft stays private, and renaming an adopted line keeps its 
     await expect(skillRow.locator('[data-f="label"]')).toHaveValue('Financial management');
     await expect(skillRow).toContainText('1 of 1');
     await skillRow.locator('[data-f="label"]').fill('Financial management.');
+    const savedProfile = manager.waitForResponse(r => r.url().endsWith('/api/searches/'+search.id+'/profile') && r.request().method()==='PUT');
     await manager.getByRole('button', { name: 'Save profile' }).click();
+    expect((await savedProfile).ok()).toBe(true);
     await expect(manager.locator('#toast')).toContainText('Profile saved');
+    await manager.reload();
     const renamed = manager.locator('#prof-skill .crit-row').first();
     await expect(renamed.locator('[data-f="label"]')).toHaveValue('Financial management.');
     await expect(renamed).toContainText('1 of 1');
