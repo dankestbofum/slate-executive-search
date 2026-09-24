@@ -4942,12 +4942,31 @@ function adoptPlanPanel(){
 
 function sharedQualitiesPanel(){
   const intake = state.search.intake || {};
-  return '<section class="spec"><div class="spec__bar">Committee questionnaire</div><div class="spec__body stack">'
-    + '<p>Everyone answers the same four questions about skills, leadership traits, current challenges, and future opportunities. Each quality is rated independently from 1 to 5, with an Explain why field.</p>'
-    + '<p>The questionnaire supplies the qualities. The account manager opens and closes the response window, then reviews the highest-scoring qualities in Step 3.</p>'
-    + '<ul class="stack">'+(intake.qualities || []).map(q => '<li><b>'+esc(KIND[q.kind]?.label || q.kind)+'</b>: '+esc(q.label)+'</li>').join('')+'</ul>'
-    + (intake.questionnaireVersion ? '<p class="t-small">Standard questionnaire: '+(intake.qualities || []).length+' qualities. Scores use the average of submitted ratings; drafts are excluded.</p>' : '<p class="t-small">This search already began an earlier questionnaire. Its questions and answers are preserved so existing responses remain comparable.</p>')
-    + '</div></section>';
+  const groups = Object.entries(INTAKE_ASK).map(([kind, ask]) => {
+    const qualities = (intake.qualities || []).filter(q => q.kind === kind);
+    return `<section class="spec"><div class="spec__bar">${esc(KIND[kind].plural)} · ${qualities.length}</div>
+      <div class="spec__body stack stack--tight">
+        <h3>${esc(ask.t)}</h3>
+        <p class="t-small">${esc(ask.hint)}</p>
+        <ul>${qualities.map(q => `<li>${esc(q.label)}</li>`).join('')}</ul>
+        <p class="t-small">For each quality, the member rates importance from 1 (nice to have) to 5 (decisive) and may explain why.</p>
+      </div></section>`;
+  }).join('');
+  return `<section class="stack" id="committee-questionnaire-preview" aria-label="Committee questionnaire preview">
+    <div class="spec"><div class="spec__bar">Committee questionnaire · Read-only preview</div>
+      <div class="spec__body stack stack--tight">
+        <p>These are the questions and shared qualities committee members see. This preview does not submit an answer.</p>
+        <p class="t-small">${intake.questionnaireVersion
+          ? 'Standard questionnaire: '+(intake.qualities || []).length+' shared qualities. Only submitted ratings count in the results.'
+          : 'This search began an earlier questionnaire. Its questions and answers are preserved so existing responses remain comparable.'}</p>
+      </div></div>
+    ${groups}
+    <section class="spec"><div class="spec__bar">In your own words</div><div class="spec__body stack stack--tight">
+      <p>What would make you say yes to a candidate?</p>
+      <p>What would make you say no?</p>
+      <p>Anything else the search team should know</p>
+    </div></section>
+  </section>`;
 }
 
 function questionnaireChoice(){
@@ -4986,16 +5005,33 @@ function vIntakeManage(){
   const closed = intake.status === 'closed';
   const mine = mySubmission();
   const waiting = agg?.pending || [];
+  const windowAction = canManage()
+    ? (!confirmed
+      ? '<button type="button" class="btn btn--primary btn--sm" data-go="team">Confirm the roster</button>'
+      : open
+        ? '<button type="button" class="btn btn--secondary btn--sm" data-act="intake-close">Close intake and review answers</button>'
+        : `<button type="button" class="btn btn--primary btn--sm" data-act="intake-open">${closed?'Reopen':'Open'} intake for committee input</button>`)
+    : '<button type="button" class="btn btn--secondary btn--sm" data-go="team">View the account manager and roster</button>';
   return shell(`
     ${head('Step '+stepNo('intake'), 'Committee questionnaire',
       'Collect what each committee member wants in the candidate profile: essential skills, leadership traits, current challenges, and future opportunities. In Step '+stepNo('profile')+', review these priorities together and adopt the profile used to evaluate candidates.',
       `${you().member && open ? `<button class="btn btn--primary" data-go="intake-mine">Answer my questionnaire</button>` : ''}
-       ${canManage() && !open && !closed ? `<button class="btn btn--primary" data-act="intake-open" ${confirmed?'':'disabled'}>Open the window</button>` : ''}
-       ${canManage() && open ? `<button class="btn btn--primary" data-act="intake-close">Close and read the room</button>` : ''}
-       ${canManage() && closed ? `<button class="btn btn--secondary" data-act="intake-open" ${confirmed?'':'disabled'}>Reopen the window</button>` : ''}
        ${nextBtn('intake')}`)}
     <div class="band"><div class="wrap stack">
-      ${!canManage() ? `<div class="notice notice--info"><div><div class="notice__t">The account manager controls collection</div><div class="notice__b">${esc(askManager())}</div></div></div>` : ''}
+      <div class="notice notice--${open?'ok':closed?'wait':'info'}" role="status"><div>
+        <div class="notice__t">Committee intake is ${open?'open':closed?'closed':'not open yet'}</div>
+        <div class="notice__b">${canManage()
+          ? (!confirmed
+            ? 'Confirm the search roster before '+(closed?'reopening':'opening')+' intake so everyone who should answer is included.'
+            : open
+              ? 'Committee members on the roster can answer now. Close intake when their responses are ready for review.'
+              : closed
+                ? 'Committee members cannot add or revise answers while intake is closed. Reopen it to collect more input.'
+                : 'The roster is confirmed. Open intake so committee members can answer.')
+          : esc(askManager()+' Only the account manager can '+(open?'close':closed?'reopen':'open')+' intake.')}</div>
+        ${windowAction}
+        <button type="button" class="btn btn--secondary btn--sm" data-act="jump" data-to="committee-questionnaire-preview">View questionnaire questions</button>
+      </div></div>
       ${!you().member ? `<div class="notice notice--info"><div><div class="notice__t">You are not on this search roster</div><div class="notice__b">You can inspect the questions here. Join the search before answering your own questionnaire.</div>
         <button type="button" class="btn btn--secondary btn--sm" data-act="join-search">Join this search</button></div></div>` : ''}
       <button type="button" class="btn btn--secondary btn--sm" data-act="check-intake">Check again</button>
@@ -5004,13 +5040,8 @@ function vIntakeManage(){
       ${you().member ? `<section class="spec"><div class="spec__bar">Your input for the candidate profile</div>
         <div class="spec__body stack stack--tight"><p>Use your form to name the priorities you want included and rate how much each matters. Your submitted answers contribute alongside the committee’s.</p>
           ${open ? `<div class="row"><button class="btn btn--primary" data-go="intake-mine">${mine ? 'Review my profile input' : 'Add my profile input'}</button></div>`
-            : `<p class="t-small">${closed ? 'The response window is closed. Submitted priorities are shown below.' : 'The input form becomes available when the response window opens.'}</p>`}
+            : `<p class="t-small">${closed ? 'Reopen intake to revise your answer. Submitted input appears in the candidate profile review.' : 'Your input form becomes available when the response window opens.'}</p>`}
         </div></section>` : ''}
-      ${!confirmed ? `<div class="notice notice--info"><div>
-        <div class="notice__t">Confirm the roster first</div>
-        <div class="notice__b">Anyone added after the window opens would miss it. ${canManage()?'Finish':'Ask the account manager to finish'} Step ${stepNo('team')}, then open intake. <button type="button" class="btn btn--secondary btn--sm" data-go="team">Open the roster</button></div>
-      </div></div>` : ''}
-
       <div class="tiles">
         <div class="tile"><span class="tile__k">On the search</span><span class="tile__v">${agg?agg.asked:(s.roster||[]).length}</span></div>
         <div class="tile"><span class="tile__k">Answered</span><span class="tile__v">${agg?agg.submitted:0}</span></div>
