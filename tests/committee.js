@@ -36,9 +36,10 @@ async function check(name, fn) {
 
 const sign = identity.signer();
 
-async function api(path, { auth, method = 'GET', body, revision, responseRevision } = {}) {
+async function api(path, { auth, method = 'GET', body, revision, responseRevision, scoreVersion } = {}) {
   const headers = { ...JSON_HEADERS, ...auth };
   if (revision !== undefined) headers['if-match'] = String(revision);
+  if (scoreVersion !== undefined) headers['if-match-score'] = String(scoreVersion);
   const payload = responseRevision === undefined ? body : { ...body, responseRevision };
   const res = await fetch(BASE + path, {
     method, headers, body: payload ? JSON.stringify(payload) : undefined
@@ -902,6 +903,91 @@ const archive = (id, abe) => write('/api/searches/' + id, { auth: abe, id, metho
     // CA-04: the draft button says what it does now.
     assert.match(app, /Your submitted answers stay in the tally until you choose Update my answers/);
     assert.match(app, /data-act="withdraw-intake"/);
+  });
+
+  await check('committee responses omit unpublished posting and working notes on reads and writes', async () => {
+    const { id, abe, people } = await standUp('Private committee fields', ['privacy']);
+    const root = '/api/searches/' + id;
+    const marker = 'PRIVATE-PA01-' + id;
+    try {
+      assert.strictEqual((await write(root, { auth:abe, id, method:'PATCH', body:{notes:marker+' facts'} })).status, 200);
+      assert.strictEqual((await write(root+'/posting', { auth:abe, id, method:'PUT', body:{summary:marker+' posting'} })).status, 200);
+      assert.strictEqual((await write(root+'/staff/sourcing', { auth:abe, id, method:'PUT', body:{notes:marker+' notes'} })).status, 200);
+      const staff = await read(id, abe);
+      assert.ok(JSON.stringify(staff).includes(marker));
+      const member = await read(id, people.privacy.auth);
+      assert.ok(!JSON.stringify(member).includes(marker));
+      assert.strictEqual(member.posting, undefined);
+      assert.strictEqual(member.pending.length, 0);
+      const unassignedEmail = 'unassigned-'+id.toLowerCase()+'@example.test';
+      const invited = await api('/api/organization/invitations', {auth:abe,method:'POST',body:{email:unassignedEmail,role:'org:committee'}});
+      assert.strictEqual(invited.status, 200);
+      const unassigned = sign.headers(unassignedEmail);
+      assert.strictEqual((await api('/api/me', {auth:unassigned})).status, 200);
+      assert.strictEqual((await api(root, {auth:unassigned})).status, 404);
+      const draft = await saveDraft(id, people.privacy, [], {context:'private member draft'});
+      assert.strictEqual(draft.status, 200);
+      assert.ok(!JSON.stringify(draft.json).includes(marker));
+      assert.ok(!JSON.stringify((await read(id, people.privacy.auth))).includes(marker));
+      assert.strictEqual((await closeIntake(id, abe, {emptyReason:'No responses in this privacy test.'})).status, 200);
+      assert.strictEqual((await write(root+'/profile', {auth:abe, id, method:'PUT', body:{criteria:[{id:'S1',kind:'skill',label:'Budgeting',weight:3}]}})).status, 200);
+      const added = await write(root+'/candidates', {auth:abe, id, body:{name:'Private Marker Candidate'}});
+      assert.strictEqual(added.status, 200);
+      const score = await api(root+'/scores/'+added.json.candidates[0].id, {
+        auth:people.privacy.auth, method:'PUT',
+        scoreVersion:String((await read(id, people.privacy.auth)).profileRevision)+':1',
+        body:{scores:{S1:4},note:'Reviewer note'}
+      });
+      assert.strictEqual(score.status, 200);
+      assert.ok(!JSON.stringify(score.json).includes(marker));
+    } finally { await archive(id, abe); }
+  });
+
+  await check('score versions permit independent reviewers and refuse incompatible saves', async () => {
+    const { id, abe, people } = await standUp('Independent scores', ['raterone', 'ratertwo']);
+    const root = '/api/searches/' + id;
+    try {
+      assert.strictEqual((await closeIntake(id, abe, {emptyReason:'Proceeding without questionnaire input for this test.'})).status, 200);
+      assert.strictEqual((await write(root+'/profile', { auth:abe, id, method:'PUT', body:{criteria:[{id:'S1',kind:'skill',label:'Budgeting',weight:3}]} })).status, 200);
+      const candidate = await write(root+'/candidates', { auth:abe, id, body:{name:'Synthetic Candidate'} });
+      assert.strictEqual(candidate.status, 200);
+      const cid = candidate.json.candidates[0].id;
+      const first = await read(id, people.raterone.auth);
+      const second = await read(id, people.ratertwo.auth);
+      const firstVersion = String(first.profileRevision)+':1';
+      const secondVersion = String(second.profileRevision)+':1';
+      const savedOne = await api(root+'/scores/'+cid, { auth:people.raterone.auth, method:'PUT', scoreVersion:firstVersion, body:{scores:{S1:4},note:'First view'} });
+      assert.strictEqual(savedOne.status, 200);
+      const savedTwo = await api(root+'/scores/'+cid, { auth:people.ratertwo.auth, method:'PUT', scoreVersion:secondVersion, body:{scores:{S1:5},note:'Second view'} });
+      assert.strictEqual(savedTwo.status, 200);
+      const oneView = await read(id, people.raterone.auth);
+      const twoView = await read(id, people.ratertwo.auth);
+      assert.deepStrictEqual(oneView.scores[people.raterone.userId]?.[cid], {S1:4}, JSON.stringify({scores:oneView.scores, userId:people.raterone.userId}));
+      assert.deepStrictEqual(twoView.scores[people.ratertwo.userId]?.[cid], {S1:5}, JSON.stringify({scores:twoView.scores, userId:people.ratertwo.userId}));
+      const retry = await api(root+'/scores/'+cid, { auth:people.raterone.auth, method:'PUT', scoreVersion:firstVersion, body:{scores:{S1:4},note:'First view'} });
+      assert.strictEqual(retry.status, 200);
+      const clash = await api(root+'/scores/'+cid, { auth:people.raterone.auth, method:'PUT', scoreVersion:firstVersion, body:{scores:{S1:2},note:'Other tab'} });
+      assert.strictEqual(clash.status, 409);
+      assert.strictEqual(clash.json.code, 'STALE_SCORE');
+      assert.deepStrictEqual(clash.json.current.scores, {S1:4});
+      assert.strictEqual((await write(root+'/profile', { auth:abe, id, method:'PUT', body:{criteria:[{id:'S1',kind:'skill',label:'Updated budgeting',weight:3}]} })).status, 200);
+      const changedProfile = await api(root+'/scores/'+cid, { auth:people.ratertwo.auth, method:'PUT', scoreVersion:String(second.profileRevision)+':2', body:{scores:{S1:3},note:'Stale profile'} });
+      assert.strictEqual(changedProfile.status, 409);
+      assert.strictEqual(changedProfile.json.code, 'STALE_SCORE');
+      const withdrawn = await write(root+'/candidates/'+cid+'/disposition', {auth:abe, id, body:{outcome:'withdrawn',reason:'Candidate withdrew by phone.'}});
+      assert.strictEqual(withdrawn.status, 200);
+      const afterWithdrawal = await api(root+'/scores/'+cid, {auth:people.raterone.auth, method:'PUT', scoreVersion:String((await read(id, people.raterone.auth)).profileRevision)+':2', body:{scores:{S1:3}}});
+      assert.strictEqual(afterWithdrawal.status, 409);
+      assert.strictEqual(afterWithdrawal.json.code, 'DISPOSITION_FINAL');
+      const other = await write(root+'/candidates', {auth:abe, id, body:{name:'Another Synthetic Candidate'}});
+      assert.strictEqual(other.status, 200);
+      const otherId = other.json.candidates.find(c => c.name === 'Another Synthetic Candidate').id;
+      const closed = await write(root+'/close', {auth:abe, id, body:{status:'cancelled',reason:'Synthetic search ended.'}});
+      assert.strictEqual(closed.status, 200);
+      const afterClose = await api(root+'/scores/'+otherId, {auth:people.raterone.auth, method:'PUT', scoreVersion:String((await read(id, people.raterone.auth)).profileRevision)+':1', body:{scores:{S1:3}}});
+      assert.strictEqual(afterClose.status, 409);
+      assert.strictEqual(afterClose.json.code, 'SEARCH_CLOSED');
+    } finally { await archive(id, abe); }
   });
 
   console.log(passed + ' committee checks passed' + (failed ? ', ' + failed + ' failed' : '') + '.');

@@ -80,6 +80,51 @@ async function namePriorities(page, searchId, priorities) {
 const nameOnePriority = (page, searchId, label, weight) =>
   namePriorities(page, searchId, [[label, weight]]);
 
+test('waiting member checks again while staff can preview but cannot control the window', async ({ browser }, testInfo) => {
+  const {search, manager, managerContext, members} = await openIntake(browser, testInfo, ['waiting'], {draft:true});
+  const staffContext = await browser.newContext();
+  const staff = await staffContext.newPage();
+  try {
+    await installClerk(staff, {email:'mike@slate.local'});
+    await members.waiting.page.goto('/#/s/'+search.id+'/intake');
+    await expect(members.waiting.page.getByText('Preview only — answers are not open')).toBeVisible();
+    await expect(members.waiting.page.getByRole('button',{name:'Submit my answers'})).toHaveCount(0);
+    await staff.goto('/#/s/'+search.id+'/intake');
+    await expect(staff.getByText('Budgeting')).toBeVisible();
+    await expect(staff.getByRole('button',{name:'Open the window'})).toHaveCount(0);
+    await expect(staff.getByText('You are not on this search roster')).toBeVisible();
+    await manager.goto('/#/s/'+search.id+'/intake');
+    await manager.getByRole('button',{name:'Open the window'}).click();
+    await members.waiting.page.getByRole('button',{name:'Check again'}).click();
+    await expect(members.waiting.page.getByRole('button',{name:'Submit my answers'})).toBeVisible();
+  } finally {
+    await Promise.all([staffContext.close(), managerContext.close(), ...Object.values(members).map(m => m.context.close())]);
+  }
+});
+
+test('an administrator outside the roster sees the ballot and the separate skip decision', async ({ browser }, testInfo) => {
+  const managerContext = await browser.newContext();
+  const adminContext = await browser.newContext();
+  try {
+    const manager = await managerContext.newPage();
+    const admin = await adminContext.newPage();
+    await installClerk(manager, {email:'mike@slate.local'});
+    await installClerk(admin, {email:'abe@slate.local'});
+    const search = await (await manager.request.post('/api/searches', {
+      data:{client:'Admin Preview '+testInfo.project.name,position:'City Manager',package:'executive'}
+    })).json();
+    const root = '/api/searches/'+search.id;
+    const revision = String((await (await manager.request.get(root)).json()).revision);
+    const confirmed = await manager.request.post(root+'/team/confirm', {headers:{'if-match':revision},data:{confirmed:true}});
+    expect(confirmed.ok(), await confirmed.text()).toBe(true);
+    await admin.goto('/#/s/'+search.id+'/intake');
+    await expect(admin.getByText('Budgeting')).toBeVisible();
+    await expect(admin.getByText('You are not on this search roster')).toBeVisible();
+    await expect(admin.getByRole('button',{name:'Open the window'})).toHaveCount(0);
+    await expect(admin.getByRole('button',{name:'Skip questionnaire and continue'})).toBeEnabled();
+  } finally { await Promise.all([managerContext.close(),adminContext.close()]); }
+});
+
 test('the administrator can skip the questionnaire and enable it again without asking members to respond', async ({ browser }, testInfo) => {
   test.slow();
   const {search, manager, managerContext, members} = await openIntake(browser, testInfo, ['ada'], {draft:true});
@@ -88,7 +133,7 @@ test('the administrator can skip the questionnaire and enable it again without a
     await manager.goto('/#/s/' + search.id + '/intake');
     await manager.getByRole('button', {name:'Skip questionnaire and continue', exact:true}).click();
     await expect(manager).toHaveURL(/\/profile$/);
-    await expect(manager.getByRole('navigation', {name:'Search stages'})).toContainText('Committee rankings · Skipped');
+    await expect(manager.getByRole('navigation', {name:'Search stages'})).toContainText('Committee questionnaire · Skipped');
     const skipped = await (await manager.request.get('/api/searches/' + search.id)).json();
     expect(skipped.steps.find(s => s.key === 'profile').blocked).toBe(false);
 

@@ -257,7 +257,7 @@
           ${open ? articleHtml(open, { level: 2 })
             : `<div class="help__placeholder"><h2 class="help__title">Slate user guide</h2>
                <p class="help__summary">Choose an article, or search for the task you are trying to finish.
-               Every screen also has a <b>Help with this page</b> control that opens the right article beside your work.</p></div>`}
+               Supported work pages have a <b>Help with this page</b> control that opens a relevant article beside your work.</p></div>`}
           ${glossaryHtml()}
           ${provenanceHtml()}
         </div>

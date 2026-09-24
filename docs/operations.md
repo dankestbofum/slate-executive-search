@@ -408,12 +408,37 @@ support as unavailable rather than showing a contact nobody reads.
 
 ### Incident quick reference
 
+#### Project billing switched off after searches were opened
+
+Searches opened while `SLATE_PROJECT_BILLING_MODE` was `test` or `live` retain
+`paymentAccess: "unpaid"` until a verified project purchase activates them.
+Changing the mode to `off` does not grant access. Checkout is unavailable in
+that mode, so an unpaid search will return `PROJECT_PAYMENT_REQUIRED` for work.
+
+1. Record the affected search IDs, owning organization IDs, current mode, and
+   purchase states from a protected store snapshot. Keep the searches blocked.
+2. Restore the previously approved billing mode, offer configuration, and
+   matching provider credentials. Verify the provider account and offer version
+   before letting anyone open checkout again.
+3. For an existing checkout or payment, use the search's **Check payment
+   status** action to reconcile with the provider. Confirm a single active
+   purchase for that search and verify another unpaid search remains blocked.
+4. If provider configuration cannot be restored, leave unpaid work disabled and
+   escalate to the product owner and finance operator. Record any approved
+   manual remedy as a separate audited change after payment evidence is
+   verified; do not edit `paymentAccess` to `legacy` or fabricate a purchase.
+5. Record the incident, mode transition, provider evidence, affected users,
+   and the result of read/write checks before reopening the search for work.
+
+Legacy searches opened before project billing was enabled retain their original
+legacy access. They are a separate case from searches opened as unpaid.
+
 | Symptom | First step |
 |---|---|
 | Someone cannot sign in | `node scripts/accounts.js list` — check for `disabled`; then verify their Clerk account, active organization and membership. Slate has no local password or PIN reset. |
 | Candidate link not working | Replace it from the candidate record; old links stop working immediately |
 | Candidate says a submission failed | Check whether it committed before asking them to resubmit |
-| "This search changed since you opened it" | Expected stale-write protection. Their edits were not lost; copy, reload, reapply |
+| "This search changed since you opened it" | Expected stale-write protection for shared search edits. Keep the tab and its typed values open while comparing the latest search; candidate scores use their own reviewable conflict path. |
 | Wrong copy published | Restore the prior revision from history; approvals invalidate on edit |
 | AI unavailable | Confirm `ai.degraded`; manual work continues. Check the key and model access |
 | Volume lost | §8, then §5 |

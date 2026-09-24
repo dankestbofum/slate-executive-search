@@ -167,6 +167,25 @@ test('a step opened by link survives a reload and browser Back returns to it', a
   await expect(page.locator('#main h1')).toContainText('Review committee input');
 });
 
+test('My access closes when a route or browser history changes', async ({ page }) => {
+  await workspace(page);
+  const search = await makeSearch(page, {client:'Access Route City',position:'City Manager'});
+  const openAccess = async () => {
+    const menu = page.getByRole('button',{name:'Menu',exact:true});
+    if (await menu.isVisible()) await menu.click();
+    await page.getByRole('button',{name:'My access',exact:true}).click();
+  };
+  await page.goto('/#/s/'+search.id+'/overview');
+  await openAccess();
+  await expect(page.getByRole('heading',{name:'My access'})).toBeVisible();
+  await page.evaluate(id => { location.hash = '#/s/'+id+'/screen'; }, search.id);
+  await expect(page.getByRole('heading',{name:'My access'})).toHaveCount(0);
+  await openAccess();
+  await expect(page.getByRole('heading',{name:'My access'})).toBeVisible();
+  await page.goBack();
+  await expect(page.getByRole('heading',{name:'My access'})).toHaveCount(0);
+});
+
 test('Back from a candidate returns to the filtered list', async ({ page }) => {
   await workspace(page);
   const search = await makeSearch(page, { client: 'Return City', position: 'City Manager', package: 'executive' });
