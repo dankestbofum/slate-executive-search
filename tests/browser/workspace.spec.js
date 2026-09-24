@@ -154,17 +154,17 @@ test('a step opened by link survives a reload and browser Back returns to it', a
   const search = await makeSearch(page, { client: 'Linkable County', position: 'County Administrator', jurisdictionType: 'county' });
 
   await page.goto('/#/s/' + search.id + '/profile');
-  await expect(page.locator('#main h1')).toContainText('Candidate profile', { timeout: 10000 });
+  await expect(page.locator('#main h1')).toContainText('Review committee input', { timeout: 10000 });
 
   await page.reload();
   await page.waitForLoadState('networkidle');
-  await expect(page.locator('#main h1')).toContainText('Candidate profile', { timeout: 10000 });
+  await expect(page.locator('#main h1')).toContainText('Review committee input', { timeout: 10000 });
   expect(page.url()).toContain('/profile');
 
   await page.locator('#crumbs button', { hasText: 'Linkable County' }).click();
   await page.waitForURL(/\/s\/[^/]+$/);
   await page.goBack();
-  await expect(page.locator('#main h1')).toContainText('Candidate profile');
+  await expect(page.locator('#main h1')).toContainText('Review committee input');
 });
 
 test('Back from a candidate returns to the filtered list', async ({ page }) => {

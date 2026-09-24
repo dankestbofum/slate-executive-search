@@ -6,6 +6,13 @@ Objective: an invited committee member reaches the correct search, understands c
 
 This is the current follow-up plan to the [three-agent walkthrough](REPORT.md). The [earlier paid-pilot plan](../2026-09-22-paid-pilot/IMPLEMENTATION_PLAN.md) retains the broader payment and research design; reconcile its proposals with existing code before implementing anything again.
 
+## Committee workflow clarification (September 23)
+
+- Step 2 collects each member's independent priorities: suggested or custom qualities, clickable 1–5 importance ratings, and a visible **Explain why** field. Before the administrator opens the window, members can preview the shared questions but cannot submit answers or advance into an administrator task.
+- Step 3 is the administrator's review of submitted ratings, every explanation, community challenges/opportunities, and written context. Aggregation and adoption live here, not in Step 2. A blank profile editor no longer replaces this review; administrators can adopt the proposed profile or explicitly write the final profile after collection closes.
+- Committee members see a read-only adopted profile. Skipping the optional questionnaire still opens direct profile writing for the administrator.
+- Maintained coverage: `tests/browser/committee.spec.js` exercises the member waiting screen, independent submissions, community-needs review, adoption in Step 3, explanation persistence, and the skipped-questionnaire path. Existing role and server adoption checks remain in force.
+
 ## Starting point
 
 - Invitation landing and clearer Step 2 wording were deployed in baseline `a6c91bf`.
