@@ -5217,6 +5217,7 @@ function vProfile(){
             <p class="t-small">The committee named these, and the profile holds five per category. They are recorded for discussion rather than dropped.</p>
             ${s.adoption.discussion.map(d => `<div class="t-small"><b>${esc(d.label)}</b> — named by ${d.mentions} of ${d.respondents}, rated ${d.minWeight} to ${d.maxWeight}${d.contested?', contested':''}.</div>`).join('')}
           </div></div>` : ''}
+        ${s.intake?.status === 'closed' && agg?.submitted ? `<details class="spec"><summary class="spec__bar">View submitted committee input (read-only)</summary><div class="spec__body stack">${consensusPanels(agg, false)}</div></details>` : ''}
         <div class="row"><button type="button" class="btn btn--secondary" data-go="intake">Back to my questionnaire</button></div>
       </div></div>`);
   }

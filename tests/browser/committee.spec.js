@@ -179,6 +179,8 @@ test('shared qualities reach every member and the owner can navigate from aggreg
     await expect(members.ada.page.locator('.crit-row')).toHaveCount(0);
     await expect(members.ada.page.locator('[data-act="adopt-preview"]')).toHaveCount(0);
     await expect(members.ada.page.locator('.crit-read')).toContainText(['Financial management','Community engagement','Staff leadership','Aging water infrastructure','Downtown revitalization']);
+    await members.ada.page.getByText('View submitted committee input (read-only)',{exact:true}).click();
+    await expect(members.ada.page.locator('details .voice').first()).toContainText('Residents need reliable utilities and a stronger downtown.');
     for (const [label, route] of [['Create brochure','brochure'], ['Create advertisement','ads'], ['Review candidates','screen']]) {
       await manager.getByRole('navigation', { name:'Search stages', exact:true }).getByRole('button', { name:new RegExp('^' + label) }).click();
       await expect(manager).toHaveURL(new RegExp('/' + route + '$'));
