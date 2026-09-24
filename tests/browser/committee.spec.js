@@ -116,8 +116,16 @@ test('shared qualities reach every member and the owner can navigate from aggreg
     }
     await manager.goto('/#/s/' + search.id + '/intake');
     await manager.locator('#sharedqualities [name="skill"]').fill('Financial management\nCommunity engagement\nStaff leadership');
+    await manager.locator('#sharedqualities [name="chall"]').fill('Aging water infrastructure');
+    await manager.locator('#sharedqualities [name="opp"]').fill('Downtown revitalization');
     await manager.getByRole('button', { name:'Save shared qualities', exact:true }).click();
     await expect(manager.locator('#toast')).toContainText('Shared qualities saved');
+    await members.ada.page.goto('/#/s/' + search.id + '/intake');
+    await expect(members.ada.page.getByRole('heading',{name:'Committee questionnaire',exact:true})).toBeVisible();
+    await expect(members.ada.page.getByRole('button',{name:'Rate Financial management 5 of 5',exact:true})).toBeDisabled();
+    await expect(members.ada.page.getByRole('textbox',{name:'Explain why Financial management matters (optional)',exact:true})).toBeDisabled();
+    await expect(members.ada.page.locator('[data-act="next-step"]')).toHaveCount(0);
+    await members.ada.page.screenshot({path:testInfo.outputPath('member-questionnaire-waiting.png'),fullPage:true});
     await manager.getByRole('button', { name:'Open the window', exact:true }).click();
     await expect(manager.locator('#toast')).toContainText('Intake is open');
 
@@ -136,20 +144,43 @@ test('shared qualities reach every member and the owner can navigate from aggreg
       for (const [i, label] of labels.entries()) {
         await page.getByRole('button', { name:'Rate ' + label + ' ' + (5-i) + ' of 5', exact:true }).click();
       }
+      await page.getByRole('button',{name:'Rate Aging water infrastructure 5 of 5',exact:true}).click();
+      await page.getByRole('textbox',{name:'Explain why Aging water infrastructure matters (optional)',exact:true}).fill('Water main replacements are the most urgent community need.');
+      await page.getByRole('button',{name:'Rate Downtown revitalization 4 of 5',exact:true}).click();
+      await page.locator('#intake-context').fill('Residents need reliable utilities and a stronger downtown.');
       await page.getByRole('button', { name:'Submit my answers', exact:true }).click();
       await expect(page.locator('#toast')).toContainText('Your answers are in');
     }
 
     await manager.goto('/#/s/' + search.id + '/intake');
-    await expect(manager.locator('.cons').first()).toContainText('3 of 3');
-    await expect(manager.locator('.cons').first()).toContainText('avg 5.0');
+    await expect(manager.locator('.cons')).toHaveCount(0);
+    await expect(manager.locator('[data-act="adopt-preview"]')).toHaveCount(0);
+    await manager.getByRole('button',{name:'Review committee input',exact:true}).click();
+    await expect(manager.locator('h1')).toHaveText('Review committee input');
+    await expect(manager.locator('#committee-review .cons').first()).toContainText('3 of 3');
+    await expect(manager.locator('#committee-review .cons').first()).toContainText('avg 5.0');
+    await expect(manager.locator('#committee-review')).toContainText('Water main replacements are the most urgent community need.');
+    await expect(manager.locator('#committee-review')).toContainText('Residents need reliable utilities and a stronger downtown.');
+    await expect(manager.locator('.crit-row')).toHaveCount(0);
+    await expect(manager.getByRole('button',{name:'Review what this would change',exact:true})).toBeDisabled();
+    await manager.getByRole('button',{name:'Manage questionnaire',exact:true}).click();
     await manager.getByRole('button', { name:'Close and read the room', exact:true }).click();
     await expect(manager.locator('#toast')).toContainText('Intake closed');
+    await manager.getByRole('button',{name:'Review committee input',exact:true}).click();
     await manager.getByRole('button', { name:'Review what this would change', exact:true }).click();
+    await expect(manager).toHaveURL(/\/profile$/);
     await expect(manager.locator('#adoptplan')).toContainText('Financial management');
+    await manager.screenshot({path:testInfo.outputPath('administrator-review.png'),fullPage:true});
     await manager.getByRole('button', { name:'Save this profile', exact:true }).click();
     await expect(manager.locator('#toast')).toContainText('Profile saved from committee input');
     await expect(manager.locator('#prof-skill .crit-row').first().locator('[data-f="label"]')).toHaveValue('Financial management');
+    await members.ada.page.goto('/#/s/' + search.id + '/profile');
+    await expect(members.ada.page.locator('h1')).toHaveText('Adopted candidate profile');
+    await expect(members.ada.page.locator('.crit-row')).toHaveCount(0);
+    await expect(members.ada.page.locator('[data-act="adopt-preview"]')).toHaveCount(0);
+    await expect(members.ada.page.locator('.crit-read')).toContainText(['Financial management','Community engagement','Staff leadership','Aging water infrastructure','Downtown revitalization']);
+    await members.ada.page.getByText('View submitted committee input (read-only)',{exact:true}).click();
+    await expect(members.ada.page.locator('details .voice').first()).toContainText('Residents need reliable utilities and a stronger downtown.');
     for (const [label, route] of [['Create brochure','brochure'], ['Create advertisement','ads'], ['Review candidates','screen']]) {
       await manager.getByRole('navigation', { name:'Search stages', exact:true }).getByRole('button', { name:new RegExp('^' + label) }).click();
       await expect(manager).toHaveURL(new RegExp('/' + route + '$'));
@@ -195,6 +226,10 @@ test('quality suggestions build the shared questionnaire without losing custom w
 
     const member = members.ada.page;
     await member.goto('/#/s/' + search.id + '/intake');
+    const financialRow = member.locator('.intake-row').filter({has:member.locator('[data-f="label"][value="Financial management"]')});
+    await expect(financialRow.getByText('Explain why', {exact:true})).toBeVisible();
+    await financialRow.getByRole('textbox', {name:'Explain why Financial management matters (optional)',exact:true}).fill('We need careful oversight of the capital budget.');
+    for (const rating of [1,2,3,4,5]) await expect(financialRow.getByRole('button',{name:`Rate Financial management ${rating} of 5`,exact:true})).toBeVisible();
     const additions = member.locator('#ipick-skill');
     await expect(additions.getByRole('button',{name:'Financial management',exact:true})).toBeDisabled();
     await additions.getByRole('button',{name:'Communication',exact:true}).click();
@@ -207,6 +242,7 @@ test('quality suggestions build the shared questionnaire without losing custom w
     const result = await (await manager.request.get('/api/searches/' + search.id)).json();
     expect(result.intake.prompt).toBe('Consider our next five years.');
     expect(result.consensus.byKind.skill.map(q => q.label)).toEqual(expect.arrayContaining(['Team development','Grant administration','Financial management','Communication']));
+    expect(result.consensus.byKind.skill.find(q => q.label === 'Financial management').notes).toEqual(expect.arrayContaining([expect.objectContaining({note:'We need careful oversight of the capital budget.',weight:5})]));
   } finally { await Promise.all([managerContext.close(), members.ada.context.close()]); }
 });
 
@@ -222,6 +258,8 @@ test('skipping intake still lets the administrator select, edit, add and weight 
     await expect(choices.getByRole('button',{name:'Communication',exact:true})).toBeVisible();
     const rows = manager.locator('#prof-skill .crit-row');
     await rows.first().locator('[data-f="label"]').fill('Public finance leadership');
+    await expect(rows.first().getByText('Explain why',{exact:true})).toBeVisible();
+    await rows.first().locator('[data-f="note"]').fill('The capital plan needs steady financial oversight.');
     await rows.first().locator('[data-w="5"]').click();
     await manager.locator('#prof-skill [data-add="skill"]').click();
     await rows.last().locator('[data-f="label"]').fill('Grant administration');
@@ -231,6 +269,7 @@ test('skipping intake still lets the administrator select, edit, add and weight 
     await manager.reload();
     await expect(rows.first().locator('[data-f="label"]')).toHaveValue('Public finance leadership');
     await expect(rows.first().locator('[data-w="5"]')).toHaveAttribute('aria-pressed','true');
+    await expect(rows.first().locator('[data-f="note"]')).toHaveValue('The capital plan needs steady financial oversight.');
     await expect(rows.last().locator('[data-f="label"]')).toHaveValue('Grant administration');
     await expect(choices.getByRole('button',{name:'Community engagement',exact:true})).toHaveAttribute('aria-pressed','true');
     await manager.screenshot({path:testInfo.outputPath('profile-quality-picker.png'),fullPage:true});
@@ -319,7 +358,7 @@ test('an unfinished draft stays private, and renaming an adopted line keeps its 
     expect(JSON.stringify(asAda)).not.toContain('A thought I never sent');
 
     // Adopt through the preview the manager now has to review.
-    await manager.goto('/#/s/' + search.id + '/intake');
+    await manager.goto('/#/s/' + search.id + '/profile');
     await manager.getByRole('button', { name: 'Review what this would change' }).click();
     await expect(manager.locator('#adoptplan')).toBeVisible({ timeout: 15000 });
     await expect(manager.locator('#adoptplan')).toContainText('Financial management');

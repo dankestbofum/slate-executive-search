@@ -317,6 +317,8 @@ button.strip__s:hover{background:var(--sunken)}
   padding:var(--s-3) 0; border-bottom:1px solid var(--line);
 }
 .intake-row:last-child{border-bottom:0}
+.intake-row .rating__scale,.crit-row .rating__scale{flex-direction:column; align-items:flex-start}
+.questionnaire-preview{border:0; margin:0; padding:0; min-width:0; display:grid; gap:var(--s-4)}
 
 /* One person being added. The rows stack rather than sitting in a table,
    because each is a small form and a table row cannot hold a hint or the

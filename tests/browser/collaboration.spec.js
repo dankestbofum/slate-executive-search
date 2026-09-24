@@ -144,10 +144,10 @@ test('a slow refresh never paints over the screen the member moved on to', async
     // The first move stalls; the second is answered and lands.
     await openCandidates(reviewer, testInfo);
     await reviewer.evaluate(id => { location.hash = '#/s/' + id + '/profile'; }, search.id);
-    await expect(reviewer.locator('#main h1')).toHaveText('Candidate profile');
+    await expect(reviewer.locator('#main h1')).toHaveText('Adopted candidate profile');
     release();
     await reviewer.waitForTimeout(500);
-    await expect(reviewer.locator('#main h1')).toHaveText('Candidate profile');
+    await expect(reviewer.locator('#main h1')).toHaveText('Adopted candidate profile');
     await reviewer.unroute(searchRead);
   } finally { await close(); }
 });

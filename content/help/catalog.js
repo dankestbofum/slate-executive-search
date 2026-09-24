@@ -263,7 +263,7 @@ const articles = [
       { do: 'Open the search and select **Answer your questionnaire**, or **Open your questionnaire** if you have started one.' },
       { do: 'If you are managing Step 2, prepare **Shared candidate qualities** before opening the window. Select suggestions in each category, edit their wording, or add your own qualities, one per line. Select **Save shared qualities**.', note: 'The list stays fixed once the window opens so every member rates the same qualities.' },
       { do: 'If you are managing Step 2, select **Add my profile input**, or **Review my profile input** after submitting.', note: 'The response window must be open. These are your individual priorities; the shared candidate profile is reviewed and adopted in Step 3.' },
-      { do: 'Answer the four questions: what this person must already know how to do, what kind of person works here, what they are walking into, and what they could build.' },
+      { do: 'Answer the four questions: what this person must already know how to do, what kind of person works here, what they are walking into, and what they could build. For each quality, click an importance rating from 1 (nice to have) to 5 (decisive), and use **Explain why** to give the reason for your rating.' },
       { do: 'Select **Save and finish later** at any point.', note: 'This is a private draft. It changes nothing that you have already submitted, and nobody else can read it.' },
       { do: 'When you are ready, select **Submit my answers**.', note: 'After a first submission the same control reads **Update my answers**. Updating replaces your submitted answer; the previous one stays in the record.' }
     ],
@@ -307,10 +307,10 @@ const articles = [
     ],
     doThis: [
       { do: 'Open **Committee**, then the intake screen, and select **Close and read the room**.', note: 'Closing also makes submitted answers readable by everyone on the search. Tell the committee before you do it.' },
-      { do: 'Open the candidate profile. You can select suggested qualities in each category, edit their wording and weights, or add your own.', note: 'These selectors are also available when the committee questionnaire is skipped. Suggestions remain visible while you choose; Hide suggestions collapses them when you are finished.' },
-      { do: 'Select **Build from committee**, or **Rebuild from committee** if a profile has already been adopted.' },
+      { do: 'Open Step 3, **Review committee input**. Compare the combined ratings and every explanation, including current challenges, future opportunities, and members’ written context.', note: 'Step 2 collects individual answers. Step 3 is the administrator’s review and adoption step; committee members see a read-only profile once it is available.' },
+      { do: 'Select **Review what this would change** to preview the profile proposed from the committee’s answers.' },
       { do: 'Read the preview. It names which committee priorities become criteria and what an adoption would change.', note: 'The same review is available from **Review what this would change** without committing anything.' },
-      { do: 'Select **Save this profile**.' }
+      { do: 'Select **Save this profile**, then finalize the wording, explanations, and importance ratings. You can select suggested qualities or add your own.', note: 'If the questionnaire was skipped, Step 3 opens directly to profile writing. Suggestions remain visible while you choose; Hide suggestions collapses them when you are finished.' }
     ],
     worked: [
       'The profile lists criteria with weights, and each line that came from the committee says so.',

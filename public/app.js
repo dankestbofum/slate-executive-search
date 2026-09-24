@@ -303,8 +303,8 @@ function deskNote(desk){
 const STEP_FLOW = ['team','intake','profile','community','survey1','guide','survey2','plan','brochure','ads','sourcing','screen','send2','video','finalists','schedule','references','contract','bar'];
 const STEP_NAME = {
   team:'Search committee',
-  intake:'Candidate profile input',
-  profile:'Candidate profile',
+  intake:'Committee questionnaire',
+  profile:'Review and adopt profile',
   community:'Community',
   survey1:'Initial survey',
   guide:'Interview guide',
@@ -2418,6 +2418,7 @@ async function loadSearch(id, { current = () => true } = {}){
   // into this one.
   if (state.search?.id !== id) {
     state.intake = null; state.intakeConflict = null; state.adoptPlan = null;
+    delete state.open.profileedit;
     state.newPin = null; state.newPeople = null; stopResearch();
   }
   state.search = search;
@@ -4648,10 +4649,10 @@ function intakeRow(item, i){
   return `<div class="intake-row" data-row="${i}">
     <div class="stack u-gap-6">
       <input class="input" data-f="label" value="${esc(item.label)}" ${shared?'readonly':''} placeholder="Name it in your own words" aria-label="${esc(named ? 'Priority: '+what : 'Name '+what)}">
-      <input class="input" data-f="note" value="${esc(item.note||'')}" placeholder="Why does this matter here? (optional)" aria-label="Why ${esc(what)} matters here (optional)">
+      <label class="field"><span>Explain why</span><textarea class="input" data-f="note" rows="2" maxlength="600" placeholder="Why is this quality important for this search?" aria-label="Explain why ${esc(what)} matters (optional)">${esc(item.note||'')}</textarea><span class="field__hint">Optional. Explain the reason for your rating.</span></label>
     </div>
     ${ratingGroup('How much '+what+' matters — 1, nice to have, to 5, decisive',
-      `<div class="wgt">${[1,2,3,4,5].map(n=>`<button type="button" data-iw="${n}" aria-label="Rate ${esc(what)} ${n} of 5" aria-pressed="${Number(item.weight)===n}">${n}</button>`).join('')}</div>`)}
+      `<span class="t-small">Importance</span><div class="wgt">${[1,2,3,4,5].map(n=>`<button type="button" data-iw="${n}" aria-label="Rate ${esc(what)} ${n} of 5" aria-pressed="${Number(item.weight)===n}">${n}</button>`).join('')}</div>`, '1 = Nice to have · 5 = Decisive')}
     ${shared ? `<span class="t-small">${item.weight == null ? 'Choose a rating' : 'Shared quality'}</span>` : `<button class="btn btn--ghost btn--sm" data-idel="${i}" aria-label="Remove ${esc(what)}">Remove</button>`}
   </div>`;
 }
@@ -4720,7 +4721,7 @@ function vIntakeAnswer(){
   const closed = intake.status === 'closed';
   const count = d.items.filter(i => String(i.label||'').trim()).length;
   return shell(`
-    ${head('Step '+stepNo('intake'), 'Candidate profile input',
+    ${head('Step '+stepNo('intake'), 'Committee questionnaire',
       'Describe the candidate you want to hire: essential skills, leadership traits, current challenges, and future opportunities. '
       + 'Rate how much each priority matters to you. The account manager uses the committee’s submitted answers to build and adopt the candidate profile in Step '+stepNo('profile')+'.')}
     <div class="band"><div class="wrap stack">
@@ -4738,7 +4739,7 @@ function vIntakeAnswer(){
         <div class="notice__t">${closed ? 'Intake is closed' : 'Intake has not opened yet'}</div>
         <div class="notice__b">${closed
           ? 'The window is shut and the committee’s answers have been read together. Ask '+esc(s.accountManager?.name||'the account manager')+' if you still need to add something.'
-          : esc(s.accountManager?.name||'The account manager')+' will open it when the roster is set.'}</div>
+          : esc(s.accountManager?.name||'The account manager')+' must open the questionnaire before you can answer. Your ratings and explanations belong here in Step '+stepNo('intake')+'. Step '+stepNo('profile')+' is the administrator’s review of the committee’s answers.'}</div>
       </div></div>` : ''}
       ${mine ? `<div class="notice notice--${intakeHasUnsubmitted()?'wait':'ok'}"><div>
         <div class="notice__t">${intakeHasUnsubmitted() ? 'Submitted — you have unpublished changes' : 'Your answers are in'}</div>
@@ -4784,8 +4785,15 @@ function vIntakeAnswer(){
             'Take your submitted answers out of the tally. They come back to you as a private draft.') : ''),
           count+' named so far.',
           mine ? (intakeHasUnsubmitted() ? 'Saved edits not submitted' : 'Submitted') : 'Not submitted yet')}` : ''}
-      ${closed && s.consensus ? consensusPanels(s.consensus, false) : ''}
-      ${!open ? stepFooter('intake') : ''}
+      ${!open && !closed && (intake.qualities || []).length ? `<section class="stack">
+        <h2>Preview your questionnaire</h2><p class="t-small">These controls become available when the account manager opens the questionnaire. Then choose 1–5 and explain why for each quality.</p>
+        <fieldset class="questionnaire-preview" disabled><legend class="sr-only">Questionnaire preview — not open for answers</legend>${Object.keys(INTAKE_ASK).map(intakeGroup).join('')}</fieldset>
+      </section>` : ''}
+      ${closed && mine ? `<section class="spec"><div class="spec__bar">Your submitted answers</div><div class="spec__body stack">
+        ${(mine.items || []).map(item => `<div><b>${esc(item.label)}</b> <span class="t-small">Importance: ${esc(item.weight)} of 5</span>${item.note ? `<p class="t-small">${esc(item.note)}</p>` : ''}</div>`).join('')}
+      </div></section>` : ''}
+      ${!open ? `<p class="t-small">The administrator reviews the combined ratings, explanations, and community needs in Step ${stepNo('profile')}. You do not need to complete another questionnaire there.</p>` : ''}
+      ${!open && you().consultant ? stepFooter('intake') : ''}
     </div></div>`);
 }
 
@@ -4804,7 +4812,7 @@ function consensusMeter(entry, submitted){
     <div class="cons__bar"><span data-width-pct="${pct}"></span></div>
     <div class="cons__who t-small">${entry.voters.map(v => esc(v.name||'A member')+' '+v.weight).join(' · ')}</div>
     ${entry.contested ? `<div class="t-small cons__flag">Rated as low as ${entry.minWeight} and as high as ${entry.maxWeight}. Worth naming out loud before the profile is adopted.</div>` : ''}
-    ${entry.notes.length ? `<div class="cons__notes">${entry.notes.slice(0,3).map(n => `<div class="t-small">${esc(n.name||'A member')}: ${esc(n.note)}</div>`).join('')}</div>` : ''}
+    ${entry.notes.length ? `<div class="cons__notes">${entry.notes.map(n => `<div class="t-small">${esc(n.name||'A member')}: ${esc(n.note)}</div>`).join('')}</div>` : ''}
   </div>`;
 }
 
@@ -4973,7 +4981,7 @@ function vIntakeManage(){
   const mine = mySubmission();
   const waiting = agg?.pending || [];
   return shell(`
-    ${head('Step '+stepNo('intake'), 'Candidate profile input',
+    ${head('Step '+stepNo('intake'), 'Committee questionnaire',
       'Collect what each committee member wants in the candidate profile: essential skills, leadership traits, current challenges, and future opportunities. In Step '+stepNo('profile')+', review these priorities together and adopt the profile used to evaluate candidates.',
       `${!open && !closed ? `<button class="btn btn--primary" data-act="intake-open" ${confirmed?'':'disabled'}>Open the window</button>` : ''}
        ${open ? `<button class="btn btn--primary" data-act="intake-close">Close and read the room</button>` : ''}
@@ -5035,23 +5043,11 @@ function vIntakeManage(){
         <div class="notice__b">${esc(intake.completedEmpty.byName||'The account manager')} recorded this on ${esc(String(intake.completedEmpty.at||'').slice(0,10))}: “${esc(intake.completedEmpty.reason)}”. No responses were collected.</div>
       </div></div>` : ''}
 
-      ${adoptPlanPanel()}
-
-      <div class="sub">What the committee said</div>
-      ${agg ? consensusPanels(agg) : ''}
-
-      ${agg && agg.submitted ? `<div class="next">
-        <div class="t-label">Turn this into the profile</div>
-        <h2>Step ${stepNo('profile')}. Adopt the candidate profile</h2>
-        <p class="t-small">Ranked by how many of the people who answered named each item, weighted by how much they said it mattered. You review what would change before anything is saved.</p>
-        <div class="row">
-          ${closed
-            ? `<button class="btn btn--primary" data-act="adopt-preview">Review what this would change</button>`
-            : `<button class="btn btn--primary" disabled>Review what this would change</button>
-               <span class="t-small">Close the window first. Building the profile publishes what the committee said to everyone on the search.</span>`}
-          <button class="btn btn--secondary" data-go="profile">Open Step ${stepNo('profile')}</button>
+      <section class="spec"><div class="spec__bar">Next: administrator review</div>
+        <div class="spec__body stack"><p>Step ${stepNo('profile')} brings together the committee’s ratings, explanations, and community needs. Review and adopt the candidate profile there.</p>
+          <div class="row"><button type="button" class="btn btn--primary" data-go="profile">Review committee input</button></div>
         </div>
-      </div>` : ''}
+      </section>
       ${stepFooter('intake')}
     </div></div>`);
 }
@@ -5138,10 +5134,10 @@ function critRow(c, i){
     <span class="mono t-small">${esc(c.id||'')}${critSource(c)}</span>
     <div class="stack u-gap-6">
       <input class="input" data-f="label" value="${esc(c.label)}" placeholder="Label" aria-label="Criterion ${esc(c.id||i+1)} label">
-      <input class="input" data-f="note" value="${esc(c.note||'')}" placeholder="Why this matters here" aria-label="Why ${esc(name)} matters here">
+      <label class="field"><span>Explain why</span><textarea class="input" data-f="note" rows="2" maxlength="600" placeholder="Why is this quality important for this search?" aria-label="Explain why ${esc(name)} matters">${esc(c.note||'')}</textarea></label>
     </div>
     ${ratingGroup('Weight for '+name+' — 1, nice to have, to 5, decisive',
-      `<div class="wgt">${[1,2,3,4,5].map(n=>`<button type="button" data-w="${n}" aria-label="Weight ${n} of 5 for ${esc(name)}" aria-pressed="${Number(c.weight)===n}">${n}</button>`).join('')}</div>`)}
+      `<span class="t-small">Importance</span><div class="wgt">${[1,2,3,4,5].map(n=>`<button type="button" data-w="${n}" aria-label="Weight ${n} of 5 for ${esc(name)}" aria-pressed="${Number(c.weight)===n}">${n}</button>`).join('')}</div>`, '1 = Nice to have · 5 = Decisive')}
     <button type="button" class="btn btn--ghost btn--sm" data-del="${i}" aria-label="Remove ${esc(name)}">Remove</button>
     ${critEvidence(c)}
   </div>`;
@@ -5165,6 +5161,22 @@ function profileGaps(criteria){
   return Object.keys(KIND).filter(k => !inCritRange(labeledKind(k, criteria).length)).map(k => names[k]);
 }
 
+function committeeReviewPanel(){
+  const s = state.search;
+  const agg = s.consensus;
+  if (s.intake?.skipped) return '';
+  const closed = s.intake?.status === 'closed';
+  return `<section id="committee-review" class="stack">
+    <h2>Evaluate the committee’s answers</h2>
+    <p>Review the candidate qualities alongside the community’s challenges and opportunities. Compare the 1–5 ratings, read each explanation, and consider areas of agreement and disagreement before adopting the profile.</p>
+    ${!closed ? `<div class="notice notice--info"><div><div class="notice__t">${s.intake?.status === 'open' ? 'Responses are still being collected' : 'The questionnaire has not opened'}</div>
+      <div class="notice__b">These results are preliminary. Finish collecting answers in Step ${stepNo('intake')} before adopting the profile. <button type="button" class="btn btn--secondary btn--sm" data-go="intake">Manage questionnaire</button></div></div></div>` : ''}
+    ${agg ? consensusPanels(agg) : '<p>No submitted answers are available yet.</p>'}
+    ${agg?.submitted && canManage() ? `<div class="row"><button type="button" class="btn btn--primary" data-act="adopt-preview" ${closed?'':'disabled'}>Review what this would change</button></div>` : ''}
+    ${adoptPlanPanel()}
+  </section>`;
+}
+
 function vProfile(){
   const s = state.search;
   const agg = s.consensus;
@@ -5174,9 +5186,8 @@ function vProfile(){
   // them live inputs the server would reject is worse than showing the result.
   if (!canEdit()) {
     return shell(`
-      ${head('Step '+stepNo('profile'),'Candidate profile',
-        'What the search is looking for, adopted from the committee’s answers. Candidates are screened and interviewed against these.',
-        nextBtn('profile'))}
+      ${head('Step '+stepNo('profile'),'Adopted candidate profile',
+        'The administrator reviews the committee’s ratings, explanations, and community needs here, then adopts the profile. Your input is collected in Step '+stepNo('intake')+'; this page is read-only for committee members.')}
       <div class="band"><div class="wrap stack">
         ${s.profileWithheld ? `<div class="notice notice--info"><div>
           <div class="notice__t">Not published yet</div>
@@ -5206,7 +5217,18 @@ function vProfile(){
             <p class="t-small">The committee named these, and the profile holds five per category. They are recorded for discussion rather than dropped.</p>
             ${s.adoption.discussion.map(d => `<div class="t-small"><b>${esc(d.label)}</b> — named by ${d.mentions} of ${d.respondents}, rated ${d.minWeight} to ${d.maxWeight}${d.contested?', contested':''}.</div>`).join('')}
           </div></div>` : ''}
-        ${stepFooter('profile')}
+        ${s.intake?.status === 'closed' && agg?.submitted ? `<details class="spec"><summary class="spec__bar">View submitted committee input (read-only)</summary><div class="spec__body stack">${consensusPanels(agg, false)}</div></details>` : ''}
+        <div class="row"><button type="button" class="btn btn--secondary" data-go="intake">Back to my questionnaire</button></div>
+      </div></div>`);
+  }
+
+  // Start Step 3 with the evidence, not another blank qualities form. A search
+  // without committee input still has the direct profile-writing path.
+  if (!s.intake?.skipped && !s.intake?.completedEmpty && !(s.criteria || []).length && !state.open.profileedit) {
+    return shell(`${head('Step '+stepNo('profile'), 'Review committee input', 'Evaluate the committee’s view of the candidate and the community’s needs, then adopt the profile that will guide recruiting and candidate review.')}
+      <div class="band"><div class="wrap stack">
+        ${committeeReviewPanel()}
+        ${s.intake?.status === 'closed' ? `<button type="button" class="btn btn--secondary" data-act="edit-final-profile">Write the final profile manually</button>` : ''}
       </div></div>`);
   }
 
@@ -5257,10 +5279,11 @@ function vProfile(){
   const aiReady = Boolean(state.health?.hasKey);
 
   return shell(`
-    ${head('Step '+stepNo('profile'),'Candidate profile',s.intake?.skipped
+    ${head('Step '+stepNo('profile'),s.intake?.skipped ? 'Candidate profile' : 'Review and adopt profile',s.intake?.skipped
       ? 'Choose the candidate qualities and their weights for this search. The profile guides recruiting, screening, and interviews.'
-      : 'Review and adopt the candidate profile from the priorities submitted in Step '+stepNo('intake')+' · Candidate profile input. Refine the criteria and weights here. The adopted profile guides recruiting, screening, and interviews.')}
+      : 'Evaluate the committee’s answers and community needs below. Then finalize the profile that guides recruiting, screening, and interviews.')}
     <div class="band"><div class="wrap stack">
+      ${committeeReviewPanel()}
       ${s.sourceChanged ? `<div class="notice notice--stop"><div>
         <div class="notice__t">Committee input has changed since this profile was adopted</div>
         <div class="notice__b">The profile has not been altered, and it will not be: a changed answer is something to look at, not an automatic edit to a
@@ -5279,13 +5302,14 @@ function vProfile(){
           : 'Build the matrix from their answers rather than typing it from memory, then edit.'}
           ${agg.contested.length ? ' <b>'+agg.contested.length+'</b> item'+(agg.contested.length===1?' is':'s are')+' contested — the committee disagrees on how much '+(agg.contested.length===1?'it matters':'they matter')+'. Disagreement is kept as disagreement rather than averaged away.' : ''}
           Matching is by wording, so “Budgeting” and “Financial management” stay separate entries.
-          <button type="button" class="btn btn--ghost btn--sm" data-go="intake">See what they said</button></div>
+          </div>
       </div></div>` : `<div class="notice notice--info"><div>
         <div class="notice__t">${s.intake?.skipped ? 'Committee questionnaire skipped' : 'No committee input on file'}</div>
         <div class="notice__b">${s.intake?.skipped
           ? 'No questionnaire responses are needed. Add and weight the criteria below, then save the profile to continue. An organization administrator can include the questionnaire again in Step '+stepNo('intake')+'.'
           : 'Step '+stepNo('intake')+' collects what each member is looking for, and this matrix is normally built from it. You can still write the profile by hand.'}</div>
       </div></div>`}
+      <h2>Finalize the candidate profile</h2>
       ${nav}
       ${groups}
       ${sectionHead('Preparation', 'Optional', `<button type="button" class="btn btn--ghost btn--sm" data-panel="profileprep" aria-expanded="${prepOpen}" aria-controls="profileprep" data-open-label="Open" data-close-label="Close">${prepOpen?'Close':'Open'}</button>`)}
@@ -9163,9 +9187,14 @@ document.addEventListener('click', async e => {
     }, waitSave('Withdrawing your answers'));
     return;
   }
+  if (act==='edit-final-profile'){
+    state.open.profileedit = true;
+    render();
+    return;
+  }
   if (act==='adopt-preview' || act==='adopt-consensus'){
     await refreshAdoptPlan();
-    if (state.adoptPlan && state.view !== 'intake') go('intake');
+    if (state.adoptPlan && state.view !== 'profile') go('profile');
     return;
   }
   if (act==='adopt-cancel'){
