@@ -645,12 +645,19 @@ function stillAuthorized(req){
     && projectEntitlements.allows(current, db.db.projectPurchases, 'work');
 }
 
-/** Rostering, the intake window, and adoption sit with the account manager. */
+/** Roster edits and profile adoption sit with the account manager. */
 function requireManager(req, res, next){
   if (!db.canManage(req.search, req.access)) {
     const mgr = db.accountManager(req.search);
     const who = mgr ? (db.findUserById(mgr.userId)?.name || 'the account manager') : 'the account manager';
     return res.status(403).json({ error: who + ' runs this search. Ask them, or reassign the account.' });
+  }
+  next();
+}
+
+function requireIntakeManager(req, res, next){
+  if (!db.canManageIntake(req.search, req.access)) {
+    return res.status(403).json({ error:'Only the account manager or an organization administrator can manage committee input.' });
   }
   next();
 }
@@ -1613,7 +1620,7 @@ app.delete('/api/searches/:id/members/:uid', ...requireWorkspace, requireSearch,
   res.json({ search: painted(req, req.search), ...rosterOnly(req.search) });
 });
 
-app.post('/api/searches/:id/team/confirm', ...requireWorkspace, requireSearch, requireManager, (req, res) => {
+app.post('/api/searches/:id/team/confirm', ...requireWorkspace, requireSearch, requireIntakeManager, (req, res) => {
   const confirm = req.body?.confirmed !== false;
   req.search.team = confirm
     ? { confirmedAt: db.now(), confirmedBy: req.user.id }
@@ -1689,7 +1696,7 @@ app.put('/api/searches/:id/intake/participation', ...requireWorkspace, requireSe
   res.json(painted(req, req.search));
 });
 
-app.post('/api/searches/:id/intake/status', ...requireWorkspace, requireSearch, requireManager, (req, res) => {
+app.post('/api/searches/:id/intake/status', ...requireWorkspace, requireSearch, requireIntakeManager, (req, res) => {
   const want = String(req.body?.status || '');
   if (!['draft', 'open', 'closed'].includes(want)) {
     return res.status(400).json({ error:'Intake is draft, open, or closed.' });

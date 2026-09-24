@@ -706,11 +706,16 @@ function rosterChanged(search){
   if (search.intake?.status === 'open') search.intake.rosterChangedAt = now();
 }
 
-/** Rostering, intake windows, and adoption belong to the account manager. */
+/** Roster edits and profile adoption belong to the account manager. */
 function canManage(search, access){
   if (!canEdit(search, access)) return false;
   const mgr = accountManager(search);
   return !mgr || mgr.userId === access.userId;
+}
+
+/** Administrators can run collection without taking over the account. */
+function canManageIntake(search, access){
+  return canEdit(search, access) && (Boolean(access.capabilities.admin) || canManage(search, access));
 }
 
 /**
@@ -914,7 +919,8 @@ function decorate(search, access){
       consultant: isStaff(access),
       role: access.role || null,
       canEdit: canEdit(search, access),
-      canManage: canManage(search, access)
+      canManage: canManage(search, access),
+      canManageIntake: canManageIntake(search, access)
     };
     // Intake is answered in confidence. An unfinished draft belongs to its
     // author and to nobody else, before or after the window closes; closing
@@ -1084,6 +1090,7 @@ module.exports = {
   canView,
   canEdit,
   canManage,
+  canManageIntake,
   findUserById,
   findUserByEmail,
   findSearch: id => db.searches.find(s=>s.id===id),

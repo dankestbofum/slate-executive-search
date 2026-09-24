@@ -97,7 +97,7 @@ test('waiting member checks again while staff can preview but cannot control the
     await expect(staffPreview.getByText('What would make you say no?')).toBeVisible();
     await expect(staff.getByRole('button',{name:'Submit my answers'})).toHaveCount(0);
     await expect(staff.getByRole('button',{name:'Open intake for committee input'})).toHaveCount(0);
-    await expect(staff.getByText('Only the account manager can open intake.')).toBeVisible();
+    await expect(staff.getByText('Only the account manager or an organization administrator can open intake.')).toBeVisible();
     await expect(staff.getByText('You are not on this search roster')).toBeVisible();
     await manager.goto('/#/s/'+search.id+'/intake');
     await manager.getByRole('button',{name:'Open intake for committee input'}).click();
@@ -128,7 +128,8 @@ test('closed intake shows the manager how to reopen committee input', async ({ b
   }
 });
 
-test('an administrator outside the roster sees the ballot and the separate skip decision', async ({ browser }, testInfo) => {
+test('an administrator can manage collection and join to answer another manager’s survey', async ({ browser }, testInfo) => {
+  test.slow();
   const managerContext = await browser.newContext();
   const adminContext = await browser.newContext();
   try {
@@ -155,8 +156,37 @@ test('an administrator outside the roster sees the ballot and the separate skip 
     await expect(preview).toBeFocused();
     await expect(admin.getByRole('button',{name:'Submit my answers'})).toHaveCount(0);
     await expect(admin.getByText('You are not on this search roster')).toBeVisible();
-    await expect(admin.getByRole('button',{name:'Open intake for committee input'})).toHaveCount(0);
+    await expect(admin.getByRole('button',{name:'Open intake for committee input'})).toBeVisible();
     await expect(admin.getByRole('button',{name:'Skip questionnaire and continue'})).toBeEnabled();
+    await admin.getByRole('textbox',{name:'Due date'}).fill('30 September 2026');
+    await admin.getByRole('textbox',{name:'Note to the committee'}).fill('Please rate each quality independently.');
+    await admin.getByRole('button',{name:'Open intake for committee input'}).click();
+    await expect(admin.getByText('Committee intake is open')).toBeVisible();
+    await admin.getByRole('button',{name:'Join and fill out my survey'}).click();
+    await expect(admin.locator('.intake-row')).toHaveCount(35);
+    await expect(admin.getByText('Please rate each quality independently.')).toBeVisible();
+    await primeRatings(admin, search.id);
+    await admin.reload();
+    await admin.getByRole('button',{name:'Submit my answers',exact:true}).click();
+    await expect(admin.getByRole('button',{name:'Review my survey',exact:true})).toBeVisible();
+    // Joining changes the denominator; the administrator can reconfirm it.
+    await admin.getByRole('button',{name:'Confirm the roster',exact:true}).click();
+    await admin.getByRole('button',{name:'Roster is set',exact:true}).click();
+    await admin.goto('/#/s/'+search.id+'/intake');
+    admin.on('dialog', dialog => dialog.accept());
+    await admin.getByRole('button',{name:'Close intake and review answers'}).click();
+    await expect(admin.getByRole('button',{name:'Reopen intake for committee input'})).toBeVisible();
+    await admin.getByRole('button',{name:'View my submitted survey'}).click();
+    await expect(admin.getByText('Your submitted answers',{exact:true})).toBeVisible();
+    await expect(admin.getByRole('button',{name:'Update my answers'})).toHaveCount(0);
+    await admin.getByRole('button',{name:'Manage committee input'}).click();
+    await admin.getByRole('button',{name:'Reopen intake for committee input'}).click();
+    await expect(admin.getByRole('button',{name:'Review my survey',exact:true})).toBeVisible();
+    const final = await (await admin.request.get(root)).json();
+    expect(final.you.canManage).toBe(false);
+    expect(final.accountManager.email).toBe('mike@slate.local');
+    expect(final.consensus.submitted).toBe(1);
+    expect(final.intake.dueBy).toBe('30 September 2026');
   } finally { await Promise.all([managerContext.close(),adminContext.close()]); }
 });
 

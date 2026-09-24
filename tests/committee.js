@@ -716,6 +716,38 @@ const archive = (id, abe) => write('/api/searches/' + id, { auth: abe, id, metho
     } finally { await archive(id, mike); }
   });
 
+  await check('administrators manage collection without taking the account; committee input obeys the window', async () => {
+    const { id, abe, people } = await standUp('Administrator collection controls', ['alice']);
+    const mike = sign.headers('mike@slate.local');
+    const staff = sign.headers('team@slate.local');
+    const root = '/api/searches/' + id;
+    try {
+      const joined = await write(root+'/members/self', {auth:mike,id,body:{}});
+      assert.strictEqual(joined.status, 200);
+      const managerId = joined.json.search.roster.find(m => m.email === 'mike@slate.local').userId;
+      assert.strictEqual((await write(root+'/members/'+managerId, {auth:abe,id,method:'PATCH',body:{searchRole:'manager'}})).status, 200);
+      const admin = await read(id, abe);
+      assert.strictEqual(admin.you.canManage, false);
+      assert.strictEqual(admin.you.canManageIntake, true);
+      for (const auth of [staff, people.alice.auth]) {
+        assert.strictEqual((await write(root+'/team/confirm', {auth,id,body:{confirmed:true}})).status, 403);
+        assert.strictEqual((await write(root+'/intake/status', {auth,id,body:{status:'closed'}})).status, 403);
+      }
+      assert.strictEqual((await write(root+'/team/confirm', {auth:abe,id,body:{confirmed:true}})).status, 200);
+      assert.strictEqual((await submit(id, people.alice, [])).status, 200);
+      assert.strictEqual((await closeIntake(id, abe)).status, 200);
+      assert.strictEqual((await saveDraft(id, people.alice, [])).json.code, 'INTAKE_SHUT');
+      assert.strictEqual((await submit(id, people.alice, [])).json.code, 'INTAKE_SHUT');
+      assert.strictEqual((await openIntake(id, abe)).status, 200);
+      assert.strictEqual((await submit(id, people.alice, [])).status, 200);
+      const final = await read(id, abe);
+      assert.strictEqual(final.accountManager.userId, managerId);
+      assert.strictEqual(final.consensus.submitted, 1);
+      const db = require('../server/db');
+      assert.strictEqual(db.canManageIntake({organizationId:'other',members:[]}, {orgId:'mine',userId:'admin',capabilities:{admin:true,staff:true}}), false);
+    } finally { await archive(id, mike); }
+  });
+
   await check('a roster change during the window has to be reconfirmed before closing', async () => {
     const { id, abe, people } = await standUp('Roster Change', ['alice']);
     try {

@@ -404,6 +404,7 @@ function you(){
 }
 function canEdit(){ return Boolean(you().canEdit); }
 function canManage(){ return Boolean(you().canManage); }
+function canManageIntake(){ return Boolean(you().canManageIntake); }
 /**
  * May I take this late-stage decision?
  *
@@ -4497,7 +4498,7 @@ function vTeam(){
     <div class="band"><div class="wrap stack">
       ${you().consultant && !you().member ? `<div class="notice notice--info"><div>
         <div class="notice__t">You are not on this search</div>
-        <div class="notice__b">You can read and edit it as a consultant, but adding people and running intake belong to the account manager. Join the roster to contribute; the account manager or an organization administrator can hand over the account.
+        <div class="notice__b">Join the roster to contribute your own survey answers. The account manager adds people; the account manager or an organization administrator can confirm the roster and open or close committee input.
           <button class="btn btn--secondary btn--sm" data-act="join-search">Join this search</button></div>
       </div></div>` : ''}
       ${mgr ? `<div class="spec"><div class="spec__bar">Account manager</div>
@@ -4563,7 +4564,7 @@ function vTeam(){
           ? 'Step '+stepNo('intake')+' can open. Adding anyone new reopens this step, because a person added later would miss the window.'
           : 'Everyone who should get a say needs to be on the roster first. Once you confirm, you can open the intake window.'}</div>
       </div></div>
-      ${manage
+      ${canManageIntake()
         ? actionBar(
             confirmed
               ? nextBtn('team')
@@ -4750,7 +4751,8 @@ function vIntakeAnswer(){
   return shell(`
     ${head('Step '+stepNo('intake'), 'Committee questionnaire',
       'Describe the candidate you want to hire: essential skills, leadership traits, current challenges, and future opportunities. '
-      + 'Rate how much each priority matters to you. The account manager uses the committee’s submitted answers to build and adopt the candidate profile in Step '+stepNo('profile')+'.')}
+      + 'Rate how much each priority matters to you. The account manager uses the committee’s submitted answers to build and adopt the candidate profile in Step '+stepNo('profile')+'.',
+      you().consultant ? '<button type="button" class="btn btn--secondary" data-go="intake">Manage committee input</button>' : '')}
     <div class="band"><div class="wrap stack">
       ${!open ? `<div class="notice notice--info" role="status"><div><div class="notice__t">${closed?'Questionnaire closed':'Preview only — answers are not open'}</div>
         <div class="notice__b">${closed?'Ask the account manager to reopen collection if you need to revise your answer.':'The controls below show the questions. You can answer when the account manager opens collection.'}</div>
@@ -4979,7 +4981,7 @@ function questionnaireChoice(){
       <div class="row">${skipped
         ? '<button type="button" class="btn btn--secondary" data-act="include-questionnaire">Include committee questionnaire</button>'
         : `<span class="t-small">Included in this search.</span><button type="button" class="btn btn--secondary" data-act="skip-questionnaire" ${!confirmed || submitted?'disabled':''}>Skip questionnaire and continue</button>`}</div>
-      ${!skipped && !confirmed ? '<p class="t-small">The account manager must confirm the roster in Step 1 first. A search can have just the account manager.</p>' : ''}
+      ${!skipped && !confirmed ? '<p class="t-small">Confirm the roster in Step 1 first. The account manager or an organization administrator can confirm it.</p>' : ''}
       ${!skipped && submitted ? '<p class="t-small">Answers have already been submitted. Review them and close the response window to continue.</p>' : ''}
     </div></section>`;
 }
@@ -5005,7 +5007,7 @@ function vIntakeManage(){
   const closed = intake.status === 'closed';
   const mine = mySubmission();
   const waiting = agg?.pending || [];
-  const windowAction = canManage()
+  const windowAction = canManageIntake()
     ? (!confirmed
       ? '<button type="button" class="btn btn--primary btn--sm" data-go="team">Confirm the roster</button>'
       : open
@@ -5015,12 +5017,14 @@ function vIntakeManage(){
   return shell(`
     ${head('Step '+stepNo('intake'), 'Committee questionnaire',
       'Collect what each committee member wants in the candidate profile: essential skills, leadership traits, current challenges, and future opportunities. In Step '+stepNo('profile')+', review these priorities together and adopt the profile used to evaluate candidates.',
-      `${you().member && open ? `<button class="btn btn--primary" data-go="intake-mine">Answer my questionnaire</button>` : ''}
+      `${open ? (you().member
+        ? `<button class="btn btn--primary" data-go="intake-mine">${mine ? 'Review my survey' : 'Fill out my survey'}</button>`
+        : '<button type="button" class="btn btn--primary" data-act="join-search" data-answer="true">Join and fill out my survey</button>') : ''}
        ${nextBtn('intake')}`)}
     <div class="band"><div class="wrap stack">
       <div class="notice notice--${open?'ok':closed?'wait':'info'}" role="status"><div>
         <div class="notice__t">Committee intake is ${open?'open':closed?'closed':'not open yet'}</div>
-        <div class="notice__b">${canManage()
+        <div class="notice__b">${canManageIntake()
           ? (!confirmed
             ? 'Confirm the search roster before '+(closed?'reopening':'opening')+' intake so everyone who should answer is included.'
             : open
@@ -5028,7 +5032,7 @@ function vIntakeManage(){
               : closed
                 ? 'Committee members cannot add or revise answers while intake is closed. Reopen it to collect more input.'
                 : 'The roster is confirmed. Open intake so committee members can answer.')
-          : esc(askManager()+' Only the account manager can '+(open?'close':closed?'reopen':'open')+' intake.')}</div>
+          : esc(askManager()+' Only the account manager or an organization administrator can '+(open?'close':closed?'reopen':'open')+' intake.')}</div>
         ${windowAction}
         <button type="button" class="btn btn--secondary btn--sm" data-act="jump" data-to="committee-questionnaire-preview">View questionnaire questions</button>
       </div></div>
@@ -5036,11 +5040,10 @@ function vIntakeManage(){
         <button type="button" class="btn btn--secondary btn--sm" data-act="join-search">Join this search</button></div></div>` : ''}
       <button type="button" class="btn btn--secondary btn--sm" data-act="check-intake">Check again</button>
       ${questionnaireChoice()}
-      ${sharedQualitiesPanel()}
       ${you().member ? `<section class="spec"><div class="spec__bar">Your input for the candidate profile</div>
         <div class="spec__body stack stack--tight"><p>Use your form to name the priorities you want included and rate how much each matters. Your submitted answers contribute alongside the committee’s.</p>
           ${open ? `<div class="row"><button class="btn btn--primary" data-go="intake-mine">${mine ? 'Review my profile input' : 'Add my profile input'}</button></div>`
-            : `<p class="t-small">${closed ? 'Reopen intake to revise your answer. Submitted input appears in the candidate profile review.' : 'Your input form becomes available when the response window opens.'}</p>`}
+            : `<p class="t-small">${closed ? 'Reopen intake to revise your answer. Submitted input appears in the candidate profile review.' : 'Your input form becomes available when the response window opens.'}</p>${closed && mine ? '<button type="button" class="btn btn--secondary" data-go="intake-mine">View my submitted survey</button>' : ''}`}
         </div></section>` : ''}
       <div class="tiles">
         <div class="tile"><span class="tile__k">On the search</span><span class="tile__v">${agg?agg.asked:(s.roster||[]).length}</span></div>
@@ -5049,7 +5052,7 @@ function vIntakeManage(){
         <div class="tile tile--hi"><span class="tile__k">Window</span><span class="tile__v u-fs-135">${open?'Open':closed?'Closed':'Not open'}</span><span class="tile__n">${esc(intake.dueBy||'no due date')}</span></div>
       </div>
 
-      ${canManage() ? `<div class="spec"><div class="spec__bar">Window</div>
+      ${canManageIntake() ? `<div class="spec"><div class="spec__bar">Committee input settings</div>
         <div class="spec__body"><form id="intakewindow" class="formgrid">
           ${field('Due date','Shown to every member.', `<input class="input" name="dueBy" value="${esc(intake.dueBy||'')}" placeholder="Respond by 12 Sep 2026">`)}
           ${field('Note to the committee','Optional. Appears above their form.', `<input class="input" name="prompt" value="${esc(intake.prompt||'')}" placeholder="Answer for yourself, not for the group.">`)}
@@ -5061,6 +5064,8 @@ function vIntakeManage(){
         <div class="spec__body"><div class="waiting">${waiting.map(p => `<span class="chip">${esc(p.name||'A member')}</span>`).join('')}</div>
         <p class="t-small">You can close the window without them. They can still score candidates later.</p>
         </div></div>` : ''}
+
+      ${sharedQualitiesPanel()}
 
       ${intake.rosterChangedAt && open ? `<div class="notice notice--stop"><div>
         <div class="notice__t">The roster changed while the window is open</div>
@@ -9046,8 +9051,9 @@ document.addEventListener('click', async e => {
     await withBusy(async () => {
       const out = await api('/api/searches/'+state.search.id+'/members/self', { method:'POST', body:{} });
       state.search = out.search;
-      toast('You are on this search. The manager or a workspace administrator can hand the account over.');
+      toast('You are on the roster and can contribute your own survey answers.');
     }, waitSave('Joining the search'));
+    if (t.dataset.answer && you().member) await go('intake-mine');
     return;
   }
   if (act==='make-manager'){
@@ -9089,7 +9095,7 @@ document.addEventListener('click', async e => {
       });
       state.intake = null;
       state.intakeConflict = null;
-      toast(enabled ? 'Committee questionnaire included. The account manager can open the response window.' : 'Committee questionnaire skipped. Continue with the candidate profile.');
+      toast(enabled ? 'Committee questionnaire included. The account manager or an organization administrator can open the response window.' : 'Committee questionnaire skipped. Continue with the candidate profile.');
     }, waitSave(enabled ? 'Including the questionnaire' : 'Skipping the questionnaire'));
     if (!enabled && state.search.intake?.skipped) await go('profile');
     return;
