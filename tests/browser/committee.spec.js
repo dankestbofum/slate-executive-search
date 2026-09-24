@@ -90,15 +90,41 @@ test('waiting member checks again while staff can preview but cannot control the
     await expect(members.waiting.page.getByText('Preview only — answers are not open')).toBeVisible();
     await expect(members.waiting.page.getByRole('button',{name:'Submit my answers'})).toHaveCount(0);
     await staff.goto('/#/s/'+search.id+'/intake');
-    await expect(staff.getByText('Budgeting')).toBeVisible();
-    await expect(staff.getByRole('button',{name:'Open the window'})).toHaveCount(0);
+    const staffPreview = staff.getByRole('region',{name:'Committee questionnaire preview'});
+    await expect(staffPreview.getByRole('heading',{name:'What must this person already know how to do?'})).toBeVisible();
+    await expect(staffPreview.getByText('Financial management')).toBeVisible();
+    await expect(staffPreview.getByText('What would make you say yes to a candidate?')).toBeVisible();
+    await expect(staffPreview.getByText('What would make you say no?')).toBeVisible();
+    await expect(staff.getByRole('button',{name:'Submit my answers'})).toHaveCount(0);
+    await expect(staff.getByRole('button',{name:'Open intake for committee input'})).toHaveCount(0);
+    await expect(staff.getByText('Only the account manager can open intake.')).toBeVisible();
     await expect(staff.getByText('You are not on this search roster')).toBeVisible();
     await manager.goto('/#/s/'+search.id+'/intake');
-    await manager.getByRole('button',{name:'Open the window'}).click();
+    await manager.getByRole('button',{name:'Open intake for committee input'}).click();
     await members.waiting.page.getByRole('button',{name:'Check again'}).click();
     await expect(members.waiting.page.getByRole('button',{name:'Submit my answers'})).toBeVisible();
   } finally {
     await Promise.all([staffContext.close(), managerContext.close(), ...Object.values(members).map(m => m.context.close())]);
+  }
+});
+
+test('closed intake shows the manager how to reopen committee input', async ({ browser }, testInfo) => {
+  const {search, manager, managerContext, members} = await openIntake(browser, testInfo, ['ada']);
+  try {
+    await manager.goto('/#/s/'+search.id+'/intake');
+    manager.on('dialog', dialog => dialog.accept('The committee needs another response window.'));
+    await manager.getByRole('button',{name:'Close intake and review answers'}).click();
+    await expect(manager.getByRole('button',{name:'Reopen intake for committee input'})).toBeVisible();
+    await expect(manager.getByRole('region',{name:'Committee questionnaire preview'})
+      .getByRole('heading',{name:'What could they build?'})).toBeVisible();
+    await members.ada.page.goto('/#/s/'+search.id+'/intake');
+    await expect(members.ada.page.getByText('Questionnaire closed')).toBeVisible();
+    await manager.getByRole('button',{name:'Reopen intake for committee input'}).click();
+    await expect(manager.getByText('Committee intake is open')).toBeVisible();
+    await members.ada.page.getByRole('button',{name:'Check again'}).click();
+    await expect(members.ada.page.getByRole('button',{name:'Submit my answers'})).toBeVisible();
+  } finally {
+    await Promise.all([managerContext.close(), members.ada.context.close()]);
   }
 });
 
@@ -118,9 +144,18 @@ test('an administrator outside the roster sees the ballot and the separate skip 
     const confirmed = await manager.request.post(root+'/team/confirm', {headers:{'if-match':revision},data:{confirmed:true}});
     expect(confirmed.ok(), await confirmed.text()).toBe(true);
     await admin.goto('/#/s/'+search.id+'/intake');
-    await expect(admin.getByText('Budgeting')).toBeVisible();
+    const preview = admin.getByRole('region',{name:'Committee questionnaire preview'});
+    await expect(preview.getByRole('heading',{name:'What must this person already know how to do?'})).toBeVisible();
+    await expect(preview.getByRole('heading',{name:'What kind of person works here?'})).toBeVisible();
+    await expect(preview.getByRole('heading',{name:'What are they walking into?'})).toBeVisible();
+    await expect(preview.getByRole('heading',{name:'What could they build?'})).toBeVisible();
+    await expect(preview.getByText('Financial management')).toBeVisible();
+    await expect(preview.getByText('What would make you say yes to a candidate?')).toBeVisible();
+    await admin.getByRole('button',{name:'View questionnaire questions'}).click();
+    await expect(preview).toBeFocused();
+    await expect(admin.getByRole('button',{name:'Submit my answers'})).toHaveCount(0);
     await expect(admin.getByText('You are not on this search roster')).toBeVisible();
-    await expect(admin.getByRole('button',{name:'Open the window'})).toHaveCount(0);
+    await expect(admin.getByRole('button',{name:'Open intake for committee input'})).toHaveCount(0);
     await expect(admin.getByRole('button',{name:'Skip questionnaire and continue'})).toBeEnabled();
   } finally { await Promise.all([managerContext.close(),adminContext.close()]); }
 });
@@ -148,8 +183,8 @@ test('the administrator can skip the questionnaire and enable it again without a
     await manager.goto('/#/s/' + search.id + '/intake');
     await expect(manager.locator('.notice__t')).toHaveText('Committee questionnaire skipped');
     await manager.getByRole('button', {name:'Include committee questionnaire', exact:true}).click();
-    await expect(manager.getByRole('button', {name:'Open the window', exact:true})).toBeVisible();
-    await manager.getByRole('button', {name:'Open the window', exact:true}).click();
+    await expect(manager.getByRole('button', {name:'Open intake for committee input', exact:true})).toBeVisible();
+    await manager.getByRole('button', {name:'Open intake for committee input', exact:true}).click();
     await expect(manager.locator('#toast')).toContainText('Intake is open');
     await nameOnePriority(members.ada.page, search.id, 'Budgeting', 5);
     await members.ada.page.getByRole('button', {name:'Submit my answers', exact:true}).click();
@@ -173,7 +208,7 @@ test('standard questionnaire feeds scored recommendations, reviewed favorites an
     await members.ada.page.goto('/#/s/'+search.id+'/intake');
     await expect(members.ada.page.getByRole('button',{name:'Rate Financial management 5 of 5',exact:true})).toBeDisabled();
     await expect(members.ada.page.locator('[data-act="next-step"]')).toHaveCount(0);
-    await manager.getByRole('button',{name:'Open the window',exact:true}).click();
+    await manager.getByRole('button',{name:'Open intake for committee input',exact:true}).click();
     await expect(manager.locator('#toast')).toContainText('Intake is open');
     for (const page of [members.ada.page,members.bo.page,manager]) {
       await page.setViewportSize(testInfo.project.use.viewport || {width:1280,height:720});
@@ -192,7 +227,7 @@ test('standard questionnaire feeds scored recommendations, reviewed favorites an
     }
     await manager.goto('/#/s/'+search.id+'/intake');
     await expect(manager.locator('.cons')).toHaveCount(0);
-    await manager.getByRole('button',{name:'Close and read the room',exact:true}).click();
+    await manager.getByRole('button',{name:'Close intake and review answers',exact:true}).click();
     await expect(manager.locator('#toast')).toContainText('Intake closed');
     await manager.getByRole('button',{name:'Review committee input',exact:true}).click();
     await expect(manager.locator('#committee-review')).toContainText('Reliable water services are our urgent community need.');
