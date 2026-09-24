@@ -8,6 +8,8 @@ This is the current follow-up plan to the [three-agent walkthrough](REPORT.md). 
 
 ## Committee workflow clarification (September 23)
 
+- Superseding mechanism: a product-owned, versioned questionnaire supplies 35 qualities across four questions/categories. Administrators cannot edit the ballot. Every member rates every listed quality from 1–5 and may explain why; submitted answers alone are scored. Unanswered searches upgrade to this questionnaire; questionnaires with saved answers keep their original questions and responses.
+- Standard results rank average importance, show response counts and the number rating 4–5, preserve disagreement, and explain ties. Step 3 initially recommends the top five per category; the administrator selects 3–5 favorites, reviews the proposed adoption, and may add missing qualities to the finalized profile. The adopted criteria continue to feed the candidate questionnaires and recruitment brochure.
 - Step 2 collects each member's independent priorities: suggested or custom qualities, clickable 1–5 importance ratings, and a visible **Explain why** field. Before the administrator opens the window, members can preview the shared questions but cannot submit answers or advance into an administrator task.
 - Step 3 is the administrator's review of submitted ratings, every explanation, community challenges/opportunities, and written context. Aggregation and adoption live here, not in Step 2. A blank profile editor no longer replaces this review; administrators can adopt the proposed profile or explicitly write the final profile after collection closes.
 - Committee members see a read-only adopted profile. Skipping the optional questionnaire still opens direct profile writing for the administrator.

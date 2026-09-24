@@ -38,6 +38,11 @@ async function req(path, { method='GET', body, auth, expect }={}){
     if (me.ok && current.ok) {
       const uid = (await me.json()).user?.id;
       const search = await current.json();
+      if (body.submitted && search.intake?.questionnaireVersion) {
+        const key = require('../server/committee').groupKey;
+        const items = body.items || [];
+        body = {...body, items:[...items, ...search.intake.qualities.filter(q => !items.some(i => key(i.kind,i.label) === key(q.kind,q.label))).map(q => ({...q,weight:1}))]};
+      }
       const mine = (search.intake?.responses || {})[uid];
       body = { ...body, responseRevision: Number(mine?.revision || 1) };
     }
@@ -987,7 +992,7 @@ async function run(){
     record('Unanimous agreement is labeled as such', money.consensus==='unanimous', money.consensus);
     const split = agg.byKind.trait.find(e => /approach/i.test(e.label));
     record('A committee that disagrees on weight is flagged contested',
-      split && split.contested===true && split.minWeight===2 && split.maxWeight===5);
+      split && split.contested===true && split.minWeight===1 && split.maxWeight===5);
     record('Members who have not answered are listed by name',
       agg.pending.some(p => p.name==='Abe Macy'));
 
@@ -1024,8 +1029,8 @@ async function run(){
       /Named by 3 of 3 who answered/.test(top.note), top.note);
     record('Each adopted line keeps a durable link to its source',
       Boolean(top.source?.key) && Boolean(top.source.adoptionId), JSON.stringify(top.source));
-    record('Kinds the profile is still short in are reported as gaps',
-      Array.isArray(adopted.json.gaps) && adopted.json.gaps.some(g => g.kind==='opp'));
+    record('The standard questionnaire produces a complete profile in every category',
+      Array.isArray(adopted.json.gaps) && adopted.json.gaps.length===0);
     record('Committee coverage is reported separately from profile gaps',
       Array.isArray(adopted.json.coverage));
 

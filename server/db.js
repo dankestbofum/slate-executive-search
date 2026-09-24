@@ -108,7 +108,8 @@ function blankSearch(input, user, organizationId){
       status: 'draft',
       dueBy: '',
       prompt: '',
-      qualities: [],
+      questionnaireVersion: committee.questionnaire.VERSION,
+      qualities: committee.questionnaire.qualities(),
       skipped: null,
       openedAt: null,
       closedAt: null,
@@ -571,6 +572,7 @@ function migrate(store){
       };
     }
     migrateIntakeResponses(s);
+    committee.questionnaire.initialize(s);
     s.adoptions ||= [];
     // A profile adopted before adoptions were recorded has no evidence behind
     // its support claims, and today's tally is not that evidence. Mark it for
@@ -924,6 +926,7 @@ function decorate(search, access){
       dueBy: intake.dueBy || '',
       prompt: intake.prompt || '',
       qualities: (intake.qualities || []).map(q => ({ kind: q.kind, label: q.label })),
+      questionnaireVersion: intake.questionnaireVersion || null,
       openedAt: intake.openedAt || null,
       closedAt: intake.closedAt || null,
       legacy: intake.legacy,
