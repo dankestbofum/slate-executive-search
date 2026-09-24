@@ -1643,24 +1643,10 @@ function recordPublication(search, req, extra){
   };
 }
 
-// The common ballot is deliberately separate from private answers and profile
-// provenance. Freeze it when collection begins so everyone rates the same list.
+// Retain a clear refusal for older clients: ballot options now come from the
+// versioned product questionnaire, never an administrator's preselection.
 app.put('/api/searches/:id/intake/qualities', ...requireWorkspace, requireSearch, requireManager, (req, res) => {
-  const intake = req.search.intake;
-  if (intake.status !== 'draft' || intake.openedAt || Object.keys(intake.responses || {}).length) {
-    return res.status(409).json({ error: 'The shared qualities cannot change after the response window has opened.' });
-  }
-  const raw = req.body?.qualities;
-  if (!Array.isArray(raw) || raw.length > 40 || raw.some(q => !q || !committee.KINDS.includes(q.kind)
-      || typeof q.label !== 'string' || !q.label.trim() || q.label.trim().length > 200)) {
-    return res.status(400).json({ error: 'Use up to 40 qualities, each with a category and a name of 200 characters or fewer.' });
-  }
-  intake.qualities = committee.cleanItems(raw).map(({ kind, label }) => ({ kind, label }));
-  if ('dueBy' in req.body) intake.dueBy = String(req.body.dueBy || '').slice(0, 120);
-  if ('prompt' in req.body) intake.prompt = String(req.body.prompt || '').slice(0, 2000);
-  db.touch(req.search, req.user, 'prepared shared qualities for committee ranking');
-  db.persist();
-  res.json(painted(req, req.search));
+  return res.status(409).json({ error:'The committee questionnaire uses a standard set of qualities. Administrators cannot select or change the ballot.', code:'STANDARD_QUESTIONNAIRE' });
 });
 
 // This per-search choice belongs to the organization administrator, including
@@ -1676,6 +1662,7 @@ app.put('/api/searches/:id/intake/participation', ...requireWorkspace, requireSe
     intake.completedEmpty = null;
     intake.status = 'draft';
     intake.closedAt = null;
+    committee.questionnaire.initialize(req.search);
   } else {
     if (intake.skipped) return res.json(painted(req, req.search));
     if (!req.search.team?.confirmedAt) return res.status(409).json({ error:'Confirm the search roster before continuing without the questionnaire.', code:'ROSTER_UNCONFIRMED' });
@@ -1728,6 +1715,7 @@ app.post('/api/searches/:id/intake/status', ...requireWorkspace, requireSearch, 
     }
   }
   intake.status = want;
+  committee.questionnaire.initialize(req.search);
   if ('dueBy' in (req.body || {})) intake.dueBy = String(req.body.dueBy || '').slice(0, 120);
   if ('prompt' in (req.body || {})) intake.prompt = String(req.body.prompt || '').slice(0, 2000);
   if (want === 'open') {
@@ -1890,8 +1878,18 @@ app.post('/api/searches/:id/intake/adopt', ...requireWorkspace, requireSearch, r
   const retain = Array.isArray(req.body?.retain) ? req.body.retain.filter(id => typeof id === 'string').slice(0, 100) : [];
   const retainReasons = (req.body?.retainReasons && typeof req.body.retainReasons === 'object') ? req.body.retainReasons : {};
   const adoptionId = 'ADOPT-' + ((req.search.adoptions || []).length + 1);
+  const selectedKeys = req.body?.selectedKeys;
+  if (selectedKeys !== undefined) {
+    const entries = Object.values(agg.byKind).flat();
+    if (!Array.isArray(selectedKeys) || selectedKeys.some(key => typeof key !== 'string' || !entries.some(e => e.key === key))
+        || new Set(selectedKeys).size !== selectedKeys.length
+        || committee.KINDS.some(kind => {
+          const count = entries.filter(e => e.kind === kind && selectedKeys.includes(e.key)).length;
+          return count < Math.min(3, agg.byKind[kind].length) || count > 5;
+        })) return res.status(400).json({ error:'Select 3 to 5 qualities in each category from the committee results.' });
+  }
   const plan = committee.adoptionPreview(req.search.criteria, agg, {
-    retain, retainReasons, adoptionId, at: db.now(), actor: req.user.id
+    retain, retainReasons, selectedKeys, adoptionId, at: db.now(), actor: req.user.id
   });
 
   if (preview) {

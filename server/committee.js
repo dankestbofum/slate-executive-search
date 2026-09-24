@@ -10,6 +10,7 @@
  */
 
 const crypto = require('crypto');
+const questionnaire = require('../content/committee-questionnaire');
 
 const KINDS = ['skill', 'trait', 'chall', 'opp'];
 const KIND_LABEL = {
@@ -232,6 +233,7 @@ function aggregate(search, nameOf){
     const share = submitted ? mentions / submitted : 0;
     const min = Math.min(...weights);
     const max = Math.max(...weights);
+    const highRatings = weights.filter(w => w >= 4).length;
     // The label most members typed wins. Ties fall to the shortest, since the
     // words normLabel strips as filler ("strong", "skills", "the") are exactly
     // what makes one member's phrasing longer than another's for the same idea,
@@ -250,6 +252,7 @@ function aggregate(search, nameOf){
       label,
       mentions,
       share,
+      highRatings,
       avgWeight: weights.reduce((a, b) => a + b, 0) / mentions,
       minWeight: min,
       maxWeight: max,
@@ -257,7 +260,7 @@ function aggregate(search, nameOf){
       // Named by several people who disagree sharply on how much it matters.
       // Worth a conversation before it is adopted or dropped.
       contested: mentions > 1 && (max - min) >= 3,
-      consensus: bucket(share, mentions, submitted),
+      consensus: search.intake?.questionnaireVersion ? (highRatings ? bucket(highRatings / submitted, highRatings, submitted) : 'none') : bucket(share, mentions, submitted),
       voters: g.voters.slice().sort((a, b) => b.weight - a.weight),
       notes: g.voters.filter(v => v.note).map(v => ({ userId: v.userId, name: v.name, weight: v.weight, note: v.note }))
     });
@@ -265,9 +268,12 @@ function aggregate(search, nameOf){
 
   for (const k of KINDS) {
     byKind[k].sort((a, b) =>
-      b.mentions - a.mentions ||
-      b.avgWeight - a.avgWeight ||
+      (search.intake?.questionnaireVersion ? b.avgWeight - a.avgWeight : b.mentions - a.mentions) ||
+      (search.intake?.questionnaireVersion ? b.mentions - a.mentions : b.avgWeight - a.avgWeight) ||
       a.label.localeCompare(b.label));
+    byKind[k].forEach((entry, i, list) => {
+      entry.rank = i && entry.avgWeight === list[i-1].avgWeight && entry.mentions === list[i-1].mentions ? list[i-1].rank : i+1;
+    });
   }
 
   return {
@@ -407,6 +413,7 @@ function critKey(c){
  */
 function adoptionPreview(existing, agg, options = {}){
   const retain = new Set(options.retain || []);
+  const selected = options.selectedKeys ? new Set(options.selectedKeys) : null;
   const adoptionId = options.adoptionId || null;
   const at = options.at || new Date().toISOString();
   const prior = (existing || []).filter(c => c && KINDS.includes(c.kind) && labelOf(c));
@@ -439,6 +446,10 @@ function adoptionPreview(existing, agg, options = {}){
 
     // 1. What the committee named, in rank order, up to the cap.
     for (const entry of supported) {
+      if (selected && !selected.has(entry.key)) {
+        excluded.push({kind, label:entry.label, key:entry.key, reason:'decision', mentions:entry.mentions, why:'Not selected during profile review.'});
+        continue;
+      }
       if (keep.length >= KIND_CAP) {
         excluded.push({ kind, label: entry.label, key: entry.key, reason: 'cap',
           mentions: entry.mentions, why: 'Ranked below the five that fit this category.' });
@@ -476,6 +487,10 @@ function adoptionPreview(existing, agg, options = {}){
       const key = critKey(c);
       const wasCommittee = c.from === 'committee';
       const record = { id: c.id, kind, label: labelOf(c), key, from: c.from || 'consultant' };
+      if (selected && supported.some(e => e.key === key) && !selected.has(key)) {
+        removed.push({...record, why:'Not selected during profile review.'});
+        continue;
+      }
       // Two lines that reduce to the same priority, and step 1 has already
       // given the committee's answer to one of them. The other is a duplicate,
       // and saying so is better than quietly not carrying it forward.
@@ -631,6 +646,7 @@ function packForPrompt(agg, options = {}){
 }
 
 module.exports = {
+  questionnaire,
   KINDS, KIND_LABEL, KIND_CAP, KIND_FLOOR,
   SEARCH_ROLES, SEARCH_ROLE_LABEL, INTAKE_ROLES, PREFIX,
   normLabel, groupKey, critKey, cleanItems, normalizeAnswer, clampWeight, searchRoleOf,

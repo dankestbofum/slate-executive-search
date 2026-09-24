@@ -2419,6 +2419,7 @@ async function loadSearch(id, { current = () => true } = {}){
   if (state.search?.id !== id) {
     state.intake = null; state.intakeConflict = null; state.adoptPlan = null;
     delete state.open.profileedit;
+    state.profileFavorites = null;
     state.newPin = null; state.newPeople = null; stopResearch();
   }
   state.search = search;
@@ -4644,7 +4645,8 @@ function intakeRow(item, i){
   // once a form holds a dozen of them. Name the priority and the scale, the
   // same way the profile editor already does (CA-11).
   const named = String(item.label||'').trim();
-  const what = named || (KIND[item.kind]?.label || 'this priority') + ' ' + (i+1);
+  const repeated = named && intakeDraft().items.filter(row => String(row.label||'').trim() === named).length > 1;
+  const what = named ? named + (repeated ? ' ('+(KIND[item.kind]?.plural || item.kind)+' '+(i+1)+')' : '') : (KIND[item.kind]?.label || 'this priority') + ' ' + (i+1);
   const shared = (state.search?.intake?.qualities || []).some(q => q.kind === item.kind && q.label === item.label);
   return `<div class="intake-row" data-row="${i}">
     <div class="stack u-gap-6">
@@ -4663,18 +4665,19 @@ function intakeGroup(kind){
   const labels = new Set(rows.map(x => String(x.it.label||'').trim().toLowerCase()).filter(Boolean));
   const ask = INTAKE_ASK[kind];
   const named = rows.filter(x => String(x.it.label||'').trim()).length;
+  const rated = rows.filter(x => Number.isInteger(x.it.weight) && x.it.weight >= 1 && x.it.weight <= 5).length;
   const suggKey = 'isugg-'+kind;
   const suggOpen = state.open[suggKey] === undefined ? true : Boolean(state.open[suggKey]);
-  return `<section id="intake-sec-${kind}" class="spec profgroup"><div class="spec__bar">${esc(KIND[kind].plural)} · ${named} named</div>
+  return `<section id="intake-sec-${kind}" class="spec profgroup"><div class="spec__bar">${esc(KIND[kind].plural)} · ${state.search.intake?.questionnaireVersion ? rated+' of '+named+' rated' : named+' named'}</div>
     <div class="spec__body stack">
       <p><strong>${esc(ask.t)}</strong></p>
-      <p class="t-small">${esc(ask.hint)} Add as many as you want. Rate each 1 to 5 for how much it matters to you.</p>
+      <p class="t-small">${esc(ask.hint)} Rate every quality from 1 to 5 and explain why it matters. You may suggest a missing quality; its response count will be shown separately in the results.</p>
       ${rows.map(x => intakeRow(x.it, x.i)).join('') || '<p class="t-small">Nothing here yet. Write your own, or open the suggestions.</p>'}
       <div class="row">
         <button type="button" class="btn btn--secondary btn--sm" data-iadd="${kind}">Write my own</button>
-        <button type="button" class="btn btn--ghost btn--sm" data-panel="${suggKey}" aria-expanded="${suggOpen}" aria-controls="ipick-${kind}" data-open-label="Suggestions" data-close-label="Hide suggestions">${suggOpen?'Hide suggestions':'Suggestions'}</button>
+        ${!state.search.intake?.questionnaireVersion ? `<button type="button" class="btn btn--ghost btn--sm" data-panel="${suggKey}" aria-expanded="${suggOpen}" aria-controls="ipick-${kind}" data-open-label="Suggestions" data-close-label="Hide suggestions">${suggOpen?'Hide suggestions':'Suggestions'}</button>` : ''}
       </div>
-      <div id="ipick-${kind}"${suggOpen?'':' hidden'}>
+      <div id="ipick-${kind}"${suggOpen && !state.search.intake?.questionnaireVersion?'':' hidden'}>
         <p class="t-small">Select suggested qualities to add to your answer, or write your own.${(state.search?.intake?.qualities || []).length ? ' Shared qualities are already included; rate those above.' : ''}</p>
         <div class="pick">${(SUGGEST[kind]||[]).map(label => {
           const on = labels.has(label.toLowerCase());
@@ -4719,7 +4722,7 @@ function vIntakeAnswer(){
   const d = intakeDraft();
   const open = intake.status === 'open';
   const closed = intake.status === 'closed';
-  const count = d.items.filter(i => String(i.label||'').trim()).length;
+  const count = d.items.filter(i => String(i.label||'').trim() && Number.isInteger(i.weight) && i.weight >= 1 && i.weight <= 5).length;
   return shell(`
     ${head('Step '+stepNo('intake'), 'Committee questionnaire',
       'Describe the candidate you want to hire: essential skills, leadership traits, current challenges, and future opportunities. '
@@ -4761,8 +4764,9 @@ function vIntakeAnswer(){
         <nav class="secnav" aria-label="Questionnaire sections">
           <span class="secnav__t">Sections</span>
           ${Object.keys(INTAKE_ASK).map(k => {
-            const named = d.items.filter(i => i.kind===k && String(i.label||'').trim()).length;
-            return `<button type="button" class="${named?'is-done':''}" data-act="jump" data-to="intake-sec-${k}">${esc(KIND[k].plural)} <span class="mono">${named}</span></button>`;
+            const items = d.items.filter(i => i.kind===k && String(i.label||'').trim());
+            const rated = items.filter(i => Number.isInteger(i.weight) && i.weight >= 1 && i.weight <= 5).length;
+            return `<button type="button" class="${items.length && rated===items.length?'is-done':''}" data-act="jump" data-to="intake-sec-${k}">${esc(KIND[k].plural)} <span class="mono">${rated}/${items.length}</span></button>`;
           }).join('')}
           <button type="button" data-act="jump" data-to="intake-sec-words">In your own words</button>
         </nav>
@@ -4783,7 +4787,7 @@ function vIntakeAnswer(){
               : 'Keep what you have written without submitting it. Nobody reads it until you submit.')
           + (mine ? withTip(`<button type="button" class="btn btn--ghost" data-act="withdraw-intake">Withdraw my answers</button>`,
             'Take your submitted answers out of the tally. They come back to you as a private draft.') : ''),
-          count+' named so far.',
+          count+' qualities rated so far.',
           mine ? (intakeHasUnsubmitted() ? 'Saved edits not submitted' : 'Submitted') : 'Not submitted yet')}` : ''}
       ${!open && !closed && (intake.qualities || []).length ? `<section class="stack">
         <h2>Preview your questionnaire</h2><p class="t-small">These controls become available when the account manager opens the questionnaire. Then choose 1–5 and explain why for each quality.</p>
@@ -4797,12 +4801,20 @@ function vIntakeAnswer(){
     </div></div>`);
 }
 
-function consensusMeter(entry, submitted){
-  const pct = Math.round((entry.share || 0) * 100);
+function favoritesFor(agg){
+  const signature = state.search.id + JSON.stringify(Object.values(agg.byKind).flat().map(e => [e.key,e.avgWeight,e.mentions]));
+  if (state.profileFavorites?.signature !== signature) {
+    state.profileFavorites = {signature, keys:Object.values(agg.byKind).flatMap(rows => rows.slice(0,5).map(e => e.key))};
+  }
+  return state.profileFavorites.keys;
+}
+
+function consensusMeter(entry, submitted, selection=null, recommended=false){
+  const pct = Math.round(state.search.intake?.questionnaireVersion ? entry.avgWeight / 5 * 100 : (entry.share || 0) * 100);
   const tone = entry.consensus==='unanimous' ? 'ok' : entry.consensus==='strong' ? 'ok' : entry.consensus==='split' ? 'wait' : 'idle';
   return `<div class="cons">
     <div class="cons__hd">
-      <b>${esc(entry.label)}</b>
+      <b>${esc(entry.label)}</b>${recommended ? '<span class="chip">Top 5 recommendation</span>' : ''}
       <span class="cons__tags">
         ${pill(tone, entry.mentions+' of '+submitted)}
         ${entry.contested ? pill('stop','Contested') : ''}
@@ -4811,12 +4823,14 @@ function consensusMeter(entry, submitted){
     </div>
     <div class="cons__bar"><span data-width-pct="${pct}"></span></div>
     <div class="cons__who t-small">${entry.voters.map(v => esc(v.name||'A member')+' '+v.weight).join(' · ')}</div>
+    ${state.search.intake?.questionnaireVersion ? `<p class="t-small">Score: ${entry.avgWeight.toFixed(2)} / 5. Rated 4 or 5 by ${entry.highRatings} of ${submitted} respondents.${(state.search.intake.qualities || []).some(q => q.kind === entry.kind && q.label === entry.label) ? '' : ' Additional suggestion; not every member was asked to rate it.'}</p>` : ''}
+    ${selection ? `<label class="row t-small"><input type="checkbox" data-act="profile-favorite" data-key="${esc(entry.key)}" ${selection.includes(entry.key)?'checked':''}> Select ${esc(entry.label)} for the profile</label>` : ''}
     ${entry.contested ? `<div class="t-small cons__flag">Rated as low as ${entry.minWeight} and as high as ${entry.maxWeight}. Worth naming out loud before the profile is adopted.</div>` : ''}
     ${entry.notes.length ? `<div class="cons__notes">${entry.notes.map(n => `<div class="t-small">${esc(n.name||'A member')}: ${esc(n.note)}</div>`).join('')}</div>` : ''}
   </div>`;
 }
 
-function consensusPanels(agg, showEmpty=true){
+function consensusPanels(agg, showEmpty=true, choose=false){
   if (!agg.submitted) {
     return showEmpty ? `<div class="empty"><div class="empty__t">Nothing submitted yet</div>Consensus appears as members answer.</div>` : '';
   }
@@ -4825,7 +4839,7 @@ function consensusPanels(agg, showEmpty=true){
   // out of the people who answered, and somebody not naming an item is not a
   // vote against it.
   const turnout = `<p class="t-small">${agg.submitted} of ${agg.asked} people asked submitted answers.
-    ${(state.search?.intake?.qualities || []).length ? 'Every submitted answer rates each shared quality. Compare their average importance on the 1–5 scale. Results are ordered by response count, then average importance; suggestions may have fewer ratings.' : ''}
+    ${state.search.intake?.questionnaireVersion ? 'Score = sum of the submitted ratings divided by the number of people who rated that quality. Results are ranked by average importance, then response count. Exact ties are shown alphabetically, not as stronger consensus. Additional suggestions may have fewer ratings.' : (state.search?.intake?.qualities || []).length ? 'Every submitted answer rates each shared quality. Results are ordered by response count, then average importance.' : ''}
     Each count below is out of those ${agg.submitted}. Somebody who did not name an item was not voting against it.
     Matching is by wording, so “Budgeting” and “Financial management” stay separate entries.
     The must-have, deal-breaker and context answers are guidance for the search team, not rules the profile enforces.</p>`;
@@ -4833,7 +4847,8 @@ function consensusPanels(agg, showEmpty=true){
     const list = agg.byKind[k] || [];
     return `<div class="spec"><div class="spec__bar">${esc(label)} ${pill(list.length>=3?'ok':'wait', list.length+' named')}</div>
       <div class="spec__body stack">
-        ${list.map(e => consensusMeter(e, agg.submitted)).join('') || '<div class="t-small">Nobody named anything here. You will have to write these yourself.</div>'}
+        ${choose ? `<p class="t-small">Choose 3 to 5 favorites. The five highest-scoring qualities are initially selected. Review ties and explanations before deciding.</p>` : ''}
+        ${list.map((e,i) => consensusMeter(e, agg.submitted, choose ? favoritesFor(agg) : null, choose && i < 5)).join('') || '<div class="t-small">Nobody named anything here. You will have to write these yourself.</div>'}
       </div></div>`;
   }).join('') + (agg.voices.length ? `<div class="spec"><div class="spec__bar">In their own words</div>
     <div class="spec__body stack">${agg.voices.map(v => `<div class="voice">
@@ -4869,17 +4884,17 @@ function adoptPlanPanel(){
         ` <span class="t-small">named by ${r.mentions} of ${plan.respondents}${r.contested?', contested':''}</span>`))}
       ${group('Already on the profile, support refreshed', c.changed || [], r => line(r,
         ` <span class="t-small">now named by ${r.mentions} of ${plan.respondents}${r.was && r.was.label !== r.label ? '; you renamed it from “'+esc(r.was.label)+'”' : ''}</span>`))}
-      ${group('Proposed for removal — nobody names these now', c.removed || [], r => `<li>
+      ${group('Proposed for removal', c.removed || [], r => `<li>
         <b>${esc(r.label)}</b> <span class="mono t-small">${esc(r.id)}</span>
         <div class="t-small">${esc(r.why)}</div>
-        <label class="t-small"><input type="checkbox" data-retain="${esc(r.id)}" ${retained.has(r.id)?'checked':''}>
-          Keep it anyway, as my decision</label>
+        ${r.why === 'Not selected during profile review.' ? '<p class="t-small">Select this quality in the results above to include it again.</p>' : `<label class="t-small"><input type="checkbox" data-retain="${esc(r.id)}" ${retained.has(r.id)?'checked':''}>
+          Keep it anyway, as my decision</label>`}
         ${retained.has(r.id) ? `<input class="input" data-retain-reason="${esc(r.id)}" placeholder="Why keep it? Recorded with the profile." value="${esc((plan.retainReasons||{})[r.id]||'')}">` : ''}
       </li>`)}
       ${group('Your own criteria, kept', c.kept || [], r => line(r))}
       ${group('Kept by your decision — support describes earlier answers', c.retained || [], r => line(r,
         ` <span class="t-small">${esc(r.why)}</span>`))}
-      ${group('Excluded — the category holds five', c.excluded || [], r => `<li>
+      ${group('Not included in this profile', c.excluded || [], r => `<li>
         <b>${esc(r.label)}</b> <span class="t-small">${esc(KIND[r.kind]?.label || r.kind)} — ${esc(r.why)}</span></li>`)}
       ${(plan.discussion || []).length ? `<div class="spec"><div class="spec__bar">For discussion, not on the profile ${pill('stop', String(plan.discussion.length))}</div>
         <div class="spec__body stack">${plan.discussion.map(d => `<div class="t-small">
@@ -4900,48 +4915,11 @@ function adoptPlanPanel(){
 
 function sharedQualitiesPanel(){
   const intake = state.search.intake || {};
-  const qualities = intake.qualities || [];
-  const editable = canManage() && intake.status === 'draft' && !intake.openedAt
-    && !Object.keys(intake.responses || {}).length;
-  return `<section class="spec"><div class="spec__bar">Shared candidate qualities</div><div class="spec__body stack">
-    <p>Prepare the same list for every committee member and yourself to rate from 1 to 5. Members can suggest additions. The list stays fixed once the window opens so the aggregate compares the same qualities.</p>
-    ${editable ? `<form id="sharedqualities" class="formgrid">${Object.keys(INTAKE_ASK).map(kind => {
-      const selected = qualities.filter(q => q.kind === kind).map(q => q.label);
-      const labels = new Set(selected.map(label => label.toLowerCase()));
-      return `<section class="stack stack--tight" aria-labelledby="shared-title-${kind}">
-        <h3 id="shared-title-${kind}">${esc(KIND[kind].plural)}</h3>
-        <p class="t-small">Select suggested qualities. Click a selected suggestion again to remove it.</p>
-        <div class="pick" role="group" aria-label="Suggested ${esc(KIND[kind].plural.toLowerCase())}">${(SUGGEST[kind] || []).map(label =>
-          `<button type="button" data-shared-pick="${kind}" data-label="${esc(label)}" aria-pressed="${labels.has(label.toLowerCase())}">${esc(label)}</button>`
-        ).join('')}</div>
-        ${field('Selected '+KIND[kind].plural.toLowerCase(), 'Edit the wording or add your own qualities, one per line.', `<textarea class="input ed" id="shared-selected-${kind}" name="${kind}" rows="4">${esc(selected.join('\n'))}</textarea>`)}
-      </section>`;
-    }).join('')}</form><div class="row">
-      <button type="button" class="btn btn--primary" data-act="save-shared-qualities">Save shared qualities</button>
-      ${(state.search.criteria || []).length ? '<button type="button" class="btn btn--secondary" data-act="copy-profile-qualities">Use current profile qualities</button>' : ''}
-    </div><p class="t-small">Save this list before opening the response window. Leaving it empty keeps the open-ended questionnaire.</p>`
-      : qualities.length ? `<ul>${qualities.map(q => `<li>${esc(KIND[q.kind]?.plural || q.kind)}: ${esc(q.label)}</li>`).join('')}</ul>`
-        : '<p class="t-small">This window uses the open-ended questionnaire: each member names and rates their own priorities.</p>'}
-  </div></section>`;
-}
-
-function collectSharedQualities(){
-  const form = $('#sharedqualities');
-  if (!form) return null;
-  return Object.entries(Object.fromEntries(new FormData(form).entries())).flatMap(([kind, text]) =>
-    String(text).split(/\r?\n/).map(label => label.trim()).filter(Boolean).map(label => ({ kind, label })));
-}
-
-// Update the selection marks in place so choosing a suggestion never redraws
-// or discards the administrator's other unsaved categories and window notes.
-function paintSharedQualities(){
-  const qualities = collectSharedQualities();
-  if (!qualities) return;
-  $$('#sharedqualities [data-shared-pick]').forEach(button => {
-    const on = qualities.some(q => q.kind === button.dataset.sharedPick
-      && q.label.toLowerCase() === button.dataset.label.toLowerCase());
-    button.setAttribute('aria-pressed', String(on));
-  });
+  return '<section class="spec"><div class="spec__bar">Committee questionnaire</div><div class="spec__body stack">'
+    + '<p>Everyone answers the same four questions about skills, leadership traits, current challenges, and future opportunities. Each quality is rated independently from 1 to 5, with an Explain why field.</p>'
+    + '<p>The questionnaire supplies the qualities. Administrators manage the response window, then review the highest-scoring qualities in Step 3; they do not choose what the committee rates.</p>'
+    + (intake.questionnaireVersion ? '<p class="t-small">Standard questionnaire: '+(intake.qualities || []).length+' qualities. Scores use the average of submitted ratings; drafts are excluded.</p>' : '<p class="t-small">This search already began an earlier questionnaire. Its questions and answers are preserved so existing responses remain comparable.</p>')
+    + '</div></section>';
 }
 
 function questionnaireChoice(){
@@ -5171,7 +5149,7 @@ function committeeReviewPanel(){
     <p>Review the candidate qualities alongside the community’s challenges and opportunities. Compare the 1–5 ratings, read each explanation, and consider areas of agreement and disagreement before adopting the profile.</p>
     ${!closed ? `<div class="notice notice--info"><div><div class="notice__t">${s.intake?.status === 'open' ? 'Responses are still being collected' : 'The questionnaire has not opened'}</div>
       <div class="notice__b">These results are preliminary. Finish collecting answers in Step ${stepNo('intake')} before adopting the profile. <button type="button" class="btn btn--secondary btn--sm" data-go="intake">Manage questionnaire</button></div></div></div>` : ''}
-    ${agg ? consensusPanels(agg) : '<p>No submitted answers are available yet.</p>'}
+    ${agg ? consensusPanels(agg, true, closed && canManage() && Boolean(s.intake?.questionnaireVersion)) : '<p>No submitted answers are available yet.</p>'}
     ${agg?.submitted && canManage() ? `<div class="row"><button type="button" class="btn btn--primary" data-act="adopt-preview" ${closed?'':'disabled'}>Review what this would change</button></div>` : ''}
     ${adoptPlanPanel()}
   </section>`;
@@ -5228,7 +5206,7 @@ function vProfile(){
     return shell(`${head('Step '+stepNo('profile'), 'Review committee input', 'Evaluate the committee’s view of the candidate and the community’s needs, then adopt the profile that will guide recruiting and candidate review.')}
       <div class="band"><div class="wrap stack">
         ${committeeReviewPanel()}
-        ${s.intake?.status === 'closed' ? `<button type="button" class="btn btn--secondary" data-act="edit-final-profile">Write the final profile manually</button>` : ''}
+        ${s.intake?.status === 'closed' && !s.intake?.questionnaireVersion ? `<button type="button" class="btn btn--secondary" data-act="edit-final-profile">Write the final profile manually</button>` : ''}
       </div></div>`);
   }
 
@@ -8052,12 +8030,14 @@ function artHasContent(body){
 async function refreshAdoptPlan(){
   const keepRetain = state.adoptPlan?.retain || [];
   const keepReasons = state.adoptPlan?.retainReasons || {};
+  const selectedKeys = state.search.intake?.questionnaireVersion ? [...favoritesFor(state.search.consensus)] : undefined;
   await withBusy(async () => {
     const plan = await api('/api/searches/'+state.search.id+'/intake/adopt', {
-      method:'POST', body:{ preview:true, retain: keepRetain }
+      method:'POST', body:{ preview:true, retain: keepRetain, selectedKeys }
     });
     plan.retain = keepRetain;
     plan.retainReasons = keepReasons;
+    plan.selectedKeys = selectedKeys;
     state.adoptPlan = plan;
   }, waitSave('Working out what would change'));
 }
@@ -8203,7 +8183,7 @@ window.addEventListener('slate:help-open-guide', () => { go('help'); });
 
 document.addEventListener('click', async e => {
   closeMenusExcept(e.target);
-  const t = e.target.closest('[data-go],[data-open],[data-act],[data-add],[data-del],[data-w],button[data-theme],[data-cand],[data-score],[data-pick],[data-shared-pick],[data-ipick],[data-iadd],[data-idel],[data-iw],[data-phase],[data-panel],[data-personadd],[data-persondel],[data-mode],[data-artadd],[data-artdel],[data-tab],[data-col]');
+  const t = e.target.closest('[data-go],[data-open],[data-act],[data-add],[data-del],[data-w],button[data-theme],[data-cand],[data-score],[data-pick],[data-ipick],[data-iadd],[data-idel],[data-iw],[data-phase],[data-panel],[data-personadd],[data-persondel],[data-mode],[data-artadd],[data-artdel],[data-tab],[data-col]');
   if (!t) return;
 
   if (t.dataset.tab){
@@ -8311,18 +8291,6 @@ document.addEventListener('click', async e => {
   }
   if (t.dataset.cand){
     await go('person', { sel:t.dataset.cand }); return;
-  }
-  if (t.dataset.sharedPick){
-    const field = $('#sharedqualities')?.elements[t.dataset.sharedPick];
-    if (!field) return;
-    const label = t.dataset.label;
-    const lines = field.value.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
-    const on = lines.some(value => value.toLowerCase() === label.toLowerCase());
-    field.value = (on ? lines.filter(value => value.toLowerCase() !== label.toLowerCase()) : [...lines, label]).join('\n');
-    state.dirty = true;
-    paintSharedQualities();
-    markUnsaved();
-    return;
   }
   if (t.dataset.pick){
     state.dirty = true;
@@ -9046,34 +9014,10 @@ document.addEventListener('click', async e => {
     if (!enabled && state.search.intake?.skipped) await go('profile');
     return;
   }
-  if (act==='copy-profile-qualities'){
-    const form = $('#sharedqualities');
-    if (!form) return;
-    for (const kind of Object.keys(INTAKE_ASK)) {
-      form.elements[kind].value = (state.search.criteria || []).filter(c => c.kind === kind && c.label).map(c => c.label).join('\n');
-    }
-    paintSharedQualities();
-    state.dirty = true;
-    markUnsaved();
-    return;
-  }
-  if (act==='save-shared-qualities'){
-    const qualities = collectSharedQualities();
-    if (!qualities) return;
-    const form = $('#intakewindow');
-    const win = form ? Object.fromEntries(new FormData(form).entries()) : {};
-    await withBusy(async () => {
-      state.search = await api('/api/searches/'+state.search.id+'/intake/qualities', { method:'PUT', body:{ qualities, ...win } });
-      state.intake = null;
-      toast('Shared qualities saved. Everyone will rate this list.');
-    }, waitSave('Saving shared qualities'));
-    return;
-  }
   if (act==='intake-open' || act==='intake-close'){
     const open = act==='intake-open';
     const form = $('#intakewindow');
     const win = form ? Object.fromEntries(new FormData(form).entries()) : {};
-    const qualities = open ? collectSharedQualities() : null;
     let emptyReason = '';
     if (!open) {
       const waiting = (state.search.consensus?.pending || []).length;
@@ -9087,10 +9031,6 @@ document.addEventListener('click', async e => {
     }
     await withBusy(async () => {
       try {
-        if (qualities) {
-          state.search = await api('/api/searches/'+state.search.id+'/intake/qualities', { method:'PUT', body:{ qualities } });
-          state.intake = null;
-        }
         state.search = await api('/api/searches/'+state.search.id+'/intake/status', {
           method:'POST', body:{ status: open ? 'open' : 'closed', ...win, ...(emptyReason ? { emptyReason } : {}) }
         });
@@ -9109,14 +9049,10 @@ document.addEventListener('click', async e => {
   if (act==='intake-save-window'){
     const form = $('#intakewindow');
     const win = form ? Object.fromEntries(new FormData(form).entries()) : {};
-    const qualities = collectSharedQualities();
     await withBusy(async () => {
-      state.search = qualities ? await api('/api/searches/'+state.search.id+'/intake/qualities', {
-        method:'PUT', body:{ qualities, ...win }
-      }) : await api('/api/searches/'+state.search.id+'/intake/status', {
+      state.search = await api('/api/searches/'+state.search.id+'/intake/status', {
         method:'POST', body:{ status: state.search.intake.status, ...win }
       });
-      if (qualities) state.intake = null;
       toast('Saved.');
     });
     return;
@@ -9187,6 +9123,16 @@ document.addEventListener('click', async e => {
     }, waitSave('Withdrawing your answers'));
     return;
   }
+  if (act==='profile-favorite'){
+    collectCriteria();
+    const selected = favoritesFor(state.search.consensus);
+    state.profileFavorites.keys = t.checked ? [...new Set([...selected, t.dataset.key])] : selected.filter(key => key !== t.dataset.key);
+    state.adoptPlan = null;
+    state.dirty = true;
+    $('#adoptplan')?.remove();
+    markUnsaved();
+    return;
+  }
   if (act==='edit-final-profile'){
     state.open.profileedit = true;
     render();
@@ -9213,7 +9159,7 @@ document.addEventListener('click', async e => {
       try {
         const out = await api('/api/searches/'+state.search.id+'/intake/adopt', {
           method:'POST',
-          body:{ retain: plan.retain || [], retainReasons: reasons,
+          body:{ retain: plan.retain || [], retainReasons: reasons, selectedKeys:plan.selectedKeys,
             fingerprint: plan.fingerprint, profileRevision: plan.profileRevision }
         });
         state.search = out.search;
@@ -9222,7 +9168,9 @@ document.addEventListener('click', async e => {
         toast(gaps.length
           ? 'Profile saved from committee input. It is still short in '+gaps.map(g=>g.label.toLowerCase()).join(', ')+' — write those yourself.'
           : 'Profile saved from committee input. Edit the weights and wording, then save.');
-        go('profile');
+        // Adoption already returned the current search. Finish navigation before
+        // releasing the editor; a late refresh could replace the first edit.
+        await go('profile', {}, { fresh:true });
       } catch (err) {
         if (err.code === 'STALE_SOURCE' || err.code === 'STALE_PROFILE') {
           state.adoptPlan = null;
@@ -10082,7 +10030,7 @@ document.addEventListener('input', e => {
     markUnsaved();
   }
   if (e.target.closest('#applyform')) paintApplyProgress();
-  if (e.target.closest('#sharedqualities')) paintSharedQualities();
+
 });
 
 // How far through the questionnaire a candidate is. Updated against the live

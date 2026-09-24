@@ -93,12 +93,6 @@ async function standUp(client, names, qualities) {
     people[name] = { auth: sign.headers(email), userId: row.userId, email };
   }
   await write('/api/searches/' + id + '/team/confirm', { auth: abe, id, body: { confirmed: true } });
-  if (qualities) {
-    const prepared = await write('/api/searches/' + id + '/intake/qualities', {
-      auth: abe, id, method: 'PUT', body: { qualities }
-    });
-    assert.strictEqual(prepared.status, 200);
-  }
   const opened = await write('/api/searches/' + id + '/intake/status', {
     auth: abe, id, body: { status: 'open' }
   });
@@ -107,6 +101,8 @@ async function standUp(client, names, qualities) {
 }
 
 async function submit(id, who, items, extra = {}) {
+  const ballot = (await read(id, who.auth)).intake.qualities;
+  items = [...items, ...ballot.filter(q => !items.some(i => committee.groupKey(i.kind,i.label) === committee.groupKey(q.kind,q.label))).map(q => ({...q,weight:1}))];
   return api('/api/searches/' + id + '/intake', {
     auth: who.auth, method: 'PUT',
     body: { submitted: true, items, ...extra },
@@ -129,6 +125,8 @@ const openIntake = (id, abe) =>
   write('/api/searches/' + id + '/intake/status', { auth: abe, id, body: { status: 'open' } });
 
 async function adopt(id, abe, body = {}) {
+  const tally = (await read(id, abe)).consensus;
+  body = {selectedKeys:Object.values(tally.byKind).flatMap(rows => rows.slice(0,3).map(e => e.key)), ...body};
   const preview = await write('/api/searches/' + id + '/intake/adopt', { auth: abe, id, body: { preview: true, ...body } });
   assert.strictEqual(preview.status, 200, 'preview failed: ' + JSON.stringify(preview.json));
   const applied = await write('/api/searches/' + id + '/intake/adopt', {
@@ -142,8 +140,54 @@ async function adopt(id, abe, body = {}) {
 const archive = (id, abe) => write('/api/searches/' + id, { auth: abe, id, method: 'DELETE' });
 
 (async () => {
+  await check('standard questionnaire upgrades only unanswered searches and preserves saved answers', async () => {
+    const fresh = {intake:{status:'open',openedAt:'earlier',qualities:[{kind:'skill',label:'Manager choice'}],responses:{}}};
+    assert.strictEqual(committee.questionnaire.initialize(fresh),true);
+    assert.strictEqual(fresh.intake.qualities.length,35);
+    assert.strictEqual(committee.questionnaire.initialize(fresh),false);
+    for (const status of ['draft','open','closed']) {
+      const saved = {intake:{status,qualities:[{kind:'skill',label:'Original'}],responses:{a:{draft:{items:[]}}}}};
+      const before = JSON.stringify(saved);
+      assert.strictEqual(committee.questionnaire.initialize(saved),false);
+      assert.strictEqual(JSON.stringify(saved),before);
+    }
+  });
+
+  await check('standard scores rank average importance and distinguish ratings from agreement', async () => {
+    const responses = {};
+    for (const [userId, weights] of [['a',[5,1,4]],['b',[1,1,4]]]) {
+      responses[userId] = {submitted:{items:weights.map((weight,i)=>({kind:'skill',label:['Divided','Low','Agreed'][i],weight,note:userId}))}};
+    }
+    responses.c = {draft:{items:[{kind:'skill',label:'Low',weight:5}]}};
+    const tally = committee.aggregate({members:['a','b','c'].map(userId=>({userId,searchRole:'committee'})),intake:{questionnaireVersion:'candidate-needs-v1',responses}});
+    assert.strictEqual(tally.submitted,2);
+    assert.deepStrictEqual(tally.byKind.skill.map(e=>[e.label,e.avgWeight]),[['Agreed',4],['Divided',3],['Low',1]]);
+    assert.strictEqual(tally.byKind.skill[0].highRatings,2);
+    assert.strictEqual(tally.byKind.skill[1].contested,true);
+    assert.strictEqual(tally.byKind.skill[2].consensus,'none');
+  });
+
+  await check('favorites are validated, recorded, and drive the brochure', async () => {
+    const {id,abe,people} = await standUp('Chosen favorites',['alice']);
+    try {
+      await submit(id,people.alice,committee.questionnaire.qualities().map((q,i)=>({...q,weight:1+i%5})));
+      await closeIntake(id,abe);
+      const tally = (await read(id,abe)).consensus;
+      const keys = Object.values(tally.byKind).flatMap(rows=>rows.slice(0,3).map(e=>e.key));
+      for (const selectedKeys of [keys.slice(1),[...keys,keys[0]],[...keys,'skill:unknown']]) {
+        const rejected = await write('/api/searches/'+id+'/intake/adopt',{auth:abe,id,body:{preview:true,selectedKeys}});
+        assert.strictEqual(rejected.status,400);
+      }
+      const {applied} = await adopt(id,abe,{selectedKeys:keys});
+      assert.deepStrictEqual(applied.search.criteria.map(c=>c.source.key).sort(),[...keys].sort());
+      const brochure = require('../server/brochure').assembleBrochure(applied.search);
+      const text = JSON.stringify(brochure);
+      for (const c of applied.search.criteria.filter(c=>['chall','opp'].includes(c.kind))) assert.ok(text.includes(c.label));
+    } finally {await archive(id,abe);}
+  });
+
   await check('shared qualities require explicit ratings and aggregate independent submissions', async () => {
-    const qualities = [{ kind:'skill', label:'Budgeting' }, { kind:'skill', label:'Communication' }];
+    const qualities = committee.questionnaire.qualities();
     const { id, abe, people } = await standUp('Shared qualities', ['alice', 'bob'], qualities);
     try {
       const seen = await read(id, people.alice.auth);
@@ -160,13 +204,13 @@ const archive = (id, abe) => write('/api/searches/' + id, { auth: abe, id, metho
       const draft = (await read(id, people.alice.auth)).intake.responses[people.alice.userId].draft;
       assert.strictEqual(draft.items.find(i => i.label === 'Communication').weight, null);
       assert.doesNotMatch(JSON.stringify(await read(id, abe)), /PRIVATE_SHARED_NOTE/);
-      assert.strictEqual((await submit(id, people.alice, [{ ...qualities[0], weight:5 }])).status, 400);
+      assert.strictEqual((await api('/api/searches/'+id+'/intake', {auth:people.alice.auth, method:'PUT', body:{submitted:true,items:[{...qualities[0],weight:5}],responseRevision:await myRevision(id,people.alice.auth,people.alice.userId)}})).status,400);
       assert.strictEqual((await read(id, abe)).consensus.submitted, 0);
-      assert.strictEqual((await submit(id, people.alice, qualities.map((q,i) => ({ ...q, weight:i ? 5 : 1 })))).status, 200);
-      assert.strictEqual((await submit(id, people.bob, qualities.map((q,i) => ({ ...q, weight:i ? 3 : 1 })))).status, 200);
+      assert.strictEqual((await submit(id, people.alice, qualities.map(q => ({...q,weight:q.label === 'Communication' ? 5 : 1})))).status, 200);
+      assert.strictEqual((await submit(id, people.bob, qualities.map(q => ({...q,weight:q.label === 'Communication' ? 3 : 1})))).status, 200);
       const own = (await read(id, abe)).you;
       const ownerId = (await read(id, abe)).roster.find(r => r.searchRole === own.searchRole).userId;
-      assert.strictEqual((await submit(id, {auth:abe, userId:ownerId}, qualities.map((q,i) => ({ ...q, weight:i ? 4 : 1 })))).status, 200);
+      assert.strictEqual((await submit(id, {auth:abe, userId:ownerId}, qualities.map(q => ({...q,weight:q.label === 'Communication' ? 4 : 1})))).status, 200);
       const agg = (await read(id, abe)).consensus;
       assert.strictEqual(agg.submitted, 3);
       assert.strictEqual(agg.byKind.skill[0].label, 'Communication');
@@ -310,7 +354,7 @@ const archive = (id, abe) => write('/api/searches/' + id, { auth: abe, id, metho
       assert.strictEqual((await submit(id, people.alice, [{ kind: 'skill', label: 'Budgeting', weight: 4 }])).status, 200);
       const second = await api('/api/searches/' + id + '/intake', {
         auth: people.bob.auth, method: 'PUT', revision: stale,
-        body: { submitted: true, items: [{ kind: 'skill', label: 'Communication', weight: 5 }], responseRevision: 1 }
+        body: { submitted: true, items: committee.questionnaire.qualities().map(q => ({...q,weight:q.label === 'Communication' ? 5 : 1})), responseRevision: 1 }
       });
       assert.strictEqual(second.status, 200,
         'an independent member was refused because somebody else answered (CA-12): ' + JSON.stringify(second.json));
@@ -573,10 +617,9 @@ const archive = (id, abe) => write('/api/searches/' + id, { auth: abe, id, metho
 
       const { applied } = await adopt(id, abe);
       const counts = Object.fromEntries(kinds.map(k => [k, applied.search.criteria.filter(c => c.kind === k).length]));
-      assert.deepStrictEqual(counts, { skill: 4, trait: 3, chall: 3, opp: 3 }, JSON.stringify(applied.search.criteria));
+      assert.deepStrictEqual(counts, { skill: 5, trait: 5, chall: 5, opp: 5 }, JSON.stringify(applied.search.criteria));
       assert.deepStrictEqual(applied.gaps, [], 'a complete profile was reported as still short (CA-06)');
-      assert.ok(applied.coverage.some(g => g.kind === 'opp'),
-        'committee coverage was not reported at all, so the two questions were merged');
+      assert.deepStrictEqual(applied.coverage, [], 'the complete standard questionnaire covers every category');
     } finally { await archive(id, abe); }
   });
 
