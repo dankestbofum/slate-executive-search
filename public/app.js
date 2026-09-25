@@ -307,7 +307,7 @@ const STEP_NAME = {
   intake:'Committee questionnaire',
   profile:'Adopt the candidate profile',
   community:'Community',
-  survey1:'Initial survey',
+  survey1:'Candidate questions',
   guide:'Interview guide',
   survey2:'Semifinalist survey',
   plan:'Ad plan',
@@ -355,9 +355,9 @@ function catalogSteps(){
 }
 function catalogPhases(){
   return state.health?.phases || [
-    { id:0, key:'convene', t:'Assemble the committee and hear them', lede:'Who is on this search, who runs it, and what each member is actually looking for.' },
-    { id:1, key:'recruit', t:'Prepare and post', lede:'Profile, community, surveys, and the ad plan. Then the brochure and ads you actually post.' },
-    { id:2, key:'people', t:'Once there are candidates', lede:'Screening is where applicants enter the file. Everything after that waits until someone is on it.' }
+    { id:0, key:'convene', t:'Part 1 \u00b7 Committee input', lede:'Who is on this search, who runs it, and what each member is actually looking for.' },
+    { id:1, key:'recruit', t:'Part 2 \u00b7 Prepare and post', lede:'Profile, community, surveys, and the ad plan. Then the brochure and ads you actually post.' },
+    { id:2, key:'people', t:'Part 3 \u00b7 Candidate evaluation', lede:'Screening is where applicants enter the file. Everything after that waits until someone is on it.' }
   ];
 }
 
@@ -433,7 +433,7 @@ function isCommittee(){ return !isStaff(); }
 function orgName(){ return state.org?.name || 'your workspace'; }
 function stepFlow(){
   const steps = catalogSteps();
-  return steps.length ? steps.map(s => s.key) : STEP_FLOW;
+  return (steps.length ? steps.map(s => s.key) : STEP_FLOW).filter(key => !['guide','survey2'].includes(key));
 }
 function stepOf(key){
   return catalogSteps().find(s => s.key===key) || null;
@@ -1680,6 +1680,7 @@ async function applyRoute(route, { push=false }={}){
 let navSeq = 0;
 
 async function go(view, extra={}, opts={}){
+  if (['guide','survey2'].includes(view) && isStaff() && canOpenStep(view)) view = 'survey1';
   if (!state.busy && state.dirty && !confirm('Leave this page and discard unsaved edits?')) return;
   state.myAccess = false;
   if (state.view === 'profile' && view !== 'profile') state.adoptPlan = null;
@@ -2452,6 +2453,7 @@ function isCurrentStep(key){
 }
 
 function railStepLink(st){
+  if (['guide','survey2'].includes(st.key)) return '';
   const current = isCurrentStep(st.key);
   const label = (st.n || '')+' · '+(STEP_NAME[st.key] || st.t);
   const mark = st.status==='done' ? 'done' : st.blocked ? 'wait' : st.status==='now' ? 'now' : '';
@@ -2550,7 +2552,7 @@ function railAccount(u, s){
 
 function shell(body){
   if (state.search && canEdit() && !WORKSPACE_VIEWS.includes(state.view)) {
-    const stages = [['intake','Committee questionnaire'], ['profile','Adopt the candidate profile'],
+    const stages = [['intake','Committee questionnaire'], ['profile','Adopt the candidate profile'], ['survey1','Candidate questions'],
       ['brochure','Create brochure'], ['ads','Create advertisement'], ['screen','Review candidates']];
     body = `<div class="wrap"><nav class="secnav" aria-label="Search stages">
       ${stages.filter(([key]) => canOpenStep(key)).map(([key,label]) => {
@@ -3384,7 +3386,7 @@ function blockingStep(st, search){
 }
 
 function stepsList(steps, search){
-  return `<div class="steps">${(steps||[]).map(st => {
+  return `<div class="steps">${(steps||[]).filter(st => !['guide','survey2'].includes(st.key)).map(st => {
     const block = blockingStep(st, search);
     const why = block
       ? `Waiting on ${esc(block.name)}.` + (canOpenStep(block.key) ? ' ' : '')
@@ -3882,7 +3884,7 @@ function overviewInner(s, { preview=false }={}){
 // candidate stage and it is not the step count; those are different questions
 // and they are answered elsewhere on the page. The catalog's own phase titles
 // are sentences, which do not read as a header eyebrow.
-const PHASE_SHORT = { convene:'Committee phase', recruit:'Recruiting phase', people:'Candidate phase' };
+const PHASE_SHORT = { convene:'Part 1 \u00b7 Committee input', recruit:'Part 2 \u00b7 Recruiting', people:'Part 3 \u00b7 Candidates' };
 function processPhase(s){
   const next = s.progress?.next;
   if (!next) return 'Search complete';
@@ -3985,7 +3987,7 @@ function vCommittee(){
   const crit = (s.criteria||[]).filter(c => c.label).length;
   const due = s.intake?.dueBy || '';
   return shell(`
-    ${head('This search','Committee',
+    ${head('Part 1 · Committee input','Committee',
       'Who is on the committee, what they were asked, and the profile their answers produced.',
       onSearch && open && !mine && canOpenStep('intake')
         ? `<button class="btn btn--primary" data-go="intake-mine">Answer your questionnaire</button>` : '')}
@@ -4074,12 +4076,72 @@ function docEditor(key){
   return hit ? { who:hit.who, at:(hit.at||'').slice(0,10) } : null;
 }
 
+function questionKeys(){
+  return ['survey1','survey2','guide'].filter(canOpenStep);
+}
+
+function captureQuestionEdits(){
+  if (!$('#question-plan')) return;
+  const drafts = Object.fromEntries(questionKeys().map(key => [key, collectArtifact(key)]));
+  state.search.artifacts = { ...state.search.artifacts, ...drafts };
+}
+
+async function saveQuestions(advance=false){
+  captureQuestionEdits();
+  const body = Object.fromEntries(questionKeys()
+    .filter(key => state.search.artifacts?.[key]?.questions?.length || state.search.artifacts?.[key]?.scenarios?.length)
+    .map(key => [key, state.search.artifacts[key]]));
+  // Include a cleared existing survey so the server reports the missing
+  // question, instead of silently leaving the old questions on file.
+  for (const key of questionKeys()) {
+    if (state.search.artifacts?.[key]?.questions && !body[key]) body[key] = state.search.artifacts[key];
+  }
+  await withBusy(async () => {
+    state.search = await api('/api/searches/'+state.search.id+'/questions', { method:'PUT', body:{ body } });
+    toast('Question plan saved. Candidates receive questions when their stage opens.');
+    if (advance) await go(nextOf('survey1').key);
+  });
+}
+
+function vQuestions(){
+  const s = state.search;
+  const keys = questionKeys();
+  const labels = { survey1:'Initial screening', survey2:'Semifinalist questionnaire', guide:'Interviews and assessment' };
+  const hints = {
+    survey1:'Candidates see these questions when they open their initial survey link.',
+    survey2:'Candidates see these questions after you name them semifinalists and open their questionnaire in Screening.',
+    guide:'The panel uses these questions during interviews. Scoring guidance stays with the panel.'
+  };
+  return shell(`
+    ${head('Part 2 · Prepare and post', 'Candidate questions', 'Plan the questions once, across every stage. Use each question to ask for different evidence against the adopted profile.')}
+    <div class="band"><div class="wrap stack" id="question-plan">
+      <div class="notice notice--info"><div><div class="notice__t">One plan, released by stage</div>
+        <div class="notice__b">All included question sets are below. Saving prepares them; it does not send invitations. Questionnaires already issued to candidates keep their original wording.</div></div></div>
+      <nav class="row" aria-label="Question stages">${keys.map(key => `<button class="btn btn--secondary btn--sm" data-act="jump" data-to="question-stage-${key}">${esc(labels[key])}</button>`).join('')}</nav>
+      ${!(s.criteria||[]).some(c => c.label) ? prereqNotice('Adopt the profile first', 'Questions should test the criteria agreed from committee input.', 'profile', 'Open the profile') : ''}
+      ${keys.map(key => {
+        const a = s.artifacts?.[key];
+        const mode = docMode(key);
+        return `<section class="spec question-stage" id="question-stage-${key}" aria-labelledby="question-title-${key}">
+          <div class="spec__bar"><h2 id="question-title-${key}">${esc(labels[key])}${key==='survey2'?' · Optional':''}</h2></div>
+          <div class="spec__body stack"><p class="t-small">${esc(hints[key])}</p>
+            ${docBar(key, Boolean(a?.questions?.length))}
+            ${mode === 'preview' ? (a ? renderArtifact(key, a) : emptyState('No questions yet','Switch to Edit to add questions.')) : artifactEditor(key, a)}
+          </div></section>`;
+      }).join('')}
+      ${actionBar('<button type="button" class="btn btn--primary" data-act="save-questions">Save all questions</button>',
+        `<button type="button" class="btn btn--secondary" data-act="generate-questions" ${state.health?.hasKey?'':'disabled'}>Draft all questions with Claude</button>
+         ${state.health?.hasKey?'':'<span class="t-small">Add and edit questions by hand, or configure an API key to draft them together.</span>'}
+         ${nextBtn('survey1').replace('btn--primary','btn--secondary')}`)}
+    </div></div>`);
+}
+
 function vDocuments(){
   const s = state.search;
-  const keys = DOC_KEYS.filter(canOpenStep);
+  const keys = DOC_KEYS.filter(key => canOpenStep(key) && !['guide','survey2'].includes(key));
   const rows = keys.map(key => {
     const has = key === 'profile' ? (s.criteria||[]).some(c => c.label) : Boolean(s.artifacts?.[key]);
-    const meta = DRAFTS[key] || { title: STEP_NAME[key] || key };
+    const meta = key === 'survey1' ? { title:'Candidate questions' } : DRAFTS[key] || { title: STEP_NAME[key] || key };
     const who = docEditor(key);
     const review = (s.reviews||{})[key];
     const stale = s.staleArtifacts?.[key];
@@ -5582,9 +5644,9 @@ function checkField(path, label, on, hint=''){
 
 // Template rows for each list a document can grow.
 const ART_TEMPLATE = {
-  'survey1.questions': list => ({ n:list.length+1, prompt:'', required:false, crit:[] }),
-  'survey2.questions': list => ({ n:list.length+1, prompt:'', required:false, crit:[] }),
-  'guide.questions':   list => ({ n:list.length+1, stem:'', approach:'', results:'', experience:'', crit:[] }),
+  'survey1.questions': list => ({ n:Math.max(0,...list.map(q => Number(q.n)||0))+1, prompt:'', required:false, crit:[] }),
+  'survey2.questions': list => ({ n:Math.max(0,...list.map(q => Number(q.n)||0))+1, prompt:'', required:false, crit:[] }),
+  'guide.questions':   list => ({ n:Math.max(0,...list.map(q => Number(q.n)||0))+1, stem:'', approach:'', results:'', experience:'', crit:[] }),
   'guide.scenarios':   list => ({ id:String.fromCharCode(65+list.length), name:'', mins:'', who:'', brief:'' }),
   'contract.sections': () => ({ h:'', body:'' }),
   'plan.rows':         () => ({ outlet:'', audience:'', format:'', when:'', cost:'', who:'', status:'' }),
@@ -5761,7 +5823,8 @@ function renderBrochure(a){
   const theme = packThemeOf(a);
   const scheme = packSchemeOf(a);
   const photos = a.photos || {};
-  const title = a.title || ((s.position||'Position')+': '+(s.client||'Search'));
+  const defaultTitle = (s.position||'Position')+': '+(s.client||'Search');
+  const title = a.title && a.title !== defaultTitle ? a.title : (s.position||'Leadership opportunity');
   const facts = [
     packFact('Population', s.population),
     packFact('Form of government', s.fog),
@@ -5781,7 +5844,7 @@ function renderBrochure(a){
       <header class="pack__cover">
         ${packHero(photos.cover, theme)}
         <div class="pack__covertext">
-          <div class="pack__brand">Slate · Executive search</div>
+          <div class="pack__brand">Executive recruitment</div>
           <div class="pack__place">${esc(s.client||'The jurisdiction')}</div>
           <h3 class="pack__title">${esc(title)}</h3>
           ${a.lede ? `<p class="pack__deck">${esc(a.lede)}</p>` : ''}
@@ -5790,24 +5853,22 @@ function renderBrochure(a){
       </header>
       ${facts ? `<div class="pack__facts">${facts}</div>` : ''}
       <div class="pack__body">
-        <div class="pack__grid">
-          ${packSec('The opportunity', a.theOpportunity)}
-          ${packSec('About the community', a.thePlace, '', packPhoto(photos.place, s.client||'The community'))}
-        </div>
+        ${packSec('The opportunity', a.theOpportunity)}
+        ${packSec('The community', a.thePlace, '', packPhoto(photos.place, s.client||'The community'))}
         ${packSec('About the organization', a.theOrganization, '', packPhoto(photos.org, 'The organization'))}
         ${packSec('Leadership opportunity', a.leadershipOpportunity)}
         <div class="pack__grid">
-          ${packSec('Current challenges', a.challenges, chall)}
-          ${packSec('Future opportunities', a.opportunities, opps)}
+          ${packSec('Current challenges', a.challenges, a.challenges ? '' : chall)}
+          ${packSec('Future opportunities', a.opportunities, a.opportunities ? '' : opps)}
         </div>
         ${skills || traits ? `<section class="pack__sec"><div class="pack__h">Desired candidate</div>
           ${a.ideal ? `<div class="pack__prose">${prose(a.ideal)}</div>` : ''}
-          ${skills ? `<div class="pack__label">Essential skills</div>${skills}` : ''}
-          ${traits ? `<div class="pack__label">Leadership traits</div>${traits}` : ''}
+          ${!a.ideal && skills ? `<div class="pack__label">Essential skills</div>${skills}` : ''}
+          ${!a.ideal && traits ? `<div class="pack__label">Leadership traits</div>${traits}` : ''}
         </section>` : packSec('Desired candidate', a.ideal)}
         ${packSec('Position responsibilities', a.theJob)}
         ${packSec('Compensation and benefits', a.compensation)}
-        ${packSec('Why consider this community', a.whyConsider)}
+        ${a.whyConsider && ![a.lede,a.theOpportunity,a.thePlace].includes(a.whyConsider) ? packSec('Why consider this community', a.whyConsider) : ''}
       </div>
       <footer class="pack__apply">
         <div class="pack__h">How to apply</div>
@@ -7769,6 +7830,7 @@ function page(){
   if (state.view === 'community') return vCommunity();
   if (state.view === 'brochure') return vBrochure();
   if (STAFF[state.view]) return vStaff(state.view);
+  if (['survey1','survey2','guide'].includes(state.view) && isStaff()) return vQuestions();
   if (DRAFTS[state.view]) return vDraft(state.view);
   switch (state.view){
     case 'home': return vHome();
@@ -8288,7 +8350,7 @@ document.addEventListener('click', async e => {
     let draft;
     // Read the form first so nothing typed since the last save is lost when
     // the list grows or shrinks.
-    try { draft = collectArtifact(kind); }
+    try { captureQuestionEdits(); draft = collectArtifact(kind); }
     catch { toast('Fix the source JSON before changing this list.'); return; }
     const list = Array.isArray(draft[path]) ? draft[path] : [];
     if (t.dataset.artadd){
@@ -8341,6 +8403,7 @@ document.addEventListener('click', async e => {
     return;
   }
   if (t.dataset.mode){
+    captureQuestionEdits();
     const key = t.dataset.modeKey || state.view;
     // Carry unsaved edits across the switch, so Preview shows what was just
     // typed and going back to Edit finds it still there.
@@ -9476,6 +9539,7 @@ document.addEventListener('click', async e => {
   }
   if (act==='next-step'){
     const from = t.dataset.from || state.view;
+    if (from === 'survey1' && isStaff()) { await saveQuestions(true); return; }
     if (from === 'profile'){
       await persistProfile(true);
       return;
@@ -9578,6 +9642,17 @@ document.addEventListener('click', async e => {
       });
       toast(approve ? 'Marked reviewed. It is ready to go out.' : 'Back to draft.');
     }, waitSave(approve ? 'Recording your review' : 'Reopening the draft'));
+    return;
+  }
+  if (act==='save-questions') { await saveQuestions(); return; }
+  if (act==='generate-questions'){
+    if (state.dirty) { toast('Save your edits before drafting a new question plan.'); return; }
+    if (questionKeys().some(key => state.search.artifacts?.[key]?.questions?.length) && !confirm('Replace all question drafts with a new coordinated plan? Previously issued candidate questionnaires keep their original wording.')) return;
+    await withBusy(async () => {
+      const out = await api('/api/searches/'+state.search.id+'/generate', { method:'POST', body:{ kind:'questions' } });
+      state.search = out.search;
+      toast('All candidate questions drafted. Review each stage before using them.');
+    }, { title:'Planning candidate questions', copy:'Writing one coordinated plan across the included stages.', steps:['Reading the adopted profile','Drafting distinct questions for each stage'] });
     return;
   }
   if (act==='save-art'){

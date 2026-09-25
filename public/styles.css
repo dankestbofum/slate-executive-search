@@ -1221,3 +1221,69 @@ details.toggle[open] summary::before{transform:rotate(90deg) translateX(-1px)}
   .review2--evidence .review2__col--scorecard,
   .review2--scorecard .review2__col--evidence{display:none}
 }
+/* Recruitment brochure: clear editorial hierarchy on screen and on paper. */
+.question-stage{scroll-margin-top:90px}
+.question-stage .spec__bar h2{font:inherit; margin:0}
+.pack--brochure{border-radius:0; background:#fff; --p-paper:#fff; --p-ink:#202b36; --p-muted:#52606b; --p-rule:#d5dce2; overflow-wrap:anywhere}
+.pack--brochure .pack__cover{background:var(--p-navy); color:#fff}
+.pack--brochure .pack__brand{color:#fff; font-size:11px; letter-spacing:.18em}
+.pack--brochure .pack__place{color:#fff; font-size:15px; letter-spacing:.06em; margin-bottom:12px}
+.pack--brochure .pack__title{color:#fff; font-family:Georgia,serif; font-weight:400; font-size:clamp(2.2rem,4vw,3.6rem); line-height:1.08; max-width:23ch}
+.pack--brochure .pack__deck{color:#fff; font-size:16px; line-height:1.6; max-width:65ch}
+.pack--brochure .pack__meta{color:#fff}
+.pack--brochure .pack__facts{display:grid; grid-template-columns:repeat(auto-fit,minmax(145px,1fr)); background:#f2f5f7}
+.pack--brochure .pack__fact{padding:18px 20px}
+.pack--brochure .pack__fact b{font-size:14px}
+.pack--brochure .pack__body{padding:36px; gap:30px}
+.pack--brochure .pack__h{font:600 23px/1.25 Georgia,serif; letter-spacing:0; text-transform:none; color:var(--p-navy); border-bottom:1px solid var(--p-rule); padding-bottom:10px; margin-bottom:14px}
+.pack--brochure .pack__prose{font-size:15px; line-height:1.65}
+.pack--brochure .pack__apply{background:#f2f5f7; color:var(--p-ink); border-top:4px solid var(--p-navy); padding:28px 36px}
+.pack--brochure .pack__apply .pack__h{color:var(--p-navy); border-color:var(--p-rule)}
+.pack--brochure .pack__apply .pack__prose,.pack--brochure .pack__due{color:var(--p-ink)}
+.pack--brochure.pack--masthead .pack__cover{background:#fff; color:var(--p-navy); border-top:8px solid var(--p-navy)}
+.pack--brochure.pack--masthead .pack__brand,.pack--brochure.pack--masthead .pack__place,.pack--brochure.pack--masthead .pack__title{color:var(--p-navy)}
+.pack--brochure.pack--masthead .pack__deck,.pack--brochure.pack--masthead .pack__meta{color:var(--p-ink)}
+@media screen and (max-width:600px){
+  .pack--brochure .pack__body,.pack--brochure .pack__apply{padding:22px}
+  .pack--brochure .pack__facts{grid-template-columns:1fr}
+  .pack--brochure .pack__fact{border-right:0; border-bottom:1px solid var(--p-rule)}
+}
+@media print{
+  /* The sample's empty first page was the stage navigation plus an unbreakable
+     brochure. Isolate the actual packet, including browser-menu printing. */
+  body:has(#pack-brochure) .secnav,
+  body:has(#pack-brochure) .pagehead,
+  body:has(#pack-brochure) .masthead,
+  body:has(#pack-brochure) .docbar,
+  body:has(#pack-brochure) .reviewbar,
+  body:has(#pack-brochure) .actionbar,
+  body:has(#pack-brochure) .notice,
+  body:has(#pack-brochure) .studio__bar,
+  body:has(#pack-brochure) .photo-tray,
+  body:has(#pack-brochure) .editor,
+  body:has(#pack-brochure) .srcjson,
+  body:has(#pack-brochure) .pack__tools{display:none !important}
+  body:has(#pack-brochure),body:has(#pack-brochure) .shell,body:has(#pack-brochure) .page,
+  body:has(#pack-brochure) .band,body:has(#pack-brochure) .wrap,
+  body:has(#pack-brochure) .stack,body:has(#pack-brochure) .studio{
+    display:block; padding:0 !important; margin:0 !important; width:auto; max-width:none; min-height:0; border:0; box-shadow:none; background:#fff;
+  }
+  html[data-print] .pack--brochure,.pack--brochure{break-inside:auto; overflow:visible; border:0; box-shadow:none; print-color-adjust:exact; -webkit-print-color-adjust:exact}
+  .pack--brochure .pack__cover{break-inside:avoid; padding:24pt}
+  .pack--brochure.pack--photo .pack__cover,.pack--brochure.pack--banner .pack__cover{padding:0}
+  .pack--brochure .pack__covertext,.pack--brochure.pack--photo .pack__covertext,.pack--brochure.pack--banner .pack__covertext{padding:24pt}
+  .pack--brochure .pack__title{font-size:32pt; max-width:100%}
+  .pack--brochure .pack__deck{font-size:11pt; line-height:1.45}
+  .pack--brochure .pack__hero img{height:155pt}
+  .pack--brochure .pack__facts{grid-template-columns:repeat(3,minmax(0,1fr)); break-inside:auto}
+  .pack--brochure .pack__fact{padding:12pt; break-inside:avoid}
+  .pack--brochure .pack__fact b{font-size:10pt}
+  .pack--brochure .pack__body{display:block; padding:20pt 0 0}
+  .pack--brochure .pack__grid{display:block}
+  .pack--brochure .pack__sec{margin:0 0 18pt; break-inside:auto}
+  .pack--brochure .pack__h{font-size:17pt; break-after:avoid}
+  .pack--brochure .pack__prose{display:block; font-size:10.5pt; line-height:1.5}
+  .pack--brochure .pack__prose p{margin:0 0 8pt; orphans:3; widows:3}
+  .pack--brochure .pack__fig{break-inside:avoid}
+  .pack--brochure .pack__apply{padding:18pt; break-inside:auto}
+}

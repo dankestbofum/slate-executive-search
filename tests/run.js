@@ -65,6 +65,7 @@ async function suite(file, suiteEnv) {
     const cands = await suite('candidates.js', suiteEnv);
     const dispo = await suite('disposition.js', suiteEnv);
     const aichecks = await suite('aireliability.js', suiteEnv);
+    const questionChecks = await suite('questions.js', suiteEnv);
     const allowanceChecks = await suite('ai-allowance.js', suiteEnv);
     const researchChecks = await suite('research.js', suiteEnv);
     const retrieval = await suite('retrieval.js', suiteEnv);
@@ -82,7 +83,7 @@ async function suite(file, suiteEnv) {
     // (docs/audits/2026-09-19-user-guidance-candidate-portal).
     const helpChecks = await suite('help.js', suiteEnv);
     const portalChecks = await suite('portal.js', suiteEnv);
-    process.exitCode = organizationsSuite || auth || billing || projectBilling || projectAccess || clerkAuth || baseline || counties || regression || security || roles || authority || storage || recover || monitoring || exports_ || cands || dispo || aichecks || allowanceChecks || researchChecks || retrieval || census || coreResearch || researchUi || committeeChecks || helpChecks || portalChecks;
+    process.exitCode = organizationsSuite || auth || billing || projectBilling || projectAccess || clerkAuth || baseline || counties || regression || security || roles || authority || storage || recover || monitoring || exports_ || cands || dispo || aichecks || questionChecks || allowanceChecks || researchChecks || retrieval || census || coreResearch || researchUi || committeeChecks || helpChecks || portalChecks;
     console.log('Isolated test data: ' + directory);
   } catch (error) { console.error(error); process.exitCode = 1; }
   finally { server.kill(); }

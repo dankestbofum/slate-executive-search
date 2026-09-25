@@ -1290,7 +1290,10 @@ async function run(){
       && /screen:'Screening'/.test(appJs) && /send2:'Semifinalist questionnaire'/.test(appJs)
       && /finalists:'Finalists'/.test(appJs));
 
-  record('Search runs in three phases', /Assemble the committee and hear them/.test(appJs) && /Prepare and post/.test(appJs) && /Once there are candidates/.test(appJs) && /needsCandidates/.test(fs.readFileSync(path.join(__dirname, '..', 'server', 'db.js'), 'utf8')));
+  const phases = require('../server/steps').PHASES;
+  record('Search runs in three numbered parts with profile adoption in committee input',
+    phases.length === 3 && phases.every((p,i) => p.t.startsWith('Part '+(i+1)))
+    && require('../server/steps').STEPS.find(s => s.key === 'profile').phase === 0);
 
   // The signed-in card became a one-row account chip in the rail footer. What
   // still has to hold is that a short rail does not squeeze it: the rail's own

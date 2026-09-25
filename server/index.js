@@ -20,6 +20,7 @@ const projectBilling = projectBillingModule.create({ db });
 const ai = require('./ai');
 const committee = require('./committee');
 const integrity = require('./integrity');
+const questions = require('./questions');
 const jurisdictions = require('./jurisdictions');
 const http = require('./http');
 const media = require('./media');
@@ -2442,6 +2443,21 @@ function clearReview(search, key){
   if (search.reviews) delete search.reviews[key];
 }
 
+// Save the question plan as one revision, so a failed stage never leaves a
+// partially updated plan. Issued candidate snapshots remain untouched.
+app.put('/api/searches/:id/questions', ...requireWorkspace, requireSearch, requireEditor, (req, res) => {
+  const bundle = req.body?.body;
+  const error = questions.validate(req.search, bundle);
+  if (error) return res.status(400).json({ error });
+  for (const [key, value] of Object.entries(bundle)) {
+    req.search.artifacts[key] = value;
+    clearReview(req.search, key);
+  }
+  db.touch(req.search, req.user, 'saved candidate questions');
+  db.persist();
+  res.json(painted(req, req.search));
+});
+
 app.put('/api/searches/:id/artifact/:key', ...requireWorkspace, requireSearch, requireEditor, artifactOnFile, (req, res) => {
   if (!ARTIFACTS.has(req.params.key)) return res.status(400).json({ error:'Unknown artifact.' });
   const incoming = req.body?.body ?? req.body;
@@ -2656,7 +2672,8 @@ app.post('/api/searches/:id/generate', ...requireWorkspace, requireSearch, requi
         });
       }
     }
-    const invalid = kind === 'profile' ? integrity.validateCriteria(out.json.criteria)
+    const invalid = kind === 'questions' ? questions.validate(snapshot, out.json, { complete:true })
+      : kind === 'profile' ? integrity.validateCriteria(out.json.criteria)
       : ['survey1', 'survey2'].includes(kind) ? integrity.validateSurvey(out.json) : null;
     if (invalid) return res.status(422).json({ error:'The generated draft was not saved: ' + invalid });
     if (kind === 'profile') {
@@ -2680,6 +2697,12 @@ app.post('/api/searches/:id/generate', ...requireWorkspace, requireSearch, requi
       });
       recordPublication(req.search, req, { source: 'draft', model: out.model });
       db.touch(req.search, req.user, 'drafted the profile with '+out.model);
+    } else if (kind === 'questions') {
+      for (const [key, value] of Object.entries(out.json)) {
+        req.search.artifacts[key] = value;
+        clearReview(req.search, key);
+      }
+      db.touch(req.search, req.user, 'drafted candidate questions with '+out.model);
     } else {
       const prev = req.search.artifacts[kind] || {};
       req.search.artifacts[kind] = out.json;

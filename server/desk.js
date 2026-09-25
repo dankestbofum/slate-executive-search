@@ -364,6 +364,15 @@ function checkShape(kind, json, add){
 function review(kind, json, search, sources){
   const findings = [];
   const add = (code, path, msg) => findings.push({ code, path, msg: (path ? path + ': ' : '') + msg });
+  if (kind === 'questions') {
+    const plan = require('./questions');
+    const error = plan.validate(search, json, { complete:true });
+    if (error) add('questions', '', error);
+    for (const key of plan.keys(search)) {
+      if (json?.[key]) findings.push(...review(key, json[key], search, sources));
+    }
+    return findings;
+  }
   checkShape(kind, json, add);
   if (isObj(json)) {
     checkNumbers(kind, json, sources || [], add);

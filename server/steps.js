@@ -11,9 +11,9 @@
 // puts the committee on the file first and collects each member's own answer
 // before anybody drafts a profile.
 const PHASES = [
-  { id:0, key:'convene', t:'Assemble the committee and hear them', lede:'Who is on this search, who runs it, and what each member is actually looking for. The profile is built from their answers, not from one person recalling the workshop.' },
-  { id:1, key:'recruit', t:'Prepare and post', lede:'Profile, community, surveys, and the ad plan. Then the brochure and ads you actually post.' },
-  { id:2, key:'people', t:'Once there are candidates', lede:'Screening is where applicants enter the file. Everything after that waits until someone is on it.' }
+  { id:0, key:'convene', t:'Part 1 \u00b7 Committee input', lede:'Who is on this search, who runs it, and what each member is actually looking for. The profile is built from their answers, not from one person recalling the workshop.' },
+  { id:1, key:'recruit', t:'Part 2 \u00b7 Prepare and post', lede:'Profile, community, surveys, and the ad plan. Then the brochure and ads you actually post.' },
+  { id:2, key:'people', t:'Part 3 \u00b7 Candidate evaluation', lede:'Screening is where applicants enter the file. Everything after that waits until someone is on it.' }
 ];
 
 // Operational workflows retain the persisted package keys for existing searches.
@@ -128,9 +128,9 @@ const DEFAULT_PACKAGE = 'executive';
 const STEPS = [
   { n:1,  key:'team',       t:'Add the search committee and name the account manager', opt:false, phase:0, needs:[], pkg:'basic' },
   { n:2,  key:'intake',     t:'Committee questionnaire', opt:false, phase:0, needs:['team'], pkg:'basic' },
-  { n:3,  key:'profile',    t:'Adopt the candidate profile', opt:false, phase:1, needs:['intake'], pkg:'basic' },
+  { n:3,  key:'profile',    t:'Adopt the candidate profile', opt:false, phase:0, needs:['intake'], pkg:'basic' },
   { n:4,  key:'community',  t:'Develop community and form-of-government profile', opt:false, phase:1, needs:['profile'], pkg:'enhanced' },
-  { n:5,  key:'survey1',    t:'Develop initial candidate survey', opt:false, phase:1, needs:['profile'], pkg:'basic' },
+  { n:5,  key:'survey1',    t:'Prepare candidate questions', opt:false, phase:1, needs:['profile'], pkg:'basic' },
   { n:6,  key:'guide',      t:'Develop interview questions and assessment scenarios', opt:false, phase:1, needs:['profile'], pkg:'enhanced' },
   { n:7,  key:'survey2',    t:'Develop semifinalist survey', opt:true,  phase:1, needs:['guide'], pkg:'enhanced' },
   { n:8,  key:'plan',       t:'Develop recruitment and advertising locations', opt:false, phase:1, needs:['profile'], pkg:'basic' },

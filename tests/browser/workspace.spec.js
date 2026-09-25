@@ -256,7 +256,7 @@ test('a consultant can write a questionnaire without AI or raw JSON', async ({ p
   await expect(page.locator('#main h1')).toBeVisible({ timeout: 10000 });
   // No API key is configured for these runs, so drafting must not be the only
   // way to create a questionnaire.
-  await expect(page.getByRole('button', { name: /draft with claude/i }).first()).toBeDisabled();
+  await expect(page.getByRole('button', { name: /draft all questions with claude/i }).first()).toBeDisabled();
 
   await page.getByRole('button', { name: 'Add a question' }).first().click();
   await page.locator('[data-path="questions.0.prompt"]').fill('Describe a budget you turned around.');
@@ -265,14 +265,14 @@ test('a consultant can write a questionnaire without AI or raw JSON', async ({ p
   await page.locator('[data-path="questions.1.prompt"]').fill('What would your first ninety days look like?');
 
   // Preview shows the unsaved edits, and Edit still has them afterwards.
-  await page.getByRole('button', { name: 'Preview', exact: true }).click();
+  await page.locator('#question-stage-survey1').getByRole('button', { name: 'Preview', exact: true }).click();
   await expect(page.locator('#main')).toContainText('budget you turned around');
-  await page.getByRole('button', { name: 'Edit', exact: true }).click();
+  await page.locator('#question-stage-survey1').getByRole('button', { name: 'Edit', exact: true }).click();
   await expect(page.locator('[data-path="questions.0.prompt"]')).toHaveValue('Describe a budget you turned around.');
   await expect(page.locator('[data-path="questions.0.required"]')).toBeChecked();
 
-  await page.getByRole('button', { name: 'Save edits' }).click();
-  await expect(page.locator('.docbar')).toContainText('Saved draft', { timeout: 10000 });
+  await page.getByRole('button', { name: 'Save all questions' }).click();
+  await expect(page.locator('#question-stage-survey1 .docbar')).toContainText('Saved draft', { timeout: 10000 });
 
   const saved = await (await page.request.get('/api/searches/' + search.id)).json();
   expect(saved.artifacts.survey1.questions.map(q => q.prompt)).toEqual([
